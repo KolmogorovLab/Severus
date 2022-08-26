@@ -86,12 +86,15 @@ def print_alignments(alignments, segment_enumerator):
 
 
 def enumerate_inserts(alignments):
-    all_starts = defaultdict(list)
-    all_ends = defaultdict(list)
+    all_endpoints = defaultdict(list)
     for aln in alignments:
         for i in range(1, len(aln) - 1):
-            all_starts[aln[i].ref_id].append(aln[i].ref_start)
-            all_ends[aln[i].ref_id].append(aln[i].ref_end)
+            all_endpoints[aln[i].ref_id].append(aln[i].ref_start)
+            all_endpoints[aln[i].ref_id].append(aln[i].ref_end)
+
+        if len(aln) >= 2:
+            all_endpoints[aln[0].ref_id].append(aln[0].ref_end)
+            all_endpoints[aln[-1].ref_id].append(aln[-1].ref_start)
 
     def form_clusters(positions):
         positions.sort()
@@ -106,62 +109,56 @@ def enumerate_inserts(alignments):
                 else:
                     clust_center = sum(cur_cluster) // len(cur_cluster)
                     cluster_positions.append(clust_center)
-                    cur_cluster = []
+                    cur_cluster = [p]
+
         if cur_cluster:
             clust_center = sum(cur_cluster) // len(cur_cluster)
             cluster_positions.append(clust_center)
 
         return cluster_positions
 
-    #start_clusters = {}
     endpoint_clusters = {}
-    #for seq, positions in all_starts.items():
-    for seq in all_starts:
-        endpoint_clusters[seq] = form_clusters(all_starts[seq] + all_ends[seq])
-        #print(seq, start_clusters[seq])
-    #end_clusters = {}
-    #for seq, positions in all_ends.items():
-    #    endpoint_clusters[seq] = form_clusters(positions)
-        #print(seq, end_clusters[seq])
+    for seq in all_endpoints:
+        endpoint_clusters[seq] = form_clusters(all_endpoints[seq])
+        #print(seq, endpoint_clusters[seq])
 
-    def get_standard_coord(ref_id, ref_pos, is_start):
+    def get_standard_coord(ref_id, ref_pos):
         bp_id = None
 
-        #clusters = start_clusters if is_start else end_clusters
         for pos in endpoint_clusters[ref_id]:
-            if abs(pos - ref_pos) < CLUST_SIZE:
+            if abs(pos - ref_pos) <= CLUST_SIZE:
                 bp_id = pos
                 break
+        if bp_id is None:
+            print("NONE:", ref_id, ref_pos)
         return bp_id
 
-    def get_standard_coords(seg):
-        """
-        left_id = None
-        right_id = None
-        for pos in start_clusters[seg.ref_id]:
-            if abs(pos - seg.ref_start) < CLUST_SIZE:
-                left_id = pos
-                break
-        for pos in end_clusters[seg.ref_id]:
-            if abs(pos - seg.ref_end) < CLUST_SIZE:
-                right_id = pos
-                break
-
-        #if left_id is None:
-        #    print("NONE", seg.ref_id, seg.ref_start, seg.ref_end)
-        return left_id, right_id
-        """
-        return get_standard_coord(seg.ref_id, seg.ref_start, True), get_standard_coord(seg.ref_id, seg.ref_end, False)
+    def get_segment_coords(seg, end_segment=None):
+        if end_segment is None:
+            return get_standard_coord(seg.ref_id, seg.ref_start), get_standard_coord(seg.ref_id, seg.ref_end)
+        elif end_segment == "First":
+            return None, get_standard_coord(seg.ref_id, seg.ref_end)
+        elif end_segment == "Last":
+            return get_standard_coord(seg.ref_id, seg.ref_start), None
 
     frequencies = defaultdict(int)
     for aln in alignments:
         for i in range(1, len(aln) - 1):
-            frequencies[(aln[i].ref_id, *get_standard_coords(aln[i]))] += 1
+            frequencies[(aln[i].ref_id, *get_segment_coords(aln[i]))] += 1
+
+        if len(aln) >= 2:
+            frequencies[(aln[0].ref_id, *get_segment_coords(aln[0], "First"))] += 1
+            frequencies[(aln[-1].ref_id, *get_segment_coords(aln[-1], "Last"))] += 1
 
     print("Frequent fragments (>=10)")
     fragment_ids = {}
     next_id = 0
     for fragment in sorted(frequencies, key=frequencies.get, reverse=True):
+        if fragment[1] == None and fragment[2] == None:
+            continue
+        if fragment[0] == "HPV" and None in fragment[1:3]:
+            continue
+
         fragment_ids[fragment] = next_id
         next_id += 1
         if frequencies[fragment] >= 10:
@@ -169,8 +166,10 @@ def enumerate_inserts(alignments):
                   fragment[0] + "_" + str(fragment_ids[fragment]))
     print("")
 
-    def segment_enumerator(segment):
-        left, right = get_standard_coords(segment)
+    def segment_enumerator(segment, end_segment=None):
+        left, right = get_segment_coords(segment, end_segment)
+        if not (segment.ref_id, left, right) in fragment_ids:
+            return None
         return segment.ref_id + "_" + str(fragment_ids[(segment.ref_id, left, right)])
     return segment_enumerator
 
@@ -245,10 +244,21 @@ def print_human_hpv_clusters(integrations, segment_enumerator):
 def output_enumerated_read_segments(alignments, segment_enumerator):
     for aln in alignments:
         segments = []
-        for i in range(len(aln)):
-            if i > 0 and i < len(aln) - 1:
-                segments.append(aln[i].strand + segment_enumerator(aln[i]))
-        if len(aln) >= 3:
+
+        if len(aln) >= 2:
+            first_id = segment_enumerator(aln[0], "First")
+            if first_id is not None:
+                segments.append(aln[0].strand + first_id)
+
+        for i in range(1, len(aln) - 1):
+            segments.append(aln[i].strand + segment_enumerator(aln[i]))
+
+        if len(aln) >= 2:
+            last_id = segment_enumerator(aln[-1], "Last")
+            if last_id is not None:
+                segments.append(aln[-1].strand + last_id)
+
+        if len(segments) >= 2:
             print(aln[0].qry_id, " ".join(segments))
 
 
