@@ -88,13 +88,13 @@ def print_alignments(alignments, segment_enumerator):
 def enumerate_inserts(alignments):
     all_endpoints = defaultdict(list)
     for aln in alignments:
-        for i in range(1, len(aln) - 1):
+        for i in range(len(aln)):
             all_endpoints[aln[i].ref_id].append(aln[i].ref_start)
             all_endpoints[aln[i].ref_id].append(aln[i].ref_end)
 
-        if len(aln) >= 2:
-            all_endpoints[aln[0].ref_id].append(aln[0].ref_end)
-            all_endpoints[aln[-1].ref_id].append(aln[-1].ref_start)
+        #if len(aln) >= 2:
+        #    all_endpoints[aln[0].ref_id].append(aln[0].ref_end)
+        #    all_endpoints[aln[-1].ref_id].append(aln[-1].ref_start)
 
     def form_clusters(positions):
         positions.sort()
@@ -136,10 +136,17 @@ def enumerate_inserts(alignments):
     def get_segment_coords(seg, end_segment=None):
         if end_segment is None:
             return get_standard_coord(seg.ref_id, seg.ref_start), get_standard_coord(seg.ref_id, seg.ref_end)
-        elif end_segment == "First":
-            return None, get_standard_coord(seg.ref_id, seg.ref_end)
-        elif end_segment == "Last":
-            return get_standard_coord(seg.ref_id, seg.ref_start), None
+
+        if seg.strand == "+":
+            if end_segment == "First":
+                return None, get_standard_coord(seg.ref_id, seg.ref_end)
+            elif end_segment == "Last":
+                return get_standard_coord(seg.ref_id, seg.ref_start), None
+        else:
+            if end_segment == "First":
+                return None, get_standard_coord(seg.ref_id, seg.ref_start)
+            elif end_segment == "Last":
+                return get_standard_coord(seg.ref_id, seg.ref_end), None
 
     frequencies = defaultdict(int)
     for aln in alignments:
@@ -171,10 +178,11 @@ def enumerate_inserts(alignments):
         if not (segment.ref_id, left, right) in fragment_ids:
             return None
         return segment.ref_id + "_" + str(fragment_ids[(segment.ref_id, left, right)])
-    return segment_enumerator
+
+    return segment_enumerator, get_standard_coord
 
 
-def print_human_hpv_clusters(integrations, segment_enumerator):
+def print_human_hpv_clusters(integrations, segment_enumerator, min_bp_cluster):
     """
     Single-linkage clustering of human-hpv integrations
     """
@@ -228,17 +236,19 @@ def print_human_hpv_clusters(integrations, segment_enumerator):
                     last_pos = pos
                     cluster_breakpoints.append((chr_id, pos, strand))
 
-        print("Cluster", cluster_breakpoints)
-        for aln in clusters[cl]:
-            print("\t", aln[0].qry_id, aln[0].qry_len)
-            print_alignments(aln, segment_enumerator)
-        print("")
+        if len(clusters[cl]) >= min_bp_cluster:
+            print("Cluster", len(clusters[cl]), "reads", len(cluster_breakpoints), "breakpoints")
+            print("Bp:", cluster_breakpoints)
+            for aln in clusters[cl]:
+                print("\t", aln[0].qry_id, aln[0].qry_len)
+                print_alignments(aln, segment_enumerator)
+            print("")
 
-    print("HPV-only")
-    for aln in integrations:
-        if len(breakpoint_list(aln)) == 0:
-            print("\t", aln[0].qry_id, aln[0].qry_len)
-            print_alignments(aln, segment_enumerator)
+    #print("HPV-only")
+    #for aln in integrations:
+    #    if len(breakpoint_list(aln)) == 0:
+    #        print("\t", aln[0].qry_id, aln[0].qry_len)
+    #        print_alignments(aln, segment_enumerator)
 
 
 def output_enumerated_read_segments(alignments, segment_enumerator):
@@ -262,16 +272,50 @@ def output_enumerated_read_segments(alignments, segment_enumerator):
             print(aln[0].qry_id, " ".join(segments))
 
 
+def _neg_sign(sign):
+    if sign == "+":
+        return "-"
+    return "+"
+
+
+def enumerate_breakpoints(alignments, coordinate_enumerator):
+    for aln in alignments:
+        if len(aln) == 1:
+            continue
+
+        breakpoints = []
+        for s1, s2 in zip(aln[:-1], aln[1:]):
+            #print(s1, s2)
+            ref_bp_1 = s1.ref_end if s1.strand == "+" else s1.ref_start
+            ref_bp_2 = s2.ref_start if s2.strand == "+" else s2.ref_end
+
+            coord_1 = coordinate_enumerator(s1.ref_id, ref_bp_1)
+            coord_2 = coordinate_enumerator(s2.ref_id, ref_bp_2)
+
+            if coord_1 is not None and coord_2 is not None:
+                label_1 = "{0}{1}_{2}".format(s1.strand, s1.ref_id, coord_1)
+                label_2 = "{0}{1}_{2}".format(_neg_sign(s2.strand), s2.ref_id, coord_2)
+                #if label_2[1:] < label_1[1:]:
+                #    label_1, label_2 = label_2, label_1
+                bp_name = label_1 + "|" + label_2
+                breakpoints.append(bp_name)
+            #else:
+            #    print("AAA")
+
+        if len(breakpoints) >= 1:
+            print(aln[0].qry_id, " ".join(breakpoints))
+
 MIN_ALN = 50
 MIN_MAPQ = 10
 CLUST_SIZE = 50
-
+MIN_BP_CLUSTER = 2
 
 def main():
     integrations = parse_paf(sys.argv[1])
-    segment_enumerator = enumerate_inserts(integrations)
-    output_enumerated_read_segments(integrations, segment_enumerator)
-    #print_human_hpv_clusters(integrations, segment_enumerator)
+    segment_enumerator, coordinate_enumerator = enumerate_inserts(integrations)
+    enumerate_breakpoints(integrations, coordinate_enumerator)
+    #output_enumerated_read_segments(integrations, segment_enumerator)
+    #print_human_hpv_clusters(integrations, segment_enumerator, MIN_BP_CLUSTER)
 
 
 if __name__ == "__main__":
