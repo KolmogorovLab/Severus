@@ -11,7 +11,7 @@ def neg_segment(segment):
         return "+" + segment[1:]
 
 def build_graph(read_segments, kmer_size, min_coverage):
-    g = nx.DiGraph()
+    g = nx.Graph()
 
     node_ids = {}
     id_to_kmers = {}
@@ -46,12 +46,12 @@ def build_graph(read_segments, kmer_size, min_coverage):
         if len(segments) <= kmer_size:
             continue
 
-        reversed_segments = []
-        for seg in segments[::-1]:
-            reversed_segments.append(neg_segment(seg))
+        #reversed_segments = []
+        #for seg in segments[::-1]:
+        #    reversed_segments.append(neg_segment(seg))
 
         update_graph(segments)
-        update_graph(reversed_segments)
+        #update_graph(reversed_segments)
 
     edges_to_delete = set()
     for n in g.nodes:

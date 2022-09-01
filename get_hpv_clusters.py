@@ -61,6 +61,7 @@ def process_read(buffer, integrations):
 
     #if has_hpv and has_chr:
     if has_hpv:
+    #if len(alignments) > 1:
         integrations.append(alignments)
 
     #if has_hpv and has_chr:
@@ -282,6 +283,10 @@ def enumerate_breakpoints(alignments, coordinate_enumerator):
     for aln in alignments:
         if len(aln) == 1:
             continue
+        #segments = []
+        #for seg in aln:
+        #    segments.append("{0}{1}_{2}:{3}".format(seg.strand, seg.ref_id, seg.ref_start, seg.ref_end))
+        #print(aln[0].qry_id, " ".join(segments))
 
         breakpoints = []
         for s1, s2 in zip(aln[:-1], aln[1:]):
@@ -295,8 +300,8 @@ def enumerate_breakpoints(alignments, coordinate_enumerator):
             if coord_1 is not None and coord_2 is not None:
                 label_1 = "{0}{1}_{2}".format(s1.strand, s1.ref_id, coord_1)
                 label_2 = "{0}{1}_{2}".format(_neg_sign(s2.strand), s2.ref_id, coord_2)
-                #if label_2[1:] < label_1[1:]:
-                #    label_1, label_2 = label_2, label_1
+                if label_2[1:] < label_1[1:]:
+                    label_1, label_2 = label_2, label_1
                 bp_name = label_1 + "|" + label_2
                 breakpoints.append(bp_name)
             #else:
@@ -304,6 +309,7 @@ def enumerate_breakpoints(alignments, coordinate_enumerator):
 
         if len(breakpoints) >= 1:
             print(aln[0].qry_id, " ".join(breakpoints))
+        #print("")
 
 MIN_ALN = 50
 MIN_MAPQ = 10
