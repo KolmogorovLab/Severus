@@ -48,13 +48,14 @@ class ReadConnection(object):
 
 
 class Breakpoint(object):
-    __slots__ = "ref_id", "position", "spanning_reads", "connections"
+    __slots__ = "ref_id", "position", "spanning_reads", "connections", "terminal"
 
     def __init__(self, ref_id, ref_position):
         self.ref_id = ref_id
         self.position = ref_position
         self.spanning_reads = []
         self.connections =[]
+        self.terminal = False
 
 
 class DoubleBreak(object):
@@ -126,7 +127,7 @@ def get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq):
                        ref_id, strand, read_length, haplotype, mapq)
 
 
-def get_split_reads(bam_file, ref_id, inter_contig):
+def get_split_reads(bam_file, ref_id, inter_contig, max_read_error):
     """
     Yields set of split reads for each contig separately. Only reads primary alignments
     and infers the split reads from SA alignment tag
@@ -149,7 +150,7 @@ def get_split_reads(bam_file, ref_id, inter_contig):
         strand = "-" if int(flags) & 0x10 else "+"
 
         if not check_read_mapping_confidence(aln.to_string(), MIN_ALIGNED_LENGTH, MIN_ALIGNED_RATE,
-                                             MAX_READ_ERROR, MAX_SEGMENTS):
+                                             max_read_error, MAX_SEGMENTS):
             if is_primary:
                 filtered_reads.add(aln.query_name)
             continue
@@ -181,10 +182,10 @@ def _unpacker(args):
     return get_split_reads(*args)
 
 
-def get_all_reads_parallel(bam_file, num_threads, inter_contig, aln_dump_file):
+def get_all_reads_parallel(bam_file, num_threads, inter_contig, aln_dump_file, max_read_error):
     all_reference_ids = [r for r in pysam.AlignmentFile(bam_file, "rb").references]
     random.shuffle(all_reference_ids)
-    tasks = [(bam_file, r, inter_contig) for r in all_reference_ids]
+    tasks = [(bam_file, r, inter_contig, max_read_error) for r in all_reference_ids]
 
     parsing_results = None
     with Pool(num_threads) as p:
@@ -325,6 +326,11 @@ def get_breakpoints(all_reads, split_reads, clust_len, min_reads, min_ref_flank,
                     bp_cluster = Breakpoint(seq, position)
                     bp_cluster.connections = cl
                     bp_clusters[seq].append(bp_cluster)
+
+        bp_clusters[seq].insert(0, Breakpoint(seq, 0))
+        bp_clusters[seq].append(Breakpoint(seq, ref_lengths[seq] - 1))
+        bp_clusters[seq][0].terminal = True
+        bp_clusters[seq][-1].terminal = True
 
     #find reads that span putative breakpoints
     for read_segments in all_reads:
@@ -509,6 +515,9 @@ def output_single_breakpoints(breakpoints, filename):
         f.write("#chr\tposition\tHP\tsupport_reads\tspanning_reads\n")
         for seq in breakpoints:
             for bp in breakpoints[seq]:
+                if bp.terminal:
+                    continue
+
                 by_hp = defaultdict(int)
                 for conn in bp.connections:
                     by_hp[conn.haplotype_1] += 1
@@ -555,14 +564,17 @@ def _run_pipeline(arguments):
     parser.add_argument("--min-reference-flank", dest="min_ref_flank",
                         default=MIN_REF_FLANK, metavar="int", type=int,
                         help="minimum distance between breakpoint and sequence ends [5000]")
+    parser.add_argument("--max-read-error", dest="max_read_error",
+                        default=MAX_READ_ERROR, metavar="float", type=float, help="maximum base alignment error [0.1]")
+
     args = parser.parse_args(arguments)
 
     with pysam.AlignmentFile(args.bam_path, "rb") as a:
         ref_lengths = dict(zip(a.references, a.lengths))
 
-    aln_dump_file = os.path.join(args.out_dir, "aligned_segments.txt")
+    aln_dump_file = os.path.join(args.out_dir, "read_alignments")
 
-    all_reads = get_all_reads_parallel(args.bam_path, args.threads, True, aln_dump_file)
+    all_reads = get_all_reads_parallel(args.bam_path, args.threads, True, aln_dump_file, args.max_read_error)
     split_reads = []
     for r in all_reads:
         if len(r) > 1:
@@ -573,18 +585,18 @@ def _run_pipeline(arguments):
     bp_clusters = get_breakpoints(all_reads, split_reads, args.cluster_size, args.bp_min_reads, args.min_ref_flank, ref_lengths)
     all_breaks, balanced_breaks = get_2_breaks(bp_clusters, args.cluster_size, args.double_bp_min_reads)
 
-    out_breaks = os.path.join(args.out_dir, "breakpoints_all.csv")
-    out_balanced_breaks = os.path.join(args.out_dir, "breakpoints_balanced.csv")
-    out_inversions = os.path.join(args.out_dir, "inversions.bed")
-    out_single_bp = os.path.join(args.out_dir, "single_breakpoints.csv")
-    out_breakpoints_per_read = os.path.join(args.out_dir, "read_breakpoints.txt")
+    out_breaks = os.path.join(args.out_dir, "breakpoints_double.csv")
+    #out_balanced_breaks = os.path.join(args.out_dir, "breakpoints_balanced.csv")
+    #out_inversions = os.path.join(args.out_dir, "inversions.bed")
+    out_single_bp = os.path.join(args.out_dir, "breakpoints_single.csv")
+    out_breakpoints_per_read = os.path.join(args.out_dir, "read_breakpoints")
 
     enumerate_read_breakpoints(split_reads, bp_clusters, args.cluster_size, out_breakpoints_per_read)
 
     output_single_breakpoints(bp_clusters, out_single_bp)
     output_breaks(all_breaks, open(out_breaks, "w"))
-    output_breaks(balanced_breaks, open(out_balanced_breaks, "w"))
-    output_inversions(balanced_breaks, open(out_inversions, "w"))
+    #output_breaks(balanced_breaks, open(out_balanced_breaks, "w"))
+    #output_inversions(balanced_breaks, open(out_inversions, "w"))
 
 
 def find_breakpoints(input_bam, output_dir, num_threads):
