@@ -10,8 +10,8 @@ def neg_segment(segment):
     else:
         return "+" + segment[1:]
 
-def build_graph(read_segments, kmer_size, min_coverage):
-    g = nx.Graph()
+def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len):
+    g = nx.MultiGraph()
 
     node_ids = {}
     id_to_kmers = {}
@@ -32,38 +32,47 @@ def build_graph(read_segments, kmer_size, min_coverage):
                 g.add_node(right_kmer)
 
             if g.has_edge(left_kmer, right_kmer):
-                g[left_kmer][right_kmer]["weight"] = g[left_kmer][right_kmer]["weight"] + 1
+                g[left_kmer][right_kmer][0]["weight"] = g[left_kmer][right_kmer][0]["weight"] + 1
                 #print(g[left_kmer][right_kmer]["weight"])
             else:
-                g.add_edge(left_kmer, right_kmer, weight=1)
+                g.add_edge(left_kmer, right_kmer, weight=1, color="red")
                 #print("new node", left_kmer, right_kmer)
 
             #print(left_kmer, right_kmer)
 
+    genome_segments = []
     for line in open(read_segments, "r"):
-        fields = line.split()
-        segments = fields[1:]
-        if len(segments) <= kmer_size:
-            continue
+        if line.startswith("Q"):
+            fields = line.strip().split()
+            segments = fields[2:]
+            if len(segments) <= kmer_size:
+                continue
 
-        #reversed_segments = []
-        #for seg in segments[::-1]:
-        #    reversed_segments.append(neg_segment(seg))
+            update_graph(segments)
+            #reversed_segments = []
+            #for seg in segments[::-1]:
+            #    reversed_segments.append(neg_segment(seg))
+            #update_graph(reversed_segments)
 
-        update_graph(segments)
-        #update_graph(reversed_segments)
+        if line.startswith("G"):
+            fields = line.strip().split()
+            genome_segments.append(fields[1:])
 
     edges_to_delete = set()
+    for u, v, _num in g.edges:
+       g[u][v][_num]["label"] = str(g[u][v][_num]["weight"])
+       if g[u][v][_num]["weight"] < min_coverage:
+           edges_to_delete.add((u, v))
+    for u, v in edges_to_delete:
+        g.remove_edge(u, v)
+
+    for gs in genome_segments:
+        if int(gs[2]) < max_genomic_len:
+            g.add_edge(node_to_id(gs[0]), node_to_id(gs[1]), label=gs[2])
+
     for n in g.nodes:
         g.nodes[n]["label"] = "\\n".join(id_to_kmers[n].split(","))
 
-    for u, v in g.edges:
-       g[u][v]["label"] = str(g[u][v]["weight"])
-       if g[u][v]["weight"] < min_coverage:
-           edges_to_delete.add((u, v))
-
-    for u, v in edges_to_delete:
-        g.remove_edge(u, v)
     g.remove_nodes_from(list(nx.isolates(g)))
 
     return g
@@ -71,8 +80,10 @@ def build_graph(read_segments, kmer_size, min_coverage):
 
 def main():
     KMER = 1
-    MIN_COVERAGE = 5
-    graph = build_graph(sys.argv[1], KMER, MIN_COVERAGE)
+    MIN_COVERAGE = 2
+    MAX_GENOMIC_LEN = 1000000000
+
+    graph = build_graph(sys.argv[1], KMER, MIN_COVERAGE, MAX_GENOMIC_LEN)
     nx.drawing.nx_pydot.write_dot(graph, sys.argv[2])
 
 
