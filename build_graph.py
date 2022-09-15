@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import sys
 import networkx as nx
 
@@ -9,6 +10,7 @@ def neg_segment(segment):
         return "-" + segment[1:]
     else:
         return "+" + segment[1:]
+
 
 def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len):
     g = nx.MultiGraph()
@@ -76,12 +78,25 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len):
 
 
 KMER = 1
-MIN_COVERAGE = 2
 MAX_GENOMIC_LEN = 1000000000
 
 def main():
-    graph = build_graph(sys.argv[1], KMER, MIN_COVERAGE, MAX_GENOMIC_LEN)
-    nx.drawing.nx_pydot.write_dot(graph, sys.argv[2])
+    parser = argparse.ArgumentParser \
+        (description="Build breakpoint graph")
+
+    parser.add_argument("--reads", dest="reads_path",
+                        metavar="path", required=True,
+                        help="path to read breakpints file")
+    parser.add_argument("--out", dest="out_graph",
+                        default=None, required=True,
+                        metavar="path", help="Output graph")
+    parser.add_argument("--min-coverage", dest="min_coverage",
+                        metavar="int", type=int, required=True, default=2,
+                        help="Minimum read coverage for breakpoint edge")
+    args = parser.parse_args()
+
+    graph = build_graph(args.reads_path, KMER, args.min_coverage, MAX_GENOMIC_LEN)
+    nx.drawing.nx_pydot.write_dot(graph, args.out_graph)
 
 
 if __name__ == "__main__":

@@ -329,10 +329,16 @@ def get_breakpoints(all_reads, split_reads, clust_len, min_reads, min_ref_flank,
                     bp_cluster.connections = cl
                     bp_clusters[seq].append(bp_cluster)
 
-        bp_clusters[seq].insert(0, Breakpoint(seq, 0))
-        bp_clusters[seq].append(Breakpoint(seq, ref_lengths[seq] - 1))
-        bp_clusters[seq][0].terminal = True
-        bp_clusters[seq][-1].terminal = True
+        """
+        if bp_clusters[seq]:
+            if bp_clusters[seq][0].position > clust_len:
+                bp_clusters[seq].insert(0, Breakpoint(seq, 0))
+                bp_clusters[seq][0].terminal = True
+
+            if ref_lengths[seq] - bp_clusters[seq][-1].position > clust_len:
+                bp_clusters[seq].append(Breakpoint(seq, ref_lengths[seq] - 1))
+                bp_clusters[seq][-1].terminal = True
+        """
 
     #find reads that span putative breakpoints
     for read_segments in all_reads:
