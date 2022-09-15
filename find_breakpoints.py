@@ -17,6 +17,7 @@ import random
 import argparse
 import os
 import logging
+import subprocess
 
 from filter_misplaced_alignments import check_read_mapping_confidence
 
@@ -78,12 +79,13 @@ class DoubleBreak(object):
     def to_string(self):
         strand_1 = "+" if self.direction_1 > 0 else "-"
         strand_2 = "+" if self.direction_2 > 0 else "-"
-        label_1 = "{0}{1}_{2}".format(strand_1, self.bp_1.ref_id, self.bp_1.position)
-        label_2 = "{0}{1}_{2}".format(strand_2, self.bp_2.ref_id, self.bp_2.position)
+        label_1 = "{0}{1}:{2}".format(strand_1, self.bp_1.ref_id, self.bp_1.position)
+        label_2 = "{0}{1}:{2}".format(strand_2, self.bp_2.ref_id, self.bp_2.position)
         if label_2[1:] < label_1[1:]:
             label_1, label_2 = label_2, label_1
         bp_name = label_1 + "|" + label_2
         return bp_name
+
 
 cigar_parser = re.compile("[0-9]+[MIDNSHP=X]")
 def get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq):
@@ -342,7 +344,7 @@ def get_breakpoints(all_reads, split_reads, clust_len, min_reads, min_ref_flank,
     return bp_clusters
 
 
-def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, out_file):
+def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, bam_file, out_file, compute_coverage):
     """
     For each read, generate the list of breakpints
     """
@@ -375,9 +377,9 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, out_file):
                 breakpoints.append(DoubleBreak(bp_1, sign_1, bp_2, sign_2))
                 #bp_names.append(breakpoints[-1].to_string())
                 strand_1 = "+" if sign_1 > 0 else "-"
-                label_1 = "{0}{1}_{2}".format(strand_1, bp_1.ref_id, bp_1.position)
+                label_1 = "{0}{1}:{2}".format(strand_1, bp_1.ref_id, bp_1.position)
                 strand_2 = "+" if sign_2 > 0 else "-"
-                label_2 = "{0}{1}_{2}".format(strand_2, bp_2.ref_id, bp_2.position)
+                label_2 = "{0}{1}:{2}".format(strand_2, bp_2.ref_id, bp_2.position)
                 bp_names.append(label_1)
                 bp_names.append(label_2)
 
@@ -387,9 +389,30 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, out_file):
     for seq in bp_clusters:
         clusters = bp_clusters[seq]
         for cl_1, cl_2 in zip(clusters[:-1], clusters[1:]):
-            label_1 = "-{0}_{1}".format(seq, cl_1.position)
-            label_2 = "+{0}_{1}".format(seq, cl_2.position)
-            fout.write("G {0} {1} {2}\n".format(label_1, label_2, cl_2.position - cl_1.position))
+            label_1 = "-{0}:{1}".format(seq, cl_1.position)
+            label_2 = "+{0}:{1}".format(seq, cl_2.position)
+            coverage = 0
+            if compute_coverage:
+                coverage = get_median_depth(bam_file, seq, cl_1.position, cl_2.position)
+            #print(cl_1.position, cl_2.position, coverage)
+            fout.write("G {0} {1} {2} {3}\n".format(label_1, label_2, cl_2.position - cl_1.position, int(coverage)))
+
+
+SAMTOOLS_BIN = "samtools"
+def get_median_depth(bam_path, ref_id, ref_start=None, ref_end=None):
+    samtools_out = subprocess.Popen("{0} coverage {1} -r '{2}:{3}-{4}' -q 10 -l 100"
+                                     .format(SAMTOOLS_BIN, bam_path,
+                                             ref_id, ref_start, ref_end),
+                                    shell=True, stdout=subprocess.PIPE).stdout
+
+    for line in samtools_out:
+        if line.startswith(b"#"):
+            continue
+        fields = line.split()
+        coverage = float(fields[6])
+        return coverage
+
+    return None
 
 
 def get_2_breaks(bp_clusters, clust_len, min_connections):
@@ -566,6 +589,8 @@ def _run_pipeline(arguments):
                         help="minimum distance between breakpoint and sequence ends [5000]")
     parser.add_argument("--max-read-error", dest="max_read_error",
                         default=MAX_READ_ERROR, metavar="float", type=float, help="maximum base alignment error [0.1]")
+    parser.add_argument("--coverage", action="store_true", dest="coverage",
+                        default=False, help="add coverage info to breakpoint graphs (takes time)")
 
     args = parser.parse_args(arguments)
 
@@ -591,7 +616,7 @@ def _run_pipeline(arguments):
     out_single_bp = os.path.join(args.out_dir, "breakpoints_single.csv")
     out_breakpoints_per_read = os.path.join(args.out_dir, "read_breakpoints")
 
-    enumerate_read_breakpoints(split_reads, bp_clusters, args.cluster_size, out_breakpoints_per_read)
+    enumerate_read_breakpoints(split_reads, bp_clusters, args.cluster_size, args.bam_path, out_breakpoints_per_read, args.coverage)
 
     output_single_breakpoints(bp_clusters, out_single_bp)
     output_breaks(all_breaks, open(out_breaks, "w"))

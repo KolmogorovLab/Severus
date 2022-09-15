@@ -33,12 +33,8 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len):
 
             if g.has_edge(left_kmer, right_kmer):
                 g[left_kmer][right_kmer][0]["weight"] = g[left_kmer][right_kmer][0]["weight"] + 1
-                #print(g[left_kmer][right_kmer]["weight"])
             else:
                 g.add_edge(left_kmer, right_kmer, weight=1, color="red")
-                #print("new node", left_kmer, right_kmer)
-
-            #print(left_kmer, right_kmer)
 
     genome_segments = []
     for line in open(read_segments, "r"):
@@ -60,7 +56,7 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len):
 
     edges_to_delete = set()
     for u, v, _num in g.edges:
-       g[u][v][_num]["label"] = str(g[u][v][_num]["weight"])
+       g[u][v][_num]["label"] = "\"R:{0}\"".format(g[u][v][_num]["weight"])
        if g[u][v][_num]["weight"] < min_coverage:
            edges_to_delete.add((u, v))
     for u, v in edges_to_delete:
@@ -68,7 +64,8 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len):
 
     for gs in genome_segments:
         if int(gs[2]) < max_genomic_len:
-            g.add_edge(node_to_id(gs[0]), node_to_id(gs[1]), label=gs[2])
+            label="\"L:{0} C:{1}\"".format(gs[2], gs[3])
+            g.add_edge(node_to_id(gs[0]), node_to_id(gs[1]), label=label)
 
     for n in g.nodes:
         g.nodes[n]["label"] = "\\n".join(id_to_kmers[n].split(","))
@@ -78,11 +75,11 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len):
     return g
 
 
-def main():
-    KMER = 1
-    MIN_COVERAGE = 2
-    MAX_GENOMIC_LEN = 1000000000
+KMER = 1
+MIN_COVERAGE = 2
+MAX_GENOMIC_LEN = 1000000000
 
+def main():
     graph = build_graph(sys.argv[1], KMER, MIN_COVERAGE, MAX_GENOMIC_LEN)
     nx.drawing.nx_pydot.write_dot(graph, sys.argv[2])
 
