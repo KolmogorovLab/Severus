@@ -80,7 +80,14 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len):
 KMER = 1
 MAX_GENOMIC_LEN = 1000000000
 
+
+def build_breakpoint_graph(reads_segments_path, min_support, out_file):
+    graph = build_graph(reads_segments_path, KMER, min_support, MAX_GENOMIC_LEN)
+    nx.drawing.nx_pydot.write_dot(graph, out_file)
+
+
 def main():
+
     parser = argparse.ArgumentParser \
         (description="Build breakpoint graph")
 

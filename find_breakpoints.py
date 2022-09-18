@@ -20,6 +20,7 @@ import logging
 import subprocess
 
 from filter_misplaced_alignments import check_read_mapping_confidence
+from build_graph import build_breakpoint_graph
 
 logger = logging.getLogger()
 
@@ -556,25 +557,25 @@ def output_single_breakpoints(breakpoints, filename):
                                                          len(bp.connections), len(bp.spanning_reads)))
 
 
-#alignment filtering parameters
+#preset constants
 MIN_ALIGNED_LENGTH = 7000
 MIN_ALIGNED_RATE = 0.9
-MAX_READ_ERROR = 0.1
 MAX_SEGMENTS = 10
 MIN_SEGMENT_MAPQ = 10
 MIN_SEGMENT_LENGTH = 100
-
-#split reads default parameters
 BP_CLUSTER_SIZE = 100
-MIN_BREAKPOINT_READS = 3
-MIN_DOUBLE_BP_READS = 2
-MIN_REF_FLANK = 5000
 MAX_SEGEMNT_OVERLAP = 500
 
 
 def _run_pipeline(arguments):
+    # default tunable parameters
+    MAX_READ_ERROR = 0.1
+    MIN_BREAKPOINT_READS = 5
+    #MIN_DOUBLE_BP_READS = 5
+    MIN_REF_FLANK = 500
+
     parser = argparse.ArgumentParser \
-        (description="Find breakpoints given a bam file")
+        (description="Find breakpoints and build breakpoint graph from a bam file")
 
     parser.add_argument("-b", "--bam", dest="bam_path",
                         metavar="path", required=True,
@@ -584,15 +585,15 @@ def _run_pipeline(arguments):
                         metavar="path", help="Output directory")
     parser.add_argument("-t", "--threads", dest="threads",
                         default=8, metavar="int", type=int, help="number of parallel threads [8]")
-    parser.add_argument("--cluster-size", dest="cluster_size",
-                        default=BP_CLUSTER_SIZE, metavar="int", type=int, help="size of breakpoint cluster in bp [100]")
-    parser.add_argument("--breakpoint-min-reads", dest="bp_min_reads",
-                        default=MIN_BREAKPOINT_READS, metavar="int", type=int, help="minimum reads in breakpoint [10]")
-    parser.add_argument("--double-breakpoint-min-reads", dest="double_bp_min_reads",
-                        default=MIN_DOUBLE_BP_READS, metavar="int", type=int, help="minimum reads in double breakpoint [5]")
+    parser.add_argument("--min-support", dest="bp_min_support",
+                        default=MIN_BREAKPOINT_READS, metavar="int", type=int, help="minimum reads supporting double breakpoint [5]")
+    #parser.add_argument("--double-breakpoint-min-reads", dest="double_bp_min_reads",
+    #                    default=MIN_DOUBLE_BP_READS, metavar="int", type=int, help="minimum reads in double breakpoint [5]")
+    #parser.add_argument("--cluster-size", dest="cluster_size",
+    #                    default=BP_CLUSTER_SIZE, metavar="int", type=int, help="size of breakpoint cluster in bp [100]")
     parser.add_argument("--min-reference-flank", dest="min_ref_flank",
                         default=MIN_REF_FLANK, metavar="int", type=int,
-                        help="minimum distance between breakpoint and sequence ends [5000]")
+                        help="minimum distance between breakpoint and sequence ends [500]")
     parser.add_argument("--max-read-error", dest="max_read_error",
                         default=MAX_READ_ERROR, metavar="float", type=float, help="maximum base alignment error [0.1]")
     parser.add_argument("--coverage", action="store_true", dest="coverage",
@@ -612,22 +613,26 @@ def _run_pipeline(arguments):
             split_reads.append(r)
     print("Parsed {0} reads {1} split reads".format(len(all_reads), len(split_reads)))
 
-    split_reads = resolve_overlaps(split_reads, args.cluster_size, MAX_SEGEMNT_OVERLAP)
-    bp_clusters = get_breakpoints(all_reads, split_reads, args.cluster_size, args.bp_min_reads, args.min_ref_flank, ref_lengths)
-    all_breaks, balanced_breaks = get_2_breaks(bp_clusters, args.cluster_size, args.double_bp_min_reads)
+    split_reads = resolve_overlaps(split_reads, BP_CLUSTER_SIZE, MAX_SEGEMNT_OVERLAP)
+    bp_clusters = get_breakpoints(all_reads, split_reads, BP_CLUSTER_SIZE, args.bp_min_support, args.min_ref_flank, ref_lengths)
+    all_breaks, balanced_breaks = get_2_breaks(bp_clusters, BP_CLUSTER_SIZE, args.bp_min_support)
 
     out_breaks = os.path.join(args.out_dir, "breakpoints_double.csv")
-    #out_balanced_breaks = os.path.join(args.out_dir, "breakpoints_balanced.csv")
-    #out_inversions = os.path.join(args.out_dir, "inversions.bed")
     out_single_bp = os.path.join(args.out_dir, "breakpoints_single.csv")
     out_breakpoints_per_read = os.path.join(args.out_dir, "read_breakpoints")
 
-    enumerate_read_breakpoints(split_reads, bp_clusters, args.cluster_size, args.bam_path, out_breakpoints_per_read, args.coverage)
+    enumerate_read_breakpoints(split_reads, bp_clusters, BP_CLUSTER_SIZE, args.bam_path, out_breakpoints_per_read, args.coverage)
 
     output_single_breakpoints(bp_clusters, out_single_bp)
     output_breaks(all_breaks, open(out_breaks, "w"))
+
+    #out_balanced_breaks = os.path.join(args.out_dir, "breakpoints_balanced.csv")
+    #out_inversions = os.path.join(args.out_dir, "inversions.bed")
     #output_breaks(balanced_breaks, open(out_balanced_breaks, "w"))
     #output_inversions(balanced_breaks, open(out_inversions, "w"))
+
+    out_breakpoint_graph = os.path.join(args.out_dir, "breakpoint_graph.dot")
+    build_breakpoint_graph(out_breakpoints_per_read, args.bp_min_support, out_breakpoint_graph)
 
 
 def find_breakpoints(input_bam, output_dir, num_threads):
