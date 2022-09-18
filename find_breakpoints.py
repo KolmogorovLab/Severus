@@ -604,6 +604,9 @@ def _run_pipeline(arguments):
     with pysam.AlignmentFile(args.bam_path, "rb") as a:
         ref_lengths = dict(zip(a.references, a.lengths))
 
+    if not os.path.isdir(args.out_dir):
+        os.mkdir(args.out_dir)
+
     aln_dump_file = os.path.join(args.out_dir, "read_alignments")
 
     all_reads = get_all_reads_parallel(args.bam_path, args.threads, True, aln_dump_file, args.max_read_error)
