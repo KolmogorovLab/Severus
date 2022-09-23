@@ -611,7 +611,7 @@ def _run_pipeline(arguments):
     MAX_READ_ERROR = 0.1
     MIN_BREAKPOINT_READS = 3
     #MIN_DOUBLE_BP_READS = 5
-    MIN_REF_FLANK = 500
+    MIN_REF_FLANK = 0
 
     parser = argparse.ArgumentParser \
         (description="Find breakpoints and build breakpoint graph from a bam file")
