@@ -34,4 +34,4 @@ This will generate a number of files with breakpoint information, and visualizat
 
 * `--min-reference-flank`: minimum distance from the end of reference sequence for a breakpoint. Could be set to 0 for specific datasets, for example containing HPV.
 
-* `--coverage`: enable computing genomic segments coverage. Currently may take lot of time, will be optimized in the future.
+* `--coverage`: enable computing genomic segments coverage

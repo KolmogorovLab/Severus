@@ -7,6 +7,7 @@ of tentative 2-breaks, in particular inversion coordinates
 
 import sys
 import re
+import shutil
 import numpy as np
 import math
 from copy import copy
@@ -181,18 +182,16 @@ def get_split_reads(bam_file, ref_id, inter_contig, max_read_error):
     return filtered_reads, alignments
 
 
-def _unpacker(args):
-    return get_split_reads(*args)
-
-
 def get_all_reads_parallel(bam_file, num_threads, inter_contig, aln_dump_file, max_read_error):
+    print("Parsing reads", file=sys.stderr)
+
     all_reference_ids = [r for r in pysam.AlignmentFile(bam_file, "rb").references]
     random.shuffle(all_reference_ids)
     tasks = [(bam_file, r, inter_contig, max_read_error) for r in all_reference_ids]
 
     parsing_results = None
     with Pool(num_threads) as p:
-        parsing_results = p.map(_unpacker, tasks)
+        parsing_results = p.starmap(get_split_reads, tasks)
 
     all_filtered_reads = set()
     segments_by_read = defaultdict(list)
@@ -351,7 +350,7 @@ def get_breakpoints(all_reads, split_reads, clust_len, min_reads, min_ref_flank,
     return bp_clusters
 
 
-def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, bam_file, out_file, compute_coverage):
+def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, bam_file, out_file, compute_coverage, num_threads):
     """
     For each read, generate the list of breakpints
     """
@@ -393,23 +392,48 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, bam_file, ou
         if len(bp_names) > 0:
             fout.write("Q " + read_segments[0].read_id + " " + " ".join(bp_names) + "\n")
 
+    segments = []
     for seq in bp_clusters:
         clusters = bp_clusters[seq]
         for cl_1, cl_2 in zip(clusters[:-1], clusters[1:]):
-            label_1 = "-{0}:{1}".format(seq, cl_1.position)
-            label_2 = "+{0}:{1}".format(seq, cl_2.position)
-            coverage = 0
-            if compute_coverage:
-                coverage = get_median_depth(bam_file, seq, cl_1.position, cl_2.position)
-            #print(cl_1.position, cl_2.position, coverage)
-            fout.write("G {0} {1} {2} {3}\n".format(label_1, label_2, cl_2.position - cl_1.position, int(coverage)))
+            segments.append((seq, cl_1.position, cl_2.position))
+
+    seg_coverage = {}
+    if compute_coverage:
+        seg_coverage = _get_segments_coverage(bam_file, segments, num_threads)
+
+    for seq, start, end in segments:
+        label_1 = "-{0}:{1}".format(seq, start)
+        label_2 = "+{0}:{1}".format(seq, end)
+        coverage = 0
+        if compute_coverage:
+            #coverage = get_median_depth(bam_file, seq, cl_1.position, cl_2.position)
+            coverage = seg_coverage[seq, start, end]
+
+        #print(cl_1.position, cl_2.position, coverage)
+        fout.write("G {0} {1} {2} {3}\n".format(label_1, label_2, cl_2.position - cl_1.position, int(coverage)))
 
 
-SAMTOOLS_BIN = "samtools"
-def get_median_depth(bam_path, ref_id, ref_start=None, ref_end=None):
+def _get_segments_coverage(bam_file, segments, num_threads):
+    print("Computing segments coverage", file=sys.stderr)
+
+    random.shuffle(segments)
+    tasks = [(bam_file, s[0], s[1], s[2]) for s in segments]
+
+    seg_coverage = None
+    with Pool(num_threads) as p:
+        seg_coverage = p.starmap(_get_median_depth, tasks)
+
+    coverage_map = {}
+    for seg, coverage in zip(segments, seg_coverage):
+        coverage_map[seg] = coverage
+
+    return coverage_map
+
+
+def _get_median_depth(bam_path, ref_id, ref_start, ref_end):
     samtools_out = subprocess.Popen("{0} coverage {1} -r '{2}:{3}-{4}' -q 10 -l 100"
-                                     .format(SAMTOOLS_BIN, bam_path,
-                                             ref_id, ref_start, ref_end),
+                                     .format(SAMTOOLS_BIN, bam_path, ref_id, ref_start, ref_end),
                                     shell=True, stdout=subprocess.PIPE).stdout
 
     for line in samtools_out:
@@ -566,11 +590,13 @@ MIN_SEGMENT_LENGTH = 100
 BP_CLUSTER_SIZE = 100
 MAX_SEGEMNT_OVERLAP = 500
 
+SAMTOOLS_BIN = "samtools"
+
 
 def _run_pipeline(arguments):
     # default tunable parameters
     MAX_READ_ERROR = 0.1
-    MIN_BREAKPOINT_READS = 5
+    MIN_BREAKPOINT_READS = 3
     #MIN_DOUBLE_BP_READS = 5
     MIN_REF_FLANK = 500
 
@@ -600,6 +626,9 @@ def _run_pipeline(arguments):
                         default=False, help="add coverage info to breakpoint graphs (takes time)")
 
     args = parser.parse_args(arguments)
+    if not shutil.which(SAMTOOLS_BIN):
+        print("samtools not found", file=sys.stderr)
+        return 1
 
     with pysam.AlignmentFile(args.bam_path, "rb") as a:
         ref_lengths = dict(zip(a.references, a.lengths))
@@ -614,7 +643,7 @@ def _run_pipeline(arguments):
     for r in all_reads:
         if len(r) > 1:
             split_reads.append(r)
-    print("Parsed {0} reads {1} split reads".format(len(all_reads), len(split_reads)))
+    print("Parsed {0} reads {1} split reads".format(len(all_reads), len(split_reads)), file=sys.stderr)
 
     split_reads = resolve_overlaps(split_reads, BP_CLUSTER_SIZE, MAX_SEGEMNT_OVERLAP)
     bp_clusters = get_breakpoints(all_reads, split_reads, BP_CLUSTER_SIZE, args.bp_min_support, args.min_ref_flank, ref_lengths)
@@ -624,7 +653,8 @@ def _run_pipeline(arguments):
     out_single_bp = os.path.join(args.out_dir, "breakpoints_single.csv")
     out_breakpoints_per_read = os.path.join(args.out_dir, "read_breakpoints")
 
-    enumerate_read_breakpoints(split_reads, bp_clusters, BP_CLUSTER_SIZE, args.bam_path, out_breakpoints_per_read, args.coverage)
+    enumerate_read_breakpoints(split_reads, bp_clusters, BP_CLUSTER_SIZE, args.bam_path,
+                               out_breakpoints_per_read, args.coverage, args.threads)
 
     output_single_breakpoints(bp_clusters, out_single_bp)
     output_breaks(all_breaks, open(out_breaks, "w"))
