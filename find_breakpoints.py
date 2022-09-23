@@ -271,7 +271,7 @@ def resolve_overlaps(split_reads, min_ovlp_len, max_overlap):
     return new_reads
 
 
-def get_breakpoints(all_reads, split_reads, clust_len, min_reads, min_ref_flank, ref_lengths):
+def get_breakpoints(all_reads, split_reads, clust_len, max_unaligned_len,  min_reads, min_ref_flank, ref_lengths):
     """
     Finds regular 1-sided breakpoints, where split reads consistently connect
     two different parts of the genome
@@ -281,7 +281,7 @@ def get_breakpoints(all_reads, split_reads, clust_len, min_reads, min_ref_flank,
         for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
 
             #TODO: consider cases with inserted sequence
-            if abs(s1.read_end - s2.read_start) > clust_len:
+            if abs(s1.read_end - s2.read_start) > max_unaligned_len:
                 continue
 
             #if s1.ref_id != s2.ref_id:
@@ -350,7 +350,7 @@ def get_breakpoints(all_reads, split_reads, clust_len, min_reads, min_ref_flank,
     return bp_clusters
 
 
-def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, bam_file, compute_coverage,
+def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligned_len, bam_file, compute_coverage,
                                num_threads, ref_lengths, out_file):
     """
     For each read, generate the list of breakpints
@@ -368,7 +368,7 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, bam_file, co
         for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
 
             #TODO: consider cases with inserted sequence
-            if abs(s1.read_end - s2.read_start) > clust_len:
+            if abs(s1.read_end - s2.read_start) > max_unaligned_len:
                 continue
 
             ref_bp_1 = s1.ref_end if s1.strand == "+" else s1.ref_start
@@ -590,14 +590,18 @@ def output_single_breakpoints(breakpoints, filename):
                                                          len(bp.connections), len(bp.spanning_reads)))
 
 
-#preset constants
+#read alignment constants
 MIN_ALIGNED_LENGTH = 7000
 MIN_ALIGNED_RATE = 0.9
 MAX_SEGMENTS = 10
 MIN_SEGMENT_MAPQ = 10
 MIN_SEGMENT_LENGTH = 100
+
+#breakpoint
 BP_CLUSTER_SIZE = 100
+MIN_SEGMENT_OVERLAP = 100
 MAX_SEGEMNT_OVERLAP = 500
+MAX_UNALIGNED_LEN = 500
 
 SAMTOOLS_BIN = "samtools"
 
@@ -654,15 +658,16 @@ def _run_pipeline(arguments):
             split_reads.append(r)
     print("Parsed {0} reads {1} split reads".format(len(all_reads), len(split_reads)), file=sys.stderr)
 
-    split_reads = resolve_overlaps(split_reads, BP_CLUSTER_SIZE, MAX_SEGEMNT_OVERLAP)
-    bp_clusters = get_breakpoints(all_reads, split_reads, BP_CLUSTER_SIZE, args.bp_min_support, args.min_ref_flank, ref_lengths)
+    split_reads = resolve_overlaps(split_reads, MIN_SEGMENT_OVERLAP, MAX_SEGEMNT_OVERLAP)
+    bp_clusters = get_breakpoints(all_reads, split_reads, BP_CLUSTER_SIZE, MAX_UNALIGNED_LEN,
+                                  args.bp_min_support, args.min_ref_flank, ref_lengths)
     all_breaks, balanced_breaks = get_2_breaks(bp_clusters, BP_CLUSTER_SIZE, args.bp_min_support)
 
     out_breaks = os.path.join(args.out_dir, "breakpoints_double.csv")
     out_single_bp = os.path.join(args.out_dir, "breakpoints_single.csv")
     out_breakpoints_per_read = os.path.join(args.out_dir, "read_breakpoints")
 
-    enumerate_read_breakpoints(split_reads, bp_clusters, BP_CLUSTER_SIZE, args.bam_path,
+    enumerate_read_breakpoints(split_reads, bp_clusters, BP_CLUSTER_SIZE, MAX_UNALIGNED_LEN, args.bam_path,
                                args.coverage, args.threads, ref_lengths, out_breakpoints_per_read)
 
     output_single_breakpoints(bp_clusters, out_single_bp)
