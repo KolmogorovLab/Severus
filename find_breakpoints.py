@@ -636,7 +636,9 @@ def _run_pipeline(arguments):
     parser.add_argument("--max-read-error", dest="max_read_error",
                         default=MAX_READ_ERROR, metavar="float", type=float, help="maximum base alignment error [0.1]")
     parser.add_argument("--coverage", action="store_true", dest="coverage",
-                        default=False, help="add coverage info to breakpoint graphs (takes time)")
+                        default=True, help="add coverage info to breakpoint graphs")
+    parser.add_argument("--reference-adjacencies", action="store_true", dest="reference_adjacencies",
+                        default=False, help="draw reference adjacencies")
 
     args = parser.parse_args(arguments)
     if not shutil.which(SAMTOOLS_BIN):
@@ -679,7 +681,7 @@ def _run_pipeline(arguments):
     #output_inversions(balanced_breaks, open(out_inversions, "w"))
 
     out_breakpoint_graph = os.path.join(args.out_dir, "breakpoint_graph.dot")
-    build_breakpoint_graph(out_breakpoints_per_read, args.bp_min_support, out_breakpoint_graph)
+    build_breakpoint_graph(out_breakpoints_per_read, args.bp_min_support, args.reference_adjacencies, out_breakpoint_graph)
 
 
 def find_breakpoints(input_bam, output_dir, num_threads):

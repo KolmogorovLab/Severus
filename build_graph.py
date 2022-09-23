@@ -12,7 +12,7 @@ def neg_segment(segment):
         return "+" + segment[1:]
 
 
-def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len):
+def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len, reference_adjacencies):
     g = nx.MultiGraph()
 
     node_ids = {}
@@ -28,6 +28,11 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len):
             left_kmer = node_to_id(",".join(segments[i : i + kmer_size]))
             right_kmer = node_to_id(",".join(segments[i + 1 : i + kmer_size + 1]))
 
+            #adjacency edges are dashed
+            edge_style = "solid"
+            if i % 2 == 0:
+                edge_style = "dashed"
+
             if not g.has_node(left_kmer):
                 g.add_node(left_kmer)
             if not g.has_node(right_kmer):
@@ -36,7 +41,7 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len):
             if g.has_edge(left_kmer, right_kmer):
                 g[left_kmer][right_kmer][0]["weight"] = g[left_kmer][right_kmer][0]["weight"] + 1
             else:
-                g.add_edge(left_kmer, right_kmer, weight=1, color="red")
+                g.add_edge(left_kmer, right_kmer, weight=1, color="red", style=edge_style)
 
     genome_segments = []
     for line in open(read_segments, "r"):
@@ -64,6 +69,7 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len):
     for u, v in edges_to_delete:
         g.remove_edge(u, v)
 
+
     for gs in genome_segments:
         if int(gs[2]) < max_genomic_len:
             label="\"L:{0} C:{1}\"".format(gs[2], gs[3])
@@ -74,6 +80,13 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len):
 
     g.remove_nodes_from(list(nx.isolates(g)))
 
+    if reference_adjacencies:
+        for n in node_ids:
+            if n.startswith("+"):
+                other_n = "-" + n[1:]
+                if other_n in node_ids and g.has_node(node_ids[n]) and g.has_node(node_ids[other_n]):
+                    g.add_edge(node_ids[n], node_ids[other_n], style="dashed")
+
     return g
 
 
@@ -81,8 +94,8 @@ KMER = 1
 MAX_GENOMIC_LEN = 1000000000
 
 
-def build_breakpoint_graph(reads_segments_path, min_support, out_file):
-    graph = build_graph(reads_segments_path, KMER, min_support, MAX_GENOMIC_LEN)
+def build_breakpoint_graph(reads_segments_path, min_support, reference_adjacencies, out_file):
+    graph = build_graph(reads_segments_path, KMER, min_support, MAX_GENOMIC_LEN, reference_adjacencies)
     nx.drawing.nx_pydot.write_dot(graph, out_file)
 
 
