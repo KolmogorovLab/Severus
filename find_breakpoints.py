@@ -350,7 +350,8 @@ def get_breakpoints(all_reads, split_reads, clust_len, min_reads, min_ref_flank,
     return bp_clusters
 
 
-def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, bam_file, out_file, compute_coverage, num_threads):
+def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, bam_file, compute_coverage,
+                               num_threads, ref_lengths, out_file):
     """
     For each read, generate the list of breakpints
     """
@@ -395,8 +396,16 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, bam_file, ou
     segments = []
     for seq in bp_clusters:
         clusters = bp_clusters[seq]
+        if len(clusters) == 0:
+            segments.append((seq, 0, ref_lengths[seq]))
+        else:
+            segments.append((seq, 0, clusters[0].position))
+
         for cl_1, cl_2 in zip(clusters[:-1], clusters[1:]):
             segments.append((seq, cl_1.position, cl_2.position))
+
+        if len(clusters) > 0:
+            segments.append((seq, clusters[-1].position, ref_lengths[seq]))
 
     seg_coverage = {}
     if compute_coverage:
@@ -411,7 +420,7 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, bam_file, ou
             coverage = seg_coverage[seq, start, end]
 
         #print(cl_1.position, cl_2.position, coverage)
-        fout.write("G {0} {1} {2} {3}\n".format(label_1, label_2, cl_2.position - cl_1.position, int(coverage)))
+        fout.write("G {0} {1} {2} {3}\n".format(label_1, label_2, end - start, int(coverage)))
 
 
 def _get_segments_coverage(bam_file, segments, num_threads):
@@ -654,7 +663,7 @@ def _run_pipeline(arguments):
     out_breakpoints_per_read = os.path.join(args.out_dir, "read_breakpoints")
 
     enumerate_read_breakpoints(split_reads, bp_clusters, BP_CLUSTER_SIZE, args.bam_path,
-                               out_breakpoints_per_read, args.coverage, args.threads)
+                               args.coverage, args.threads, ref_lengths, out_breakpoints_per_read)
 
     output_single_breakpoints(bp_clusters, out_single_bp)
     output_breaks(all_breaks, open(out_breaks, "w"))
