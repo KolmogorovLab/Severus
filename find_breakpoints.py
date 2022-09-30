@@ -26,7 +26,7 @@ from build_graph import build_breakpoint_graph
 logger = logging.getLogger()
 
 ReadSegment = namedtuple("ReadSegment", ["read_start", "read_end", "ref_start", "ref_end", "read_id", "ref_id",
-                                         "strand", "read_length", "haplotype", "mapq"])
+                                         "strand", "read_length", "haplotype", "mapq", "genome_id"])
 
 
 class ReadConnection(object):
@@ -51,14 +51,13 @@ class ReadConnection(object):
 
 
 class Breakpoint(object):
-    __slots__ = "ref_id", "position", "spanning_reads", "connections", "terminal"
+    __slots__ = "ref_id", "position", "spanning_reads", "connections"
 
     def __init__(self, ref_id, ref_position):
         self.ref_id = ref_id
         self.position = ref_position
         self.spanning_reads = []
         self.connections =[]
-        self.terminal = False
 
 
 class DoubleBreak(object):
@@ -90,7 +89,7 @@ class DoubleBreak(object):
 
 
 cigar_parser = re.compile("[0-9]+[MIDNSHP=X]")
-def get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq):
+def get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq, genome_id):
     """
     Parses cigar and generate ReadSegment structure with alignment coordinates
     """
@@ -128,10 +127,10 @@ def get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq):
         read_start, read_end = read_length - read_end, read_length - read_start
 
     return ReadSegment(read_start, read_end, ref_start, ref_end, read_id,
-                       ref_id, strand, read_length, haplotype, mapq)
+                       ref_id, strand, read_length, haplotype, mapq, genome_id)
 
 
-def get_split_reads(bam_file, ref_id, inter_contig, max_read_error):
+def get_split_reads(bam_file, ref_id, max_read_error, genome_id):
     """
     Yields set of split reads for each contig separately. Only reads primary alignments
     and infers the split reads from SA alignment tag
@@ -175,19 +174,18 @@ def get_split_reads(bam_file, ref_id, inter_contig, max_read_error):
         else:
             haplotype = int(hp_tag)
 
-        new_segment = get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq)
+        new_segment = get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq, genome_id)
         if new_segment.mapq >= MIN_SEGMENT_MAPQ and new_segment.read_end - new_segment.read_start >= MIN_SEGMENT_LENGTH:
             alignments.append(new_segment)
 
     return filtered_reads, alignments
 
 
-def get_all_reads_parallel(bam_file, num_threads, inter_contig, aln_dump_file, max_read_error):
-    print("Parsing reads", file=sys.stderr)
+def get_all_reads_parallel(bam_file, num_threads, aln_dump_stream, max_read_error, genome_id):
 
     all_reference_ids = [r for r in pysam.AlignmentFile(bam_file, "rb").references]
     random.shuffle(all_reference_ids)
-    tasks = [(bam_file, r, inter_contig, max_read_error) for r in all_reference_ids]
+    tasks = [(bam_file, r, max_read_error, genome_id) for r in all_reference_ids]
 
     parsing_results = None
     with Pool(num_threads) as p:
@@ -201,13 +199,12 @@ def get_all_reads_parallel(bam_file, num_threads, inter_contig, aln_dump_file, m
             segments_by_read[aln.read_id].append(aln)
 
     all_reads = []
-    fout = open(aln_dump_file, "w")
     for read in segments_by_read:
         if read not in all_filtered_reads:
-            fout.write(str(read) + "\n")
+            aln_dump_stream.write(str(read) + "\n")
             for seg in segments_by_read[read]:
-                fout.write(str(seg) + "\n")
-            fout.write("\n")
+                aln_dump_stream.write(str(seg) + "\n")
+            aln_dump_stream.write("\n")
 
             segments = segments_by_read[read]
             segments.sort(key=lambda s: s.read_start)
@@ -328,17 +325,6 @@ def get_breakpoints(all_reads, split_reads, clust_len, max_unaligned_len,  min_r
                     bp_cluster = Breakpoint(seq, position)
                     bp_cluster.connections = cl
                     bp_clusters[seq].append(bp_cluster)
-
-        """
-        if bp_clusters[seq]:
-            if bp_clusters[seq][0].position > clust_len:
-                bp_clusters[seq].insert(0, Breakpoint(seq, 0))
-                bp_clusters[seq][0].terminal = True
-
-            if ref_lengths[seq] - bp_clusters[seq][-1].position > clust_len:
-                bp_clusters[seq].append(Breakpoint(seq, ref_lengths[seq] - 1))
-                bp_clusters[seq][-1].terminal = True
-        """
 
     #find reads that span putative breakpoints
     for read_segments in all_reads:
@@ -578,9 +564,6 @@ def output_single_breakpoints(breakpoints, filename):
         f.write("#chr\tposition\tHP\tsupport_reads\tspanning_reads\n")
         for seq in breakpoints:
             for bp in breakpoints[seq]:
-                if bp.terminal:
-                    continue
-
                 by_hp = defaultdict(int)
                 for conn in bp.connections:
                     by_hp[conn.haplotype_1] += 1
@@ -616,10 +599,10 @@ def _run_pipeline(arguments):
     parser = argparse.ArgumentParser \
         (description="Find breakpoints and build breakpoint graph from a bam file")
 
-    parser.add_argument("-b", "--bam", dest="bam_path",
-                        metavar="path", required=True,
+    parser.add_argument("--bam", dest="bam_paths",
+                        metavar="path", required=True, default=None, nargs="+",
                         help="path to assembly bam file (must be indexed)")
-    parser.add_argument("-o", "--out-dir", dest="out_dir",
+    parser.add_argument("--out-dir", dest="out_dir",
                         default=None, required=True,
                         metavar="path", help="Output directory")
     parser.add_argument("-t", "--threads", dest="threads",
@@ -645,20 +628,28 @@ def _run_pipeline(arguments):
         print("samtools not found", file=sys.stderr)
         return 1
 
-    with pysam.AlignmentFile(args.bam_path, "rb") as a:
+    #TODO: check that all bams have the same reference
+    first_bam = args.bam_paths[0]
+    ref_lengths = None
+    with pysam.AlignmentFile(first_bam, "rb") as a:
         ref_lengths = dict(zip(a.references, a.lengths))
 
     if not os.path.isdir(args.out_dir):
         os.mkdir(args.out_dir)
 
-    aln_dump_file = os.path.join(args.out_dir, "read_alignments")
-
-    all_reads = get_all_reads_parallel(args.bam_path, args.threads, True, aln_dump_file, args.max_read_error)
+    aln_dump_stream = open(os.path.join(args.out_dir, "read_alignments"), "w")
+    all_reads = []
     split_reads = []
-    for r in all_reads:
-        if len(r) > 1:
-            split_reads.append(r)
-    print("Parsed {0} reads {1} split reads".format(len(all_reads), len(split_reads)), file=sys.stderr)
+    for bam_file in args.bam_paths:
+        genome_tag = os.path.basename(bam_file)
+        print("Parsing reads from", genome_tag, file=sys.stderr)
+        genome_reads = get_all_reads_parallel(bam_file, args.threads, aln_dump_stream, 
+                                              args.max_read_error, genome_tag)
+        all_reads.extend(genome_reads)
+
+        genome_split_reads = [r for r in all_reads if len(r) > 1]
+        split_reads.extend(genome_split_reads)
+        print("Parsed {0} reads {1} split reads".format(len(all_reads), len(split_reads)), file=sys.stderr)
 
     split_reads = resolve_overlaps(split_reads, MIN_SEGMENT_OVERLAP, MAX_SEGEMNT_OVERLAP)
     bp_clusters = get_breakpoints(all_reads, split_reads, BP_CLUSTER_SIZE, MAX_UNALIGNED_LEN,
@@ -669,7 +660,9 @@ def _run_pipeline(arguments):
     out_single_bp = os.path.join(args.out_dir, "breakpoints_single.csv")
     out_breakpoints_per_read = os.path.join(args.out_dir, "read_breakpoints")
 
-    enumerate_read_breakpoints(split_reads, bp_clusters, BP_CLUSTER_SIZE, MAX_UNALIGNED_LEN, args.bam_path,
+    #TODO: multi-bam coverage?
+    first_bam = args.bam_paths[0]
+    enumerate_read_breakpoints(split_reads, bp_clusters, BP_CLUSTER_SIZE, MAX_UNALIGNED_LEN, first_bam,
                                args.coverage, args.threads, ref_lengths, out_breakpoints_per_read)
 
     output_single_breakpoints(bp_clusters, out_single_bp)
