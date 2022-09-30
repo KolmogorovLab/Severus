@@ -16,7 +16,7 @@ The easiest way to install dependencies is through conda.
 ## Running
 
 ```
-./find_breakpoints.py -b grcm39/grcm39_m4_c11.bam -o out_breakpoints -t 16 --min-support 3 --max-read-error 0.01 --min-reference-flank 500 --coverage
+./bga.py -b grcm39/grcm39_m4_c11.bam -o out_breakpoints -t 16 --min-support 3 --max-read-error 0.01 --min-reference-flank 500 --coverage
 dot -Tsvg -O out_breakpoints/breakpoint_grpah.dot
 ```
 
