@@ -27,6 +27,7 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligne
     for read_segments in split_reads:
         breakpoints = []
         bp_names = []
+        genome_id = read_segments[0].genome_id
         for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
 
             #TODO: consider cases with inserted sequence
@@ -53,7 +54,7 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligne
                 bp_names.append(label_2)
 
         if len(bp_names) > 0:
-            fout.write("Q " + read_segments[0].read_id + " " + " ".join(bp_names) + "\n")
+            fout.write("Q {0} {1} {2}\n".format(genome_id, read_segments[0].read_id, " ".join(bp_names)))
 
     segments = []
     for seq in bp_clusters:
