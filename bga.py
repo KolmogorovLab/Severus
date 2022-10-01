@@ -127,6 +127,9 @@ def main():
                         default=True, help="add coverage info to breakpoint graphs")
     parser.add_argument("--reference-adjacencies", action="store_true", dest="reference_adjacencies",
                         default=False, help="draw reference adjacencies")
+    parser.add_argument("--max-genomic-len", dest="max_genomic_len",
+                        default=None, metavar="int", type=int,
+                        help="maximum length of genomic segment to form connected components")
 
     args = parser.parse_args()
     if not shutil.which(SAMTOOLS_BIN):
@@ -179,7 +182,7 @@ def main():
     #output_inversions(balanced_breaks, open(out_inversions, "w"))
 
     out_breakpoint_graph = os.path.join(args.out_dir, "breakpoint_graph.dot")
-    build_breakpoint_graph(out_breakpoints_per_read, args.bp_min_support, args.reference_adjacencies, out_breakpoint_graph)
+    build_breakpoint_graph(out_breakpoints_per_read, args.bp_min_support, args.reference_adjacencies, out_breakpoint_graph, args.max_genomic_len)
 
 
 if __name__ == "__main__":

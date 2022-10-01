@@ -66,10 +66,21 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len, referen
             genome_segments.append(fields[1:])
 
     #add sequence segments
-    for gs in genome_segments:
-        if int(gs[2]) < max_genomic_len:
+    for i, gs in enumerate(genome_segments):
+        if not max_genomic_len or int(gs[2]) < max_genomic_len:
             label="\"L:{0} C:{1}\"".format(gs[2], gs[3])
             g.add_edge(node_to_id(gs[0]), node_to_id(gs[1]), label=label, key=SEQUENCE_KEY)
+
+        #break connected components
+        else:
+            node_1 = "broken_{0}_1".format(i)
+            node_2 = "broken_{0}_2".format(i)
+            g.add_node(node_1, label="", style="filled", fillcolor="grey")
+            g.add_node(node_2, label="", style="filled", fillcolor="grey")
+
+            label="\"L:{0} C:{1}\"".format(gs[2], gs[3])
+            g.add_edge(node_to_id(gs[0]), node_1, label=label, key=SEQUENCE_KEY)
+            g.add_edge(node_2, node_to_id(gs[1]), label=label, key=SEQUENCE_KEY)
 
     #remove edges with low coverage
     edges_to_delete = set()
@@ -108,7 +119,8 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len, referen
 
     #label nodes
     for n in g.nodes:
-        g.nodes[n]["label"] = "\\n".join(id_to_kmers[n].split(","))
+        if n in id_to_kmers:
+            g.nodes[n]["label"] = "\\n".join(id_to_kmers[n].split(","))
 
     return g, key_to_color
 
@@ -131,11 +143,10 @@ def add_legend(key_to_color, in_dot, out_dot):
                 fout.write(line)
 
 
-def build_breakpoint_graph(reads_segments_path, min_support, reference_adjacencies, out_file):
+def build_breakpoint_graph(reads_segments_path, min_support, reference_adjacencies,
+                           out_file, max_genomic_len):
     KMER = 1
-    MAX_GENOMIC_LEN = 1000000000
-
-    graph, key_to_color = build_graph(reads_segments_path, KMER, min_support, MAX_GENOMIC_LEN, reference_adjacencies)
+    graph, key_to_color = build_graph(reads_segments_path, KMER, min_support, max_genomic_len, reference_adjacencies)
     tmp_graph = out_file + "_tmp"
     nx.drawing.nx_pydot.write_dot(graph, tmp_graph)
     add_legend(key_to_color, tmp_graph, out_file)
