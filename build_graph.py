@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+import os
 import networkx as nx
 
 
@@ -109,23 +110,36 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len, referen
     for n in g.nodes:
         g.nodes[n]["label"] = "\\n".join(id_to_kmers[n].split(","))
 
-    #legend edges
-    for i, (key, color) in enumerate(key_to_color.items()):
-        node_1 = "legend_{0}_1".format(i)
-        node_2 = "legend_{0}_2".format(i)
-        g.add_node(node_1, label="")
-        g.add_node(node_2, label="")
-        g.add_edge(node_1, node_2, color=color, label=key)
+    return g, key_to_color
 
-    return g
+
+def add_legend(key_to_color, in_dot, out_dot):
+    with open(in_dot, "r") as fin, open(out_dot, "w") as fout:
+        for line in fin:
+            if line.startswith("graph"):
+                fout.write("graph {\n")
+                fout.write("edge [penwidth=2];\n")
+                fout.write("subgraph cluster_01 {\n\tlabel = \"Legend\";\n\tnode [shape=point]\n{\n\trank=same\n")
+
+                for i, (key, color) in enumerate(key_to_color.items()):
+                    node_1 = "legend_{0}_1".format(i)
+                    node_2 = "legend_{0}_2".format(i)
+                    fout.write("\t{0} -- {1} [color={2}, label=\"{3}\"];\n".format(node_1, node_2, color, key))
+
+                fout.write("\t}\n};\n")
+            else:
+                fout.write(line)
 
 
 def build_breakpoint_graph(reads_segments_path, min_support, reference_adjacencies, out_file):
     KMER = 1
     MAX_GENOMIC_LEN = 1000000000
 
-    graph = build_graph(reads_segments_path, KMER, min_support, MAX_GENOMIC_LEN, reference_adjacencies)
-    nx.drawing.nx_pydot.write_dot(graph, out_file)
+    graph, key_to_color = build_graph(reads_segments_path, KMER, min_support, MAX_GENOMIC_LEN, reference_adjacencies)
+    tmp_graph = out_file + "_tmp"
+    nx.drawing.nx_pydot.write_dot(graph, tmp_graph)
+    add_legend(key_to_color, tmp_graph, out_file)
+    os.remove(tmp_graph)
 
 
 """
