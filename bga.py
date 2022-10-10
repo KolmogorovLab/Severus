@@ -72,14 +72,13 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligne
 
     seg_coverage = {}
     if compute_coverage:
-        seg_coverage = get_segments_coverage(bam_file, segments, num_threads)
+        seg_coverage = get_segments_coverage(bam_files, segments, num_threads)
 
     for seq, start, end in segments:
         label_1 = "-{0}:{1}".format(seq, start)
         label_2 = "+{0}:{1}".format(seq, end)
         coverage = 0
         if compute_coverage:
-            #coverage = get_median_depth(bam_file, seq, cl_1.position, cl_2.position)
             coverage = seg_coverage[seq, start, end]
 
         #print(cl_1.position, cl_2.position, coverage)

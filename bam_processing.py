@@ -6,6 +6,7 @@ from multiprocessing import Pool
 import random
 import os
 import subprocess
+import numpy as np
 
 
 #read alignment constants
@@ -284,17 +285,23 @@ def get_segments_coverage(bam_files, segments, num_threads):
     return coverage_map
 
 
-def _get_median_depth(bam_path, ref_id, ref_start, ref_end):
+def _get_median_depth(bam_paths, ref_id, ref_start, ref_end):
     SAMTOOLS_BIN = "samtools"
-    samtools_out = subprocess.Popen("{0} coverage {1} -r '{2}:{3}-{4}' -q 10 -l 100"
-                                     .format(SAMTOOLS_BIN, bam_path, ref_id, ref_start, ref_end),
-                                    shell=True, stdout=subprocess.PIPE).stdout
+    cov_by_bam = []
+    for bam in bam_paths:
+        samtools_out = subprocess.Popen("{0} coverage {1} -r '{2}:{3}-{4}' -q 10 -l 100"
+                                         .format(SAMTOOLS_BIN, bam, ref_id, ref_start, ref_end),
+                                        shell=True, stdout=subprocess.PIPE).stdout
 
-    for line in samtools_out:
-        if line.startswith(b"#"):
-            continue
-        fields = line.split()
-        coverage = float(fields[6])
-        return coverage
+        for line in samtools_out:
+            if line.startswith(b"#"):
+                continue
+            fields = line.split()
+            coverage = float(fields[6])
+            cov_by_bam.append(coverage)
+            break
 
-    return None
+    if len(cov_by_bam) > 0:
+        return np.median(cov_by_bam)
+    else:
+        return None
