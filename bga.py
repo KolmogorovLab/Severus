@@ -157,7 +157,7 @@ def main():
                                               args.max_read_error, genome_tag)
         all_reads.extend(genome_reads)
 
-        genome_split_reads = [r for r in all_reads if len(r) > 1]
+        genome_split_reads = [r for r in genome_reads if len(r) > 1]
         split_reads.extend(genome_split_reads)
         print("Parsed {0} reads {1} split reads".format(len(all_reads), len(split_reads)), file=sys.stderr)
 
