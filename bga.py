@@ -154,7 +154,7 @@ def main():
         genome_tag = os.path.basename(bam_file)
         print("Parsing reads from", genome_tag, file=sys.stderr)
         genome_reads = get_all_reads_parallel(bam_file, args.threads, aln_dump_stream, 
-                                              args.max_read_error, genome_tag)
+                                              args.max_read_error, args.min_mapping_quality, genome_tag)
         all_reads.extend(genome_reads)
 
         genome_split_reads = [r for r in genome_reads if len(r) > 1]

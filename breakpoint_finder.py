@@ -20,9 +20,10 @@ import subprocess
 
 
 class ReadConnection(object):
-    __slots__ = "ref_id_1", "pos_1", "sign_1", "ref_id_2", "pos_2", "sign_2", "haplotype_1", "haplotype_2", "read_id"
+    __slots__ = ("ref_id_1", "pos_1", "sign_1", "ref_id_2", "pos_2", "sign_2",
+                 "haplotype_1", "haplotype_2", "read_id", "genome_id")
 
-    def __init__(self, ref_id_1, pos_1, sign_1, ref_id_2, pos_2, sign_2, haplotype_1, haplotype_2, read_id):
+    def __init__(self, ref_id_1, pos_1, sign_1, ref_id_2, pos_2, sign_2, haplotype_1, haplotype_2, read_id, genome_id):
         self.ref_id_1 = ref_id_1
         self.ref_id_2 = ref_id_2
         self.pos_1 = pos_1
@@ -32,6 +33,7 @@ class ReadConnection(object):
         self.haplotype_1 = haplotype_1
         self.haplotype_2 = haplotype_2
         self.read_id = read_id
+        self.genome_id = genome_id
 
     def signed_coord_1(self):
         return self.sign_1 * self.pos_1
@@ -159,9 +161,9 @@ def get_breakpoints(all_reads, split_reads, clust_len, max_unaligned_len,  min_r
             #seq_breakpoints[s2.ref_id].append(ReadConnection(s2.ref_id, ref_bp_2, conn_2, conn_1, s1.haplotype))
 
             seq_breakpoints[s1.ref_id].append(ReadConnection(s1.ref_id, ref_bp_1, sign_1, s2.ref_id, ref_bp_2, sign_2,
-                                                             s1.haplotype, s2.haplotype, s1.read_id))
+                                                             s1.haplotype, s2.haplotype, s1.read_id, s1.genome_id))
             seq_breakpoints[s2.ref_id].append(ReadConnection(s2.ref_id, ref_bp_2, sign_2, s1.ref_id, ref_bp_1, sign_1,
-                                                             s2.haplotype, s1.haplotype, s2.read_id))
+                                                             s2.haplotype, s1.haplotype, s2.read_id, s2.genome_id))
 
     bp_clusters = defaultdict(list)
     for seq, bp_pos in seq_breakpoints.items():
@@ -181,8 +183,14 @@ def get_breakpoints(all_reads, split_reads, clust_len, max_unaligned_len,  min_r
         for cl in clusters:
             unique_reads = set()
             for x in cl:
-                unique_reads.add(x.read_id)
-            if len(unique_reads) >= min_reads:
+                unique_reads.add((x.read_id, x.genome_id))
+
+            by_genome_id = defaultdict(int)
+            for read in unique_reads:
+                by_genome_id[read[1]] += 1
+
+            #if in at least one sample there are more than X supporting reads
+            if max(by_genome_id.values()) >= min_reads:
                 position = int(np.median([x.pos_1 for x in cl]))
                 if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank:
                     bp_cluster = Breakpoint(seq, position)
