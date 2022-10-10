@@ -9,10 +9,9 @@ import subprocess
 
 
 #read alignment constants
-MIN_ALIGNED_LENGTH = 7000
-MIN_ALIGNED_RATE = 0.9
+MIN_ALIGNED_LENGTH = 5000
+MIN_ALIGNED_RATE = 0.5
 MAX_SEGMENTS = 10
-MIN_SEGMENT_MAPQ = 10
 MIN_SEGMENT_LENGTH = 100
 
 
@@ -183,7 +182,7 @@ def get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq, geno
                        ref_id, strand, read_length, haplotype, mapq, genome_id)
 
 
-def get_split_reads(bam_file, ref_id, max_read_error, genome_id):
+def get_split_reads(bam_file, ref_id, max_read_error, min_mapq, genome_id):
     """
     Yields set of split reads for each contig separately. Only reads primary alignments
     and infers the split reads from SA alignment tag
@@ -228,17 +227,17 @@ def get_split_reads(bam_file, ref_id, max_read_error, genome_id):
             haplotype = int(hp_tag)
 
         new_segment = get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq, genome_id)
-        if new_segment.mapq >= MIN_SEGMENT_MAPQ and new_segment.read_end - new_segment.read_start >= MIN_SEGMENT_LENGTH:
+        if new_segment.mapq >= min_mapq and new_segment.read_end - new_segment.read_start >= MIN_SEGMENT_LENGTH:
             alignments.append(new_segment)
 
     return filtered_reads, alignments
 
 
-def get_all_reads_parallel(bam_file, num_threads, aln_dump_stream, max_read_error, genome_id):
+def get_all_reads_parallel(bam_file, num_threads, aln_dump_stream, max_read_error, min_mapq, genome_id):
 
     all_reference_ids = [r for r in pysam.AlignmentFile(bam_file, "rb").references]
     random.shuffle(all_reference_ids)
-    tasks = [(bam_file, r, max_read_error, genome_id) for r in all_reference_ids]
+    tasks = [(bam_file, r, max_read_error, min_mapq, genome_id) for r in all_reference_ids]
 
     parsing_results = None
     with Pool(num_threads) as p:
@@ -268,11 +267,11 @@ def get_all_reads_parallel(bam_file, num_threads, aln_dump_stream, max_read_erro
     return all_reads
 
 
-def get_segments_coverage(bam_file, segments, num_threads):
+def get_segments_coverage(bam_files, segments, num_threads):
     print("Computing segments coverage", file=sys.stderr)
 
     random.shuffle(segments)
-    tasks = [(bam_file, s[0], s[1], s[2]) for s in segments]
+    tasks = [(bam_files, s[0], s[1], s[2]) for s in segments]
 
     seg_coverage = None
     with Pool(num_threads) as p:

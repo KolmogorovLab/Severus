@@ -12,7 +12,7 @@ from bam_processing import get_all_reads_parallel, get_segments_coverage
 from breakpoint_finder import resolve_overlaps, get_breakpoints, get_2_breaks, DoubleBreak, output_single_breakpoints, output_breaks
 
 
-def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligned_len, bam_file, compute_coverage,
+def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligned_len, bam_files, compute_coverage,
                                num_threads, ref_lengths, out_file):
     """
     For each read, generate the list of breakpints
@@ -90,6 +90,7 @@ def main():
     # default tunable parameters
     MAX_READ_ERROR = 0.1
     MIN_BREAKPOINT_READS = 3
+    MIN_MAPQ = 1
     #MIN_DOUBLE_BP_READS = 5
     MIN_REF_FLANK = 0
 
@@ -123,6 +124,8 @@ def main():
                         help="minimum distance between breakpoint and sequence ends [500]")
     parser.add_argument("--max-read-error", dest="max_read_error",
                         default=MAX_READ_ERROR, metavar="float", type=float, help="maximum base alignment error [0.1]")
+    parser.add_argument("--min-mapq", dest="min_mapping_quality",
+                        default=MIN_MAPQ, metavar="int", type=int, help="minimum mapping quality for aligned segment [1]")
     parser.add_argument("--coverage", action="store_true", dest="coverage",
                         default=True, help="add coverage info to breakpoint graphs")
     parser.add_argument("--reference-adjacencies", action="store_true", dest="reference_adjacencies",
@@ -168,9 +171,8 @@ def main():
     out_single_bp = os.path.join(args.out_dir, "breakpoints_single.csv")
     out_breakpoints_per_read = os.path.join(args.out_dir, "read_breakpoints")
 
-    #TODO: multi-bam coverage?
-    first_bam = args.bam_paths[0]
-    enumerate_read_breakpoints(split_reads, bp_clusters, BP_CLUSTER_SIZE, MAX_UNALIGNED_LEN, first_bam,
+    #first_bam = args.bam_paths[0]
+    enumerate_read_breakpoints(split_reads, bp_clusters, BP_CLUSTER_SIZE, MAX_UNALIGNED_LEN, args.bam_paths,
                                args.coverage, args.threads, ref_lengths, out_breakpoints_per_read)
 
     output_single_breakpoints(bp_clusters, out_single_bp)
