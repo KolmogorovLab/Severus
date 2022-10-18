@@ -289,19 +289,25 @@ def _get_median_depth(bam_paths, ref_id, ref_start, ref_end):
     SAMTOOLS_BIN = "samtools"
     cov_by_bam = []
     for bam in bam_paths:
-        samtools_out = subprocess.Popen("{0} coverage {1} -r '{2}:{3}-{4}' -q 10 -l 100"
-                                         .format(SAMTOOLS_BIN, bam, ref_id, ref_start, ref_end),
-                                        shell=True, stdout=subprocess.PIPE).stdout
+        try:
+            samtools_out = subprocess.Popen("{0} coverage {1} -r '{2}:{3}-{4}' -q 10 -l 100"
+                                             .format(SAMTOOLS_BIN, bam, ref_id, ref_start, ref_end),
+                                            shell=True, stdout=subprocess.PIPE).stdout
 
-        for line in samtools_out:
-            if line.startswith(b"#"):
-                continue
-            fields = line.split()
-            coverage = float(fields[6])
-            cov_by_bam.append(coverage)
-            break
+            for line in samtools_out:
+                if line.startswith(b"#"):
+                    continue
+                fields = line.split()
+                coverage = float(fields[6])
+                cov_by_bam.append(coverage)
+                break
+
+        except Exception as e:
+            print(e)
+            print("{0} coverage {1} -r '{2}:{3}-{4}' -q 10 -l 100"
+                  .format(SAMTOOLS_BIN, bam, ref_id, ref_start, ref_end))
 
     if len(cov_by_bam) > 0:
         return np.median(cov_by_bam)
     else:
-        return None
+        return 0
