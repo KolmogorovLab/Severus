@@ -99,6 +99,8 @@ def main():
     MAX_SEGEMNT_OVERLAP = 500
     MAX_UNALIGNED_LEN = 500
 
+    MIN_GRAPH_SUPPORT = 3
+
     SAMTOOLS_BIN = "samtools"
 
     parser = argparse.ArgumentParser \
@@ -147,13 +149,18 @@ def main():
     if not os.path.isdir(args.out_dir):
         os.mkdir(args.out_dir)
 
+    out_breaks = os.path.join(args.out_dir, "breakpoints_double.csv")
+    out_single_bp = os.path.join(args.out_dir, "breakpoints_single.csv")
+    out_breakpoints_per_read = os.path.join(args.out_dir, "read_breakpoints")
+    out_breakpoint_graph = os.path.join(args.out_dir, "breakpoint_graph.dot")
+
     aln_dump_stream = open(os.path.join(args.out_dir, "read_alignments"), "w")
     all_reads = []
     split_reads = []
     for bam_file in args.bam_paths:
         genome_tag = os.path.basename(bam_file)
         print("Parsing reads from", genome_tag, file=sys.stderr)
-        genome_reads = get_all_reads_parallel(bam_file, args.threads, aln_dump_stream, 
+        genome_reads = get_all_reads_parallel(bam_file, args.threads, aln_dump_stream,
                                               args.max_read_error, args.min_mapping_quality, genome_tag)
         all_reads.extend(genome_reads)
 
@@ -182,8 +189,8 @@ def main():
     #output_breaks(balanced_breaks, open(out_balanced_breaks, "w"))
     #output_inversions(balanced_breaks, open(out_inversions, "w"))
 
-    out_breakpoint_graph = os.path.join(args.out_dir, "breakpoint_graph.dot")
-    build_breakpoint_graph(out_breakpoints_per_read, args.bp_min_support, args.reference_adjacencies, out_breakpoint_graph, args.max_genomic_len)
+    build_breakpoint_graph(out_breakpoints_per_read, MIN_GRAPH_SUPPORT, args.reference_adjacencies,
+                           out_breakpoint_graph, args.max_genomic_len)
 
 
 if __name__ == "__main__":
