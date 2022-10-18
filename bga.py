@@ -173,11 +173,6 @@ def main():
                                   args.bp_min_support, args.min_ref_flank, ref_lengths)
     all_breaks, balanced_breaks = get_2_breaks(bp_clusters, BP_CLUSTER_SIZE, args.bp_min_support)
 
-    out_breaks = os.path.join(args.out_dir, "breakpoints_double.csv")
-    out_single_bp = os.path.join(args.out_dir, "breakpoints_single.csv")
-    out_breakpoints_per_read = os.path.join(args.out_dir, "read_breakpoints")
-
-    #first_bam = args.bam_paths[0]
     enumerate_read_breakpoints(split_reads, bp_clusters, BP_CLUSTER_SIZE, MAX_UNALIGNED_LEN, args.bam_paths,
                                args.coverage, args.threads, ref_lengths, out_breakpoints_per_read)
 
