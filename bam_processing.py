@@ -290,7 +290,7 @@ def _get_median_depth(bam_paths, ref_id, ref_start, ref_end):
     cov_by_bam = []
     for bam in bam_paths:
         try:
-            samtools_out = subprocess.Popen("{0} coverage {1} -r '{2}:{3}-{4}' -q 10 -l 100"
+            samtools_out = subprocess.Popen("{0} coverage {1} -r '{2}:{3}-{4}' -q 10 -l 100 -d 1000"
                                              .format(SAMTOOLS_BIN, bam, ref_id, ref_start, ref_end),
                                             shell=True, stdout=subprocess.PIPE).stdout
 
