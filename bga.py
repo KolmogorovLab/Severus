@@ -24,8 +24,9 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligne
         return None, None
 
     fout = open(out_file, "w")
+
+    #outputing adjacency connections
     for read_segments in split_reads:
-        breakpoints = []
         bp_names = []
         genome_id = read_segments[0].genome_id
         for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
@@ -44,8 +45,6 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligne
             _, bp_2 = _normalize_coord(sign_2 * ref_bp_2, bp_clusters[s2.ref_id])
 
             if not None in [bp_1, bp_2]:
-                breakpoints.append(DoubleBreak(bp_1, sign_1, bp_2, sign_2))
-                #bp_names.append(breakpoints[-1].to_string())
                 strand_1 = "+" if sign_1 > 0 else "-"
                 label_1 = "{0}{1}:{2}".format(strand_1, bp_1.ref_id, bp_1.position)
                 strand_2 = "+" if sign_2 > 0 else "-"
@@ -56,6 +55,32 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligne
         if len(bp_names) > 0:
             fout.write("Q {0} {1} {2}\n".format(genome_id, read_segments[0].read_id, " ".join(bp_names)))
 
+        #output all single breakpoints
+        single_bps = []
+        genome_id = read_segments[0].genome_id
+        for seg in read_segments:
+            ref_bp_1 = seg.ref_start if seg.strand == "+" else seg.ref_end
+            sign_1 = -1 if seg.strand == "+" else 1
+            _, bp_1 = _normalize_coord(sign_1 * ref_bp_1, bp_clusters[seg.ref_id])
+
+            ref_bp_2 = seg.ref_end if seg.strand == "+" else seg.ref_start
+            sign_2 = 1 if seg.strand == "+" else -1
+            _, bp_2 = _normalize_coord(sign_2 * ref_bp_2, bp_clusters[seg.ref_id])
+
+            if bp_1 is not None:
+                strand_1 = "+" if sign_1 > 0 else "-"
+                label_1 = "{0}{1}:{2}".format(strand_1, bp_1.ref_id, bp_1.position)
+                single_bps.append(label_1)
+
+            if bp_2 is not None:
+                strand_2 = "+" if sign_2 > 0 else "-"
+                label_2 = "{0}{1}:{2}".format(strand_2, bp_2.ref_id, bp_2.position)
+                single_bps.append(label_2)
+
+        if len(single_bps) > 0:
+            fout.write("S {0} {1} {2}\n".format(genome_id, read_segments[0].read_id, " ".join(single_bps)))
+
+    #output reference segments
     segments = []
     for seq in bp_clusters:
         clusters = bp_clusters[seq]

@@ -4,6 +4,7 @@ import argparse
 import sys
 import os
 import networkx as nx
+from collections import defaultdict
 
 
 def neg_segment(segment):
@@ -29,15 +30,16 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len, referen
             id_to_kmers[node_ids[node_str]] = node_str
         return node_ids[node_str]
 
-    def update_graph(segments, genome_id):
+    def update_adjacencies(segments, genome_id):
         for i in range(0, len(segments) - kmer_size):
             left_kmer = node_to_id(",".join(segments[i : i + kmer_size]))
             right_kmer = node_to_id(",".join(segments[i + 1 : i + kmer_size + 1]))
 
             #adjacency edges are dashed
-            edge_style = "solid"
-            if i % 2 == 0:
-                edge_style = "dashed"
+            adjacency = (i % 2 == 0)
+            if not adjacency:
+                continue
+            edge_style = "dashed"
 
             if not g.has_node(left_kmer):
                 g.add_node(left_kmer)
@@ -50,16 +52,20 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len, referen
                 g.add_edge(left_kmer, right_kmer, key=genome_id, weight=1, style=edge_style)
 
     genome_segments = []
+    breakpoints_coverage = defaultdict(int)
+
     for line in open(read_segments, "r"):
         if line.startswith("Q"):
             fields = line.strip().split()
             genome_id, read_id, segments = fields[1], fields[2], fields[3:]
             if len(segments) > kmer_size:
-                update_graph(segments, genome_id)
-                #reversed_segments = []
-                #for seg in segments[::-1]:
-                #    reversed_segments.append(neg_segment(seg))
-                #update_graph(reversed_segments)
+                update_adjacencies(segments, genome_id)
+
+        if line.startswith("S"):
+            fields = line.strip().split()
+            genome_id, read_id, breakpoints = fields[1], fields[2], fields[3:]
+            for bp in breakpoints:
+                breakpoints_coverage[(bp, genome_id)] += 1
 
         if line.startswith("G"):
             fields = line.strip().split()
@@ -75,12 +81,29 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len, referen
         else:
             node_1 = "broken_{0}_1".format(i)
             node_2 = "broken_{0}_2".format(i)
-            g.add_node(node_1, label="", style="filled", fillcolor="grey")
-            g.add_node(node_2, label="", style="filled", fillcolor="grey")
+            g.add_node(node_1, label=gs[1], style="filled", fillcolor="grey")
+            g.add_node(node_2, label=gs[0], style="filled", fillcolor="grey")
 
             label="\"L:{0} C:{1}\"".format(gs[2], gs[3])
             g.add_edge(node_to_id(gs[0]), node_1, label=label, key=SEQUENCE_KEY)
             g.add_edge(node_2, node_to_id(gs[1]), label=label, key=SEQUENCE_KEY)
+
+    #add hanging segments (single breakpoints), if there is no double breakpoint
+    hanging_num = 0
+    for (node, genome_id), multiplicity in breakpoints_coverage.items():
+        if multiplicity < min_coverage:
+            continue
+
+        has_adjacency = False
+        for u, v, _key in g.edges(node_to_id(node), keys=True):
+            if _key == genome_id and g[u][v][_key]["weight"] >= min_coverage:
+                has_adjacency = True
+
+        if not has_adjacency:
+            new_node = "hanging_{0}".format(hanging_num)
+            hanging_num += 1
+            g.add_node(new_node, label="", shape="point")
+            g.add_edge(node_to_id(node), new_node, key=genome_id, weight=multiplicity, style="dashed")
 
     #remove edges with low coverage
     edges_to_delete = set()
