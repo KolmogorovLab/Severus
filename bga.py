@@ -114,9 +114,10 @@ def main():
     # default tunable parameters
     MAX_READ_ERROR = 0.1
     MIN_BREAKPOINT_READS = 3
-    MIN_MAPQ = 1
+    MIN_MAPQ = 10
     #MIN_DOUBLE_BP_READS = 5
     MIN_REF_FLANK = 0
+    MAX_GENOMIC_LEN = 1000000
 
     #breakpoint
     BP_CLUSTER_SIZE = 100
