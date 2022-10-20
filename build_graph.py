@@ -108,11 +108,20 @@ def build_graph(read_segments, min_coverage, max_genomic_len, reference_adjacenc
 
     #remove edges with low coverage
     edges_to_delete = set()
+    safe_edges = set()
     for u, v, _key in g.edges:
-       if _key != SEQUENCE_KEY and g[u][v][_key]["weight"] < min_coverage:
-           edges_to_delete.add((u, v, _key))
+        if _key == SEQUENCE_KEY:
+            continue
+
+        if g[u][v][_key]["weight"] < min_coverage:
+            edges_to_delete.add((u, v, _key))
+        else:
+            safe_edges.add((u, v))
+            safe_edges.add((v, u))
+
     for u, v, _key in edges_to_delete:
-        g.remove_edge(u, v, key=_key)
+        if (u, v) not in safe_edges:
+            g.remove_edge(u, v, key=_key)
 
     #remove isolated nodes
     #g.remove_nodes_from(list(nx.isolates(g)))
@@ -166,6 +175,9 @@ def output_connected_components(graph, out_stream, target_genomes, control_genom
         target_adj = set()
         control_adj = set()
         for u, v, key in graph.edges(cc, keys=True):
+            if str(u).startswith("hanging") or str(v).startswith("hanging"):
+                continue
+
             if key in target_genomes:
                 target_adj.add((u, v))
             if key in control_genomes:
