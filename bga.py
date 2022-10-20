@@ -123,17 +123,19 @@ def main():
     MIN_SEGMENT_OVERLAP = 100
     MAX_SEGEMNT_OVERLAP = 500
     MAX_UNALIGNED_LEN = 500
-
-    MIN_GRAPH_SUPPORT = 3
+    #MIN_GRAPH_SUPPORT = 3
 
     SAMTOOLS_BIN = "samtools"
 
     parser = argparse.ArgumentParser \
         (description="Find breakpoints and build breakpoint graph from a bam file")
 
-    parser.add_argument("--bam", dest="bam_paths",
+    parser.add_argument("--target-bam", dest="target_bam",
                         metavar="path", required=True, default=None, nargs="+",
-                        help="path to assembly bam file (must be indexed)")
+                        help="path to one or multiple target bam files (must be indexed)")
+    parser.add_argument("--control-bam", dest="control_bam",
+                        metavar="path", required=False, default=None, nargs="+",
+                        help="path to one or multiple control bam files (must be indexed)")
     parser.add_argument("--out-dir", dest="out_dir",
                         default=None, required=True,
                         metavar="path", help="Output directory")
@@ -147,26 +149,36 @@ def main():
     #                    default=BP_CLUSTER_SIZE, metavar="int", type=int, help="size of breakpoint cluster in bp [100]")
     parser.add_argument("--min-reference-flank", dest="min_ref_flank",
                         default=MIN_REF_FLANK, metavar="int", type=int,
-                        help="minimum distance between breakpoint and sequence ends [500]")
+                        help="minimum distance between breakpoint and sequence ends [0]")
     parser.add_argument("--max-read-error", dest="max_read_error",
                         default=MAX_READ_ERROR, metavar="float", type=float, help="maximum base alignment error [0.1]")
     parser.add_argument("--min-mapq", dest="min_mapping_quality",
                         default=MIN_MAPQ, metavar="int", type=int, help="minimum mapping quality for aligned segment [1]")
-    parser.add_argument("--coverage", action="store_true", dest="coverage",
-                        default=True, help="add coverage info to breakpoint graphs")
+    #parser.add_argument("--coverage", action="store_true", dest="coverage",
+    #                    default=True, help="add coverage info to breakpoint graphs")
     parser.add_argument("--reference-adjacencies", action="store_true", dest="reference_adjacencies",
                         default=False, help="draw reference adjacencies")
     parser.add_argument("--max-genomic-len", dest="max_genomic_len",
-                        default=None, metavar="int", type=int,
-                        help="maximum length of genomic segment to form connected components")
-
+                        default=MAX_GENOMIC_LEN, metavar="int", type=int,
+                        help="maximum length of genomic segment to form connected components [1000000]")
     args = parser.parse_args()
+
+    if args.control_bam is None:
+        args.control_bam = []
+    all_bams = args.target_bam + args.control_bam
+    target_genomes = set(os.path.basename(b) for b in args.target_bam)
+    control_genomes = set(os.path.basename(b) for b in args.control_bam)
+
+    #print("target bams", args.target_bam, target_genomes, file=sys.stderr)
+    #print("control bams", args.control_bam, control_genomes, file=sys.stderr)
+    #print("all bams", all_bams, file=sys.stderr)
+
     if not shutil.which(SAMTOOLS_BIN):
         print("samtools not found", file=sys.stderr)
         return 1
 
     #TODO: check that all bams have the same reference
-    first_bam = args.bam_paths[0]
+    first_bam = all_bams[0]
     ref_lengths = None
     with pysam.AlignmentFile(first_bam, "rb") as a:
         ref_lengths = dict(zip(a.references, a.lengths))
@@ -182,7 +194,7 @@ def main():
     aln_dump_stream = open(os.path.join(args.out_dir, "read_alignments"), "w")
     all_reads = []
     split_reads = []
-    for bam_file in args.bam_paths:
+    for bam_file in all_bams:
         genome_tag = os.path.basename(bam_file)
         print("Parsing reads from", genome_tag, file=sys.stderr)
         genome_reads = get_all_reads_parallel(bam_file, args.threads, aln_dump_stream,
@@ -198,8 +210,8 @@ def main():
                                   args.bp_min_support, args.min_ref_flank, ref_lengths)
     all_breaks, balanced_breaks = get_2_breaks(bp_clusters, BP_CLUSTER_SIZE, args.bp_min_support)
 
-    enumerate_read_breakpoints(split_reads, bp_clusters, BP_CLUSTER_SIZE, MAX_UNALIGNED_LEN, args.bam_paths,
-                               args.coverage, args.threads, ref_lengths, out_breakpoints_per_read)
+    enumerate_read_breakpoints(split_reads, bp_clusters, BP_CLUSTER_SIZE, MAX_UNALIGNED_LEN, all_bams,
+                               True, args.threads, ref_lengths, out_breakpoints_per_read)
 
     output_single_breakpoints(bp_clusters, out_single_bp)
     output_breaks(all_breaks, open(out_breaks, "w"))
@@ -209,8 +221,8 @@ def main():
     #output_breaks(balanced_breaks, open(out_balanced_breaks, "w"))
     #output_inversions(balanced_breaks, open(out_inversions, "w"))
 
-    build_breakpoint_graph(out_breakpoints_per_read, MIN_GRAPH_SUPPORT, args.reference_adjacencies,
-                           out_breakpoint_graph, args.max_genomic_len)
+    build_breakpoint_graph(out_breakpoints_per_read, args.bp_min_support, args.reference_adjacencies,
+                           out_breakpoint_graph, args.max_genomic_len, target_genomes, control_genomes)
 
 
 if __name__ == "__main__":

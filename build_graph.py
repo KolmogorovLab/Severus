@@ -18,7 +18,8 @@ def neg_segment(segment):
 COLORS = ["red", "green", "blue", "orange", "purple", "cyan", "hotpink", "preu"]
 
 
-def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len, reference_adjacencies):
+def build_graph(read_segments, min_coverage, max_genomic_len, reference_adjacencies):
+    kmer_size = 1
     SEQUENCE_KEY = "__genomic"
     g = nx.MultiGraph()
 
@@ -74,7 +75,7 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len, referen
     #add sequence segments
     for i, gs in enumerate(genome_segments):
         if not max_genomic_len or int(gs[2]) < max_genomic_len:
-            label="\"L:{0} C:{1}\"".format(gs[2], gs[3])
+            label="L:{0} C:{1}".format(gs[2], gs[3])
             g.add_edge(node_to_id(gs[0]), node_to_id(gs[1]), label=label, key=SEQUENCE_KEY)
 
         #break connected components
@@ -84,7 +85,7 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len, referen
             g.add_node(node_1, label=gs[1], style="filled", fillcolor="grey")
             g.add_node(node_2, label=gs[0], style="filled", fillcolor="grey")
 
-            label="\"L:{0} C:{1}\"".format(gs[2], gs[3])
+            label="L:{0} C:{1}".format(gs[2], gs[3])
             g.add_edge(node_to_id(gs[0]), node_1, label=label, key=SEQUENCE_KEY)
             g.add_edge(node_2, node_to_id(gs[1]), label=label, key=SEQUENCE_KEY)
 
@@ -114,7 +115,7 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len, referen
         g.remove_edge(u, v, key=_key)
 
     #remove isolated nodes
-    g.remove_nodes_from(list(nx.isolates(g)))
+    #g.remove_nodes_from(list(nx.isolates(g)))
 
     #add reference adjacencies if requested
     if reference_adjacencies:
@@ -127,7 +128,7 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len, referen
     #adding labels to query edges
     for u, v, _key in g.edges:
         if _key != SEQUENCE_KEY:
-            g[u][v][_key]["label"] = "\"R:{0}\"".format(g[u][v][_key]["weight"])
+            g[u][v][_key]["label"] = "R:{0}".format(g[u][v][_key]["weight"])
 
     #adding colors
     key_to_color = {}
@@ -148,54 +149,75 @@ def build_graph(read_segments, kmer_size, min_coverage, max_genomic_len, referen
     return g, key_to_color
 
 
-def add_legend(key_to_color, in_dot, out_dot):
-    with open(in_dot, "r") as fin, open(out_dot, "w") as fout:
-        for line in fin:
-            if line.startswith("graph"):
-                fout.write("graph {\n")
-                fout.write("edge [penwidth=2];\n")
-                fout.write("subgraph cluster_01 {\n\tlabel = \"Legend\";\n\tnode [shape=point]\n{\n\trank=same\n")
+def add_legend(key_to_color, fout):
+    fout.write("subgraph cluster_01 {\n\tlabel = \"Legend\";\n\tnode [shape=point]\n{\n\trank=same\n")
 
-                for i, (key, color) in enumerate(key_to_color.items()):
-                    node_1 = "legend_{0}_1".format(i)
-                    node_2 = "legend_{0}_2".format(i)
-                    fout.write("\t{0} -- {1} [color={2}, label=\"{3}\"];\n".format(node_1, node_2, color, key))
+    for i, (key, color) in enumerate(key_to_color.items()):
+        node_1 = "legend_{0}_1".format(i)
+        node_2 = "legend_{0}_2".format(i)
+        fout.write("\t{0} -- {1} [color={2}, label=\"{3}\"];\n".format(node_1, node_2, color, key))
+    fout.write("}\n};\n")
 
-                fout.write("\t}\n};\n")
-            else:
-                fout.write(line)
+
+def output_connected_components(graph, out_stream, target_genomes, control_genomes):
+    #compute target-normal rank
+    components_list = []
+    for cc in nx.connected_components(graph):
+        target_adj = set()
+        control_adj = set()
+        for u, v, key in graph.edges(cc, keys=True):
+            if key in target_genomes:
+                target_adj.add((u, v))
+            if key in control_genomes:
+                control_adj.add((u, v))
+
+        target_adj = len(target_adj)
+        control_adj = len(control_adj)
+        rank = None
+        if target_adj > 0 and control_adj == 0:
+            rank = target_adj + 100
+        elif target_adj == 0 and control_adj == 0:
+            rank = -100
+        elif target_adj == 0 and control_adj > 0:
+            rank = -control_adj
+        else:
+            rank = target_adj / control_adj
+
+        components_list.append((rank, cc))
+
+    #output in rank order as subclusters
+    components_list.sort(key=lambda p: p[0], reverse=True)
+    for subgr_num, (rank, cc) in enumerate(components_list):
+        out_stream.write("subgraph cluster{0} {{\n".format(subgr_num))
+
+        for n in cc:
+            properties = []
+            for key in graph.nodes[n]:
+                properties.append("{0}=\"{1}\"".format(key, graph.nodes[n][key]))
+            out_stream.write("{0} [{1}];\n".format(n, ",".join(properties)))
+
+        for u, v, key in graph.edges(cc, keys=True):
+            properties = []
+            for prop in graph[u][v][key]:
+                properties.append("{0}=\"{1}\"".format(prop, graph[u][v][key][prop]))
+            out_stream.write("{0} -- {1} [{2}];\n".format(u, v, ",".join(properties)))
+
+        out_stream.write("}\n\n")
 
 
 def build_breakpoint_graph(reads_segments_path, min_support, reference_adjacencies,
-                           out_file, max_genomic_len):
-    KMER = 1
-    graph, key_to_color = build_graph(reads_segments_path, KMER, min_support, max_genomic_len, reference_adjacencies)
-    tmp_graph = out_file + "_tmp"
-    nx.drawing.nx_pydot.write_dot(graph, tmp_graph)
-    add_legend(key_to_color, tmp_graph, out_file)
-    os.remove(tmp_graph)
+                           out_file, max_genomic_len, target_genomes, control_genomes):
+    graph, key_to_color = build_graph(reads_segments_path, min_support, max_genomic_len, reference_adjacencies)
 
+    with open(out_file, "w") as out_stream:
+        out_stream.write("graph {\n")
+        out_stream.write("edge [penwidth=2];\n")
 
-"""
-def main():
-    parser = argparse.ArgumentParser \
-        (description="Build breakpoint graph")
+        add_legend(key_to_color, out_stream)
+        output_connected_components(graph, out_stream, target_genomes, control_genomes)
 
-    parser.add_argument("--reads", dest="reads_path",
-                        metavar="path", required=True,
-                        help="path to read breakpints file")
-    parser.add_argument("--out", dest="out_graph",
-                        default=None, required=True,
-                        metavar="path", help="Output graph")
-    parser.add_argument("--min-coverage", dest="min_coverage",
-                        metavar="int", type=int, required=True, default=2,
-                        help="Minimum read coverage for breakpoint edge")
-    args = parser.parse_args()
+        out_stream.write("}\n")
 
-    graph = build_graph(args.reads_path, KMER, args.min_coverage, MAX_GENOMIC_LEN)
-    nx.drawing.nx_pydot.write_dot(graph, args.out_graph)
-
-
-if __name__ == "__main__":
-    main()
-"""
+    #tmp_graph = out_file + "_tmp"
+    #nx.drawing.nx_pydot.write_dot(graph, tmp_graph)
+    #os.remove(tmp_graph)

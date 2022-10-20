@@ -146,19 +146,11 @@ def get_breakpoints(all_reads, split_reads, clust_len, max_unaligned_len,  min_r
             if abs(s1.read_end - s2.read_start) > max_unaligned_len:
                 continue
 
-            #if s1.ref_id != s2.ref_id:
-            #    raise Exception("Inter-contig connection!")
-
             ref_bp_1 = s1.ref_end if s1.strand == "+" else s1.ref_start
             ref_bp_2 = s2.ref_start if s2.strand == "+" else s2.ref_end
 
             sign_1 = 1 if s1.strand == "+" else -1
             sign_2 = -1 if s2.strand == "+" else 1
-            #conn_1 = ref_bp_1 if s1.strand == "+" else -ref_bp_1
-            #conn_2 = -ref_bp_2 if s2.strand == "+" else ref_bp_2
-
-            #seq_breakpoints[s1.ref_id].append(ReadConnection(s1.ref_id, ref_bp_1, conn_1, conn_2, s1.haplotype))
-            #seq_breakpoints[s2.ref_id].append(ReadConnection(s2.ref_id, ref_bp_2, conn_2, conn_1, s1.haplotype))
 
             seq_breakpoints[s1.ref_id].append(ReadConnection(s1.ref_id, ref_bp_1, sign_1, s2.ref_id, ref_bp_2, sign_2,
                                                              s1.haplotype, s2.haplotype, s1.read_id, s1.genome_id))
