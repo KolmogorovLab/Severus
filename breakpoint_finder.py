@@ -113,18 +113,18 @@ def resolve_overlaps(split_reads, min_ovlp_len, max_overlap):
 
             if max_overlap > left_ovlp and left_ovlp > 0:
                 if seg.strand == "+":
-                    seg = seg._replace(read_start = seg.read_start + left_ovlp,
-                                       ref_start = seg.ref_start + left_ovlp)
+                    seg.read_start = seg.read_start + left_ovlp
+                    seg.ref_start = seg.ref_start + left_ovlp
                 else:
-                    seg = seg._replace(read_start = seg.read_start + left_ovlp,
-                                       ref_end = seg.ref_end - left_ovlp)
+                    seg.read_start = seg.read_start + left_ovlp
+                    seg.ref_end = seg.ref_end - left_ovlp
             if max_overlap > right_ovlp and right_ovlp > 0:
                 if seg.strand == "+":
-                    seg = seg._replace(read_end = seg.read_end - right_ovlp,
-                                       ref_end = seg.ref_end - right_ovlp)
+                    seg.read_end = seg.read_end - right_ovlp
+                    seg.ref_end = seg.ref_end - right_ovlp
                 else:
-                    seg = seg._replace(read_end = seg.read_end - right_ovlp,
-                                       ref_start = seg.ref_start + right_ovlp)
+                    seg.read_end = seg.read_end - right_ovlp
+                    seg.ref_start = seg.ref_start + right_ovlp
 
             upd_segments.append(seg)
 
