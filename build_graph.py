@@ -48,9 +48,9 @@ def build_graph(read_segments, min_coverage, max_genomic_len, reference_adjacenc
                 g.add_node(right_kmer)
 
             if g.has_edge(left_kmer, right_kmer, key=genome_id):
-                g[left_kmer][right_kmer][genome_id]["weight"] = g[left_kmer][right_kmer][genome_id]["weight"] + 1
+                g[left_kmer][right_kmer][genome_id]["support"] = g[left_kmer][right_kmer][genome_id]["support"] + 1
             else:
-                g.add_edge(left_kmer, right_kmer, key=genome_id, weight=1, style=edge_style)
+                g.add_edge(left_kmer, right_kmer, key=genome_id, support=1, style=edge_style)
 
     genome_segments = []
     breakpoints_coverage = defaultdict(int)
@@ -97,14 +97,14 @@ def build_graph(read_segments, min_coverage, max_genomic_len, reference_adjacenc
 
         has_adjacency = False
         for u, v, _key in g.edges(node_to_id(node), keys=True):
-            if _key == genome_id and g[u][v][_key]["weight"] >= min_coverage:
+            if _key == genome_id and g[u][v][_key]["support"] >= min_coverage:
                 has_adjacency = True
 
         if not has_adjacency:
             new_node = "hanging_{0}".format(hanging_num)
             hanging_num += 1
             g.add_node(new_node, label="", shape="point")
-            g.add_edge(node_to_id(node), new_node, key=genome_id, weight=multiplicity, style="dashed")
+            g.add_edge(node_to_id(node), new_node, key=genome_id, support=multiplicity, style="dashed")
 
     #remove edges with low coverage
     edges_to_delete = set()
@@ -113,7 +113,7 @@ def build_graph(read_segments, min_coverage, max_genomic_len, reference_adjacenc
         if _key == SEQUENCE_KEY:
             continue
 
-        if g[u][v][_key]["weight"] < min_coverage:
+        if g[u][v][_key]["support"] < min_coverage:
             edges_to_delete.add((u, v, _key))
         else:
             safe_edges.add((u, v))
@@ -127,17 +127,18 @@ def build_graph(read_segments, min_coverage, max_genomic_len, reference_adjacenc
     #g.remove_nodes_from(list(nx.isolates(g)))
 
     #add reference adjacencies if requested
-    if reference_adjacencies:
-        for n in node_ids:
-            if n.startswith("+"):
-                other_n = "-" + n[1:]
-                if other_n in node_ids and g.has_node(node_ids[n]) and g.has_node(node_ids[other_n]):
-                    g.add_edge(node_ids[n], node_ids[other_n], style="dashed", key=SEQUENCE_KEY)
+    ref_style = "dashed" if reference_adjacencies else "invis"
+    for n in node_ids:
+        if n.startswith("+"):
+            other_n = "-" + n[1:]
+            if other_n in node_ids and g.has_node(node_ids[n]) and g.has_node(node_ids[other_n]):
+                g.add_edge(node_ids[n], node_ids[other_n], style=ref_style, weight="0",
+                           contraint="false", key=SEQUENCE_KEY)
 
     #adding labels to query edges
     for u, v, _key in g.edges:
         if _key != SEQUENCE_KEY:
-            g[u][v][_key]["label"] = "R:{0}".format(g[u][v][_key]["weight"])
+            g[u][v][_key]["label"] = "R:{0}".format(g[u][v][_key]["support"])
 
     #adding colors
     key_to_color = {}
@@ -195,12 +196,13 @@ def output_connected_components(graph, out_stream, target_genomes, control_genom
         else:
             rank = target_adj / control_adj
 
-        components_list.append((rank, cc))
+        components_list.append((rank, cc, target_adj, control_adj))
 
     #output in rank order as subclusters
     components_list.sort(key=lambda p: p[0], reverse=True)
-    for subgr_num, (rank, cc) in enumerate(components_list):
+    for subgr_num, (rank, cc, target_adj, control_adj) in enumerate(components_list):
         out_stream.write("subgraph cluster{0} {{\n".format(subgr_num))
+        #print(subgr_num, target_adj, control_adj, rank)
 
         for n in cc:
             properties = []
