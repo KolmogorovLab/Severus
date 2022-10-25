@@ -117,7 +117,7 @@ def main():
     MIN_MAPQ = 10
     #MIN_DOUBLE_BP_READS = 5
     MIN_REF_FLANK = 0
-    MAX_GENOMIC_LEN = 1000000
+    MAX_GENOMIC_LEN = 100000
 
     #breakpoint
     BP_CLUSTER_SIZE = 100
@@ -161,7 +161,7 @@ def main():
                         default=False, help="draw reference adjacencies")
     parser.add_argument("--max-genomic-len", dest="max_genomic_len",
                         default=MAX_GENOMIC_LEN, metavar="int", type=int,
-                        help="maximum length of genomic segment to form connected components [1000000]")
+                        help="maximum length of genomic segment to form connected components [100000]")
     args = parser.parse_args()
 
     if args.control_bam is None:
