@@ -139,23 +139,41 @@ def get_breakpoints(all_reads, split_reads, clust_len, max_unaligned_len,  min_r
     two different parts of the genome
     """
     seq_breakpoints = defaultdict(list)
+
+    def _signed_breakpoint(seg, direction):
+        ref_bp, sign = None, None
+        if direction == "right":
+            ref_bp = seg.ref_end if seg.strand == "+" else seg.ref_start
+            sign = 1 if seg.strand == "+" else -1
+        elif direction == "left":
+            ref_bp = seg.ref_start if seg.strand == "+" else seg.ref_end
+            sign = -1 if seg.strand == "+" else 1
+        return ref_bp, sign
+
+    def _add_double(seg_1, seg_2):
+        ref_bp_1, sign_1 = _signed_breakpoint(s1, "right")
+        ref_bp_2, sign_2 = _signed_breakpoint(s2, "left")
+        seq_breakpoints[s1.ref_id].append(ReadConnection(s1.ref_id, ref_bp_1, sign_1, s2.ref_id, ref_bp_2, sign_2,
+                                                         s1.haplotype, s2.haplotype, s1.read_id, s1.genome_id))
+        seq_breakpoints[s2.ref_id].append(ReadConnection(s2.ref_id, ref_bp_2, sign_2, s1.ref_id, ref_bp_1, sign_1,
+                                                             s2.haplotype, s1.haplotype, s2.read_id, s2.genome_id))
+
+    def _add_single(seg, direction):
+        ref_bp, sign = _signed_breakpoint(seg, direction)
+        seq_breakpoints[seg.ref_id].append(ReadConnection(seg.ref_id, ref_bp, sign, None, None, None,
+                                                          seg.haplotype, None, seg.read_id, seg.genome_id))
+
     for read_segments in split_reads:
+        #_add_single(split_reads[0], "left")
+        #_add_single(split_reads[-1], "right")
         for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
 
             #TODO: consider cases with inserted sequence
-            if abs(s1.read_end - s2.read_start) > max_unaligned_len:
-                continue
-
-            ref_bp_1 = s1.ref_end if s1.strand == "+" else s1.ref_start
-            ref_bp_2 = s2.ref_start if s2.strand == "+" else s2.ref_end
-
-            sign_1 = 1 if s1.strand == "+" else -1
-            sign_2 = -1 if s2.strand == "+" else 1
-
-            seq_breakpoints[s1.ref_id].append(ReadConnection(s1.ref_id, ref_bp_1, sign_1, s2.ref_id, ref_bp_2, sign_2,
-                                                             s1.haplotype, s2.haplotype, s1.read_id, s1.genome_id))
-            seq_breakpoints[s2.ref_id].append(ReadConnection(s2.ref_id, ref_bp_2, sign_2, s1.ref_id, ref_bp_1, sign_1,
-                                                             s2.haplotype, s1.haplotype, s2.read_id, s2.genome_id))
+            if abs(s1.read_end - s2.read_start) <= max_unaligned_len:
+                _add_double(s1, s2)
+            #else:
+            #    _add_single(s1, "right")
+            #    _add_single(s2, "left")
 
     bp_clusters = defaultdict(list)
     for seq, bp_pos in seq_breakpoints.items():
