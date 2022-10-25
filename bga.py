@@ -6,6 +6,7 @@ import pysam
 import argparse
 import os
 import math
+from multiprocessing import Pool
 
 from build_graph import build_breakpoint_graph
 from bam_processing import get_all_reads_parallel, get_segments_coverage
@@ -13,7 +14,7 @@ from breakpoint_finder import resolve_overlaps, get_breakpoints, get_2_breaks, D
 
 
 def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligned_len, bam_files, compute_coverage,
-                               num_threads, ref_lengths, out_file):
+                               thread_pool, ref_lengths, out_file, min_mapq):
     """
     For each read, generate the list of breakpints
     """
@@ -97,7 +98,7 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligne
 
     seg_coverage = {}
     if compute_coverage:
-        seg_coverage = get_segments_coverage(bam_files, segments, num_threads)
+        seg_coverage = get_segments_coverage(bam_files, segments, thread_pool)
 
     for seq, start, end in segments:
         label_1 = "-{0}:{1}".format(seq, start)
@@ -192,13 +193,15 @@ def main():
     out_breakpoints_per_read = os.path.join(args.out_dir, "read_breakpoints")
     out_breakpoint_graph = os.path.join(args.out_dir, "breakpoint_graph.dot")
 
+    thread_pool = Pool(args.threads)
+
     aln_dump_stream = open(os.path.join(args.out_dir, "read_alignments"), "w")
     all_reads = []
     split_reads = []
     for bam_file in all_bams:
         genome_tag = os.path.basename(bam_file)
         print("Parsing reads from", genome_tag, file=sys.stderr)
-        genome_reads = get_all_reads_parallel(bam_file, args.threads, aln_dump_stream,
+        genome_reads = get_all_reads_parallel(bam_file, thread_pool, aln_dump_stream,
                                               args.max_read_error, args.min_mapping_quality, genome_tag)
         all_reads.extend(genome_reads)
 
@@ -212,7 +215,7 @@ def main():
     all_breaks, balanced_breaks = get_2_breaks(bp_clusters, BP_CLUSTER_SIZE, args.bp_min_support)
 
     enumerate_read_breakpoints(split_reads, bp_clusters, BP_CLUSTER_SIZE, MAX_UNALIGNED_LEN, all_bams,
-                               True, args.threads, ref_lengths, out_breakpoints_per_read)
+                               True, thread_pool, ref_lengths, out_breakpoints_per_read)
 
     output_single_breakpoints(bp_clusters, out_single_bp)
     output_breaks(all_breaks, open(out_breaks, "w"))

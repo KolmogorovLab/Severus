@@ -16,8 +16,24 @@ MAX_SEGMENTS = 10
 MIN_SEGMENT_LENGTH = 100
 
 
-ReadSegment = namedtuple("ReadSegment", ["read_start", "read_end", "ref_start", "ref_end", "read_id", "ref_id",
-                                         "strand", "read_length", "haplotype", "mapq", "genome_id"])
+#ReadSegment = namedtuple("ReadSegment", ["read_start", "read_end", "ref_start", "ref_end", "read_id", "ref_id",
+#                                         "strand", "read_length", "haplotype", "mapq", "genome_id"])
+class ReadSegment(object):
+    __slots__ = ("read_start", "read_end", "ref_start", "ref_end", "read_id", "ref_id",
+                 "strand", "read_length", "haplotype", "mapq", "genome_id")
+
+    def __init__(self, read_start, read_end, ref_start, ref_end, read_id, ref_id,
+                 strand, read_length, haplotype, mapq, genome_id):
+        self.read_start = read_start
+        self.read_end = read_end
+        self.ref_start = ref_start
+        self.ref_end = ref_end
+        self.read_id = read_id
+        self.strand = strand
+        self.read_length = read_length
+        self.haplotype = haplotype
+        self.mapq = mapq
+        self.genome_id = genome_id
 
 
 #TODO: merge with get_segment below
@@ -234,15 +250,16 @@ def get_split_reads(bam_file, ref_id, max_read_error, min_mapq, genome_id):
     return filtered_reads, alignments
 
 
-def get_all_reads_parallel(bam_file, num_threads, aln_dump_stream, max_read_error, min_mapq, genome_id):
+def get_all_reads_parallel(bam_file, thread_pool, aln_dump_stream, max_read_error,
+                           min_mapq, genome_id):
 
     all_reference_ids = [r for r in pysam.AlignmentFile(bam_file, "rb").references]
     random.shuffle(all_reference_ids)
     tasks = [(bam_file, r, max_read_error, min_mapq, genome_id) for r in all_reference_ids]
 
     parsing_results = None
-    with Pool(num_threads) as p:
-        parsing_results = p.starmap(get_split_reads, tasks)
+    #with Pool(num_threads) as p:
+    parsing_results = thread_pool.starmap(get_split_reads, tasks)
 
     all_filtered_reads = set()
     segments_by_read = defaultdict(list)
@@ -268,15 +285,15 @@ def get_all_reads_parallel(bam_file, num_threads, aln_dump_stream, max_read_erro
     return all_reads
 
 
-def get_segments_coverage(bam_files, segments, num_threads):
+def get_segments_coverage(bam_files, segments, thread_pool):
     print("Computing segments coverage", file=sys.stderr)
 
     random.shuffle(segments)
     tasks = [(bam_files, s[0], s[1], s[2]) for s in segments]
 
     seg_coverage = None
-    with Pool(num_threads) as p:
-        seg_coverage = p.starmap(_get_median_depth, tasks)
+    #with Pool(num_threads) as p:
+    seg_coverage = thread_pool.starmap(_get_median_depth, tasks)
 
     coverage_map = {}
     for seg, coverage in zip(segments, seg_coverage):
