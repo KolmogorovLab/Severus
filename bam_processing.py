@@ -36,6 +36,12 @@ class ReadSegment(object):
         self.mapq = mapq
         self.genome_id = genome_id
 
+    def __str__(self):
+        return "".join(["read_start=", str(self.read_start), " read_end=", str(self.read_end), " ref_start=", str(self.ref_start),
+                         " ref_end=", str(self.ref_end), " read_id=", str(self.read_id), " ref_id=", str(self.ref_id), " strand=", str(self.strand),
+                         " read_length=", str(self.read_length), " haplotype=", str(self.haplotype),
+                         " mapq=", str(self.mapq), " genome_id=", str(self.genome_id)])
+
 
 #TODO: merge with get_segment below
 ReadSegmentLegacy = namedtuple("ReadSegmentLegacy", ["read_start", "read_end", "ref_start", "ref_end", "read_id", "ref_id",
