@@ -29,6 +29,7 @@ class ReadSegment(object):
         self.ref_start = ref_start
         self.ref_end = ref_end
         self.read_id = read_id
+        self.ref_id = ref_id
         self.strand = strand
         self.read_length = read_length
         self.haplotype = haplotype
