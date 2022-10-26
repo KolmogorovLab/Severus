@@ -133,7 +133,8 @@ def resolve_overlaps(split_reads, min_ovlp_len, max_overlap):
     return new_reads
 
 
-def get_breakpoints(all_reads, split_reads, clust_len, max_unaligned_len,  min_reads, min_ref_flank, ref_lengths):
+def get_breakpoints(all_reads, split_reads, clust_len, max_unaligned_len,
+                    min_reads, min_ref_flank, ref_lengths, min_mapq):
     """
     Finds regular 1-sided breakpoints, where split reads consistently connect
     two different parts of the genome
@@ -164,16 +165,20 @@ def get_breakpoints(all_reads, split_reads, clust_len, max_unaligned_len,  min_r
                                                           seg.haplotype, None, seg.read_id, seg.genome_id))
 
     for read_segments in split_reads:
-        #_add_single(split_reads[0], "left")
-        #_add_single(split_reads[-1], "right")
-        for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
+        #if read_segments[0].mapq >= min_mapq:
+        #    _add_single(read_segments[0], "left")
+        #if read_segments[-1].mapq >= min_mapq:
+        #    _add_single(read_segments[-1], "right")
 
+        for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
             #TODO: consider cases with inserted sequence
-            if abs(s1.read_end - s2.read_start) <= max_unaligned_len:
+            if abs(s1.read_end - s2.read_start) <= max_unaligned_len and s1.mapq >= min_mapq and s2.mapq >= min_mapq:
                 _add_double(s1, s2)
-            #else:
-            #    _add_single(s1, "right")
-            #    _add_single(s2, "left")
+            else:
+                if s1.mapq >= min_mapq:
+                    _add_single(s1, "right")
+                if s2.mapq >= min_mapq:
+                    _add_single(s2, "left")
 
     bp_clusters = defaultdict(list)
     for seq, bp_pos in seq_breakpoints.items():
@@ -236,6 +241,11 @@ def get_2_breaks(bp_clusters, clust_len, min_connections):
     for seq in bp_clusters:
         for cl in bp_clusters[seq]:
             for conn in cl.connections:
+
+                #single breakpoint
+                if conn.ref_id_2 is None:
+                    continue
+
                 #normalizing the coordinates of the original read, wrt to clustered breakpoint coordinates
                 dir_1, bp_1 = _normalize_coord(conn.signed_coord_1(), bp_clusters[conn.ref_id_1])
                 dir_2, bp_2 = _normalize_coord(conn.signed_coord_2(), bp_clusters[conn.ref_id_2])

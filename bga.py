@@ -33,7 +33,7 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligne
         for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
 
             #TODO: consider cases with inserted sequence
-            if abs(s1.read_end - s2.read_start) > max_unaligned_len:
+            if abs(s1.read_end - s2.read_start) > max_unaligned_len or s1.mapq < min_mapq or s2.mapq < min_mapq:
                 continue
 
             ref_bp_1 = s1.ref_end if s1.strand == "+" else s1.ref_start
@@ -59,7 +59,10 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligne
         #output all single breakpoints
         single_bps = []
         genome_id = read_segments[0].genome_id
-        for seg in read_segments:
+        for i, seg in enumerate(read_segments):
+            if seg.mapq < min_mapq:
+                continue
+
             ref_bp_1 = seg.ref_start if seg.strand == "+" else seg.ref_end
             sign_1 = -1 if seg.strand == "+" else 1
             _, bp_1 = _normalize_coord(sign_1 * ref_bp_1, bp_clusters[seg.ref_id])
@@ -68,12 +71,12 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligne
             sign_2 = 1 if seg.strand == "+" else -1
             _, bp_2 = _normalize_coord(sign_2 * ref_bp_2, bp_clusters[seg.ref_id])
 
-            if bp_1 is not None:
+            if i > 0 and bp_1 is not None:
                 strand_1 = "+" if sign_1 > 0 else "-"
                 label_1 = "{0}{1}:{2}".format(strand_1, bp_1.ref_id, bp_1.position)
                 single_bps.append(label_1)
 
-            if bp_2 is not None:
+            if i < len(read_segments) - 1 and bp_2 is not None:
                 strand_2 = "+" if sign_2 > 0 else "-"
                 label_2 = "{0}{1}:{2}".format(strand_2, bp_2.ref_id, bp_2.position)
                 single_bps.append(label_2)
@@ -211,11 +214,11 @@ def main():
 
     split_reads = resolve_overlaps(split_reads, MIN_SEGMENT_OVERLAP, MAX_SEGEMNT_OVERLAP)
     bp_clusters = get_breakpoints(all_reads, split_reads, BP_CLUSTER_SIZE, MAX_UNALIGNED_LEN,
-                                  args.bp_min_support, args.min_ref_flank, ref_lengths)
+                                  args.bp_min_support, args.min_ref_flank, ref_lengths, args.min_mapping_quality)
     all_breaks, balanced_breaks = get_2_breaks(bp_clusters, BP_CLUSTER_SIZE, args.bp_min_support)
 
     enumerate_read_breakpoints(split_reads, bp_clusters, BP_CLUSTER_SIZE, MAX_UNALIGNED_LEN, all_bams,
-                               True, thread_pool, ref_lengths, out_breakpoints_per_read)
+                               True, thread_pool, ref_lengths, out_breakpoints_per_read, args.min_mapping_quality)
 
     output_single_breakpoints(bp_clusters, out_single_bp)
     output_breaks(all_breaks, open(out_breaks, "w"))

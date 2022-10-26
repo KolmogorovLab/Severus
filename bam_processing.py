@@ -251,7 +251,7 @@ def get_split_reads(bam_file, ref_id, max_read_error, min_mapq, genome_id):
             haplotype = int(hp_tag)
 
         new_segment = get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq, genome_id)
-        if new_segment.mapq >= min_mapq and new_segment.read_end - new_segment.read_start >= MIN_SEGMENT_LENGTH:
+        if new_segment.read_end - new_segment.read_start >= MIN_SEGMENT_LENGTH:
             alignments.append(new_segment)
 
     return filtered_reads, alignments
