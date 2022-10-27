@@ -158,7 +158,7 @@ def main():
     parser.add_argument("--max-read-error", dest="max_read_error",
                         default=MAX_READ_ERROR, metavar="float", type=float, help="maximum base alignment error [0.1]")
     parser.add_argument("--min-mapq", dest="min_mapping_quality",
-                        default=MIN_MAPQ, metavar="int", type=int, help="minimum mapping quality for aligned segment [1]")
+                        default=MIN_MAPQ, metavar="int", type=int, help="minimum mapping quality for aligned segment [10]")
     #parser.add_argument("--coverage", action="store_true", dest="coverage",
     #                    default=True, help="add coverage info to breakpoint graphs")
     parser.add_argument("--reference-adjacencies", action="store_true", dest="reference_adjacencies",
