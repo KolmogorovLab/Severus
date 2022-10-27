@@ -1,6 +1,6 @@
 # Breakpoint graph assembler
 
-A work-in-progress tool to build breakpoint graphs for one or multiple long-read cancer samples.
+A tool to build breakpoint graphs for one or multiple long-read cancer samples. This is work in progress and subject to frequent updates. 
 
 <img width="1373" alt="bp_example" src="https://user-images.githubusercontent.com/2475380/198373853-a606ef10-63f9-4bde-b72f-31a249a38948.png">
 
