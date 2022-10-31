@@ -1,6 +1,9 @@
 # Breakpoint graph assembler
 
-A proof-of-consept script to identify breakpoints from long read alignment and build breakpoint graphs.
+A tool to build breakpoint graphs for one or multiple long-read cancer samples. This is work in progress and subject to frequent updates. 
+
+<img width="1373" alt="bp_example" src="https://user-images.githubusercontent.com/2475380/198373853-a606ef10-63f9-4bde-b72f-31a249a38948.png">
+
 
 ## Installation
 
@@ -16,22 +19,29 @@ The easiest way to install dependencies is through conda.
 ## Running
 
 ```
-./bga.py -b grcm39/grcm39_m4_c11.bam -o out_breakpoints -t 16 --min-support 3 --max-read-error 0.01 --min-reference-flank 500 --coverage
-dot -Tsvg -O out_breakpoints/breakpoint_grpah.dot
+./bga.py --target-bam tumor.bam --control-bam normal.bam --out-dir bga_out -t 16 --min-support 5 --max-read-error 0.01
+dot -Tsvg -O bga_out/breakpoint_grpah.dot
 ```
+The primary output is the breakpoint graph, like on the example above. Black edges correspond to the fragments of the reference genome,
+and dashed colored edges correspond to non-reference connections from reads. Each breakpoint is defined by its coordinate
+and sign. Plus sign corresponds to connection to the left of breakpoint (reference coordinates), and minus - to the right.
 
-This will generate a number of files with breakpoint information, and visualization in `breakpoint_graph.dot.svg`.
+Providing control bams is optional, but recommended. Ideally, it is a matching normal sample. But this could be any unrelated,
+non-cancerous sample as well. This helps to filter out many regions with uncertain alignemnt due to mapping difficulties or reference bias. 
+If control bams are provided, the output will prioritize connected components with adjacencies that are unique for "target" bams.
 
-## Parameters
+## Important parameters
 
-* `-b` and `-o`: Paths to input bam (must be sorted and indexed) and output difrectory respectively.
+* `--target-bam` path to one or multiple target bam files (must be indexed)
+  
+* `--control-bam` path to one or multiple control bam files (must be indexed)
+  
+* `--min-support` minimum number of reads supporting a breakpoint [5]
+  
+* `--max-read-error` maximum base alignment error for read [0.1]. Setting to `0.01` is resommended for HiFi.
+  
+* `--min-mapq` minimum mapping quality for aligned segment [10]
 
-* `-t` controlds the number of threads
+* `--reference-adjacencies` draw reference adjacencies (as dashed black edges)
 
-* `--min-support`: the minimum number of reads that support breakpoint. Should be adjusted depending on the dataset coverage 
-
-* `--max-read-error`: maximum base-level read error. The recommended is `0.1` for ONT and `0.01` for PacBio HiFi
-
-* `--min-reference-flank`: minimum distance from the end of reference sequence for a breakpoint. Could be set to 0 for specific datasets, for example containing HPV.
-
-* `--coverage`: enable computing genomic segments coverage
+* `--max-genomic-len` maximum length of genomic segment to form connected components [100000]
