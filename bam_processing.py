@@ -206,7 +206,7 @@ def get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq, geno
                        ref_id, strand, read_length, haplotype, mapq, genome_id)
 
 
-def get_split_reads(bam_file, ref_id, max_read_error, min_mapq, genome_id):
+def get_split_reads(bam_file, region, max_read_error, min_mapq, genome_id):
     """
     Yields set of split reads for each contig separately. Only reads primary alignments
     and infers the split reads from SA alignment tag
@@ -214,8 +214,10 @@ def get_split_reads(bam_file, ref_id, max_read_error, min_mapq, genome_id):
     filtered_reads = set()
     alignments = []
 
+    ref_id, region_start, region_end = region
+
     aln_file = pysam.AlignmentFile(bam_file, "rb")
-    for aln in aln_file.fetch(ref_id, multiple_iterators=True):
+    for aln in aln_file.fetch(ref_id, region_start, region_end,  multiple_iterators=True):
         fields = aln.to_string().split()
         read_id, flags, chr_id, position = fields[0:4]
         cigar = fields[5]
@@ -257,12 +259,22 @@ def get_split_reads(bam_file, ref_id, max_read_error, min_mapq, genome_id):
     return filtered_reads, alignments
 
 
-def get_all_reads_parallel(bam_file, thread_pool, aln_dump_stream, max_read_error,
+def get_all_reads_parallel(bam_file, thread_pool, aln_dump_stream, ref_lengths, max_read_error,
                            min_mapq, genome_id):
-
+    CHUNK_SIZE = 10000000
     all_reference_ids = [r for r in pysam.AlignmentFile(bam_file, "rb").references]
-    random.shuffle(all_reference_ids)
-    tasks = [(bam_file, r, max_read_error, min_mapq, genome_id) for r in all_reference_ids]
+    fetch_list = []
+    for ctg in all_reference_ids:
+        ctg_len = ref_lengths[ctg]
+        for i in range(0, max(ctg_len // CHUNK_SIZE, 1)):
+            reg_start = i * CHUNK_SIZE
+            reg_end = (i + 1) * CHUNK_SIZE
+            if ctg_len - reg_end < CHUNK_SIZE:
+                reg_end = ctg_len
+            fetch_list.append((ctg, reg_start, reg_end))
+
+    #random.shuffle(all_reference_ids)
+    tasks = [(bam_file, region, max_read_error, min_mapq, genome_id) for region in fetch_list]
 
     parsing_results = None
     #with Pool(num_threads) as p:
@@ -278,14 +290,21 @@ def get_all_reads_parallel(bam_file, thread_pool, aln_dump_stream, max_read_erro
     all_reads = []
     for read in segments_by_read:
         if read not in all_filtered_reads:
+            segments = segments_by_read[read]
+            segments.sort(key=lambda s: s.read_start)
+
+            #remove possible duplicates around chunk borders
+            dedup_segments = []
+            for seg in segments:
+                if not dedup_segments or dedup_segments[-1].read_start != seg.read_start:
+                    dedup_segments.append(seg)
+            all_reads.append(dedup_segments)
+
             aln_dump_stream.write(str(read) + "\n")
-            for seg in segments_by_read[read]:
+            for seg in dedup_segments:
                 aln_dump_stream.write(str(seg) + "\n")
             aln_dump_stream.write("\n")
 
-            segments = segments_by_read[read]
-            segments.sort(key=lambda s: s.read_start)
-            all_reads.append(segments)
         #else:
         #    four.write("Filtered: " + str(read))
 

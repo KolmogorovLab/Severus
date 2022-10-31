@@ -204,7 +204,7 @@ def main():
     for bam_file in all_bams:
         genome_tag = os.path.basename(bam_file)
         print("Parsing reads from", genome_tag, file=sys.stderr)
-        genome_reads = get_all_reads_parallel(bam_file, thread_pool, aln_dump_stream,
+        genome_reads = get_all_reads_parallel(bam_file, thread_pool, aln_dump_stream, ref_lengths,
                                               args.max_read_error, args.min_mapping_quality, genome_tag)
         all_reads.extend(genome_reads)
 
