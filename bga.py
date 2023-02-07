@@ -7,21 +7,20 @@ import argparse
 import os
 import math
 from multiprocessing import Pool
-
+from collections import namedtuple, defaultdict, Counter
 from build_graph import build_breakpoint_graph
-from bam_processing import get_all_reads_parallel, get_segments_coverage
-from breakpoint_finder import resolve_overlaps, get_breakpoints, get_2_breaks, DoubleBreak, output_single_breakpoints, output_breaks
-
+from bam_processing_2 import get_all_reads_parallel
+from breakpoint_finder_6 import resolve_overlaps, get_breakpoints, output_breaks,get_genomicsegments
 
 def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligned_len, bam_files, compute_coverage,
-                               thread_pool, ref_lengths, out_file, min_mapq):
+                               thread_pool, ref_lengths, out_file, min_mapq,sv_size, single_bp):
     """
     For each read, generate the list of breakpints
     """
-    def _normalize_coord(coord, clusters):
-        for cl in clusters:
-            if abs(abs(coord) - cl.position) < clust_len:
-                return int(math.copysign(1, coord)), cl
+    def _normalize_coord(read_id, clusters, coord):
+        for cl1 in clusters:
+            if read_id in cl1.read_ids and coord in cl1.pos2:
+                return int(math.copysign(1, coord)), cl1
         return None, None
 
     fout = open(out_file, "w")
@@ -31,58 +30,50 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligne
         bp_names = []
         genome_id = read_segments[0].genome_id
         for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
-
-            #TODO: consider cases with inserted sequence
-            if abs(s1.read_end - s2.read_start) > max_unaligned_len or s1.mapq < min_mapq or s2.mapq < min_mapq:
+            #not aligned insertions
+            if s1.mapq < min_mapq or s2.mapq < min_mapq:
                 continue
-
             ref_bp_1 = s1.ref_end if s1.strand == "+" else s1.ref_start
             ref_bp_2 = s2.ref_start if s2.strand == "+" else s2.ref_end
-
             sign_1 = 1 if s1.strand == "+" else -1
             sign_2 = -1 if s2.strand == "+" else 1
-
-            _, bp_1 = _normalize_coord(sign_1 * ref_bp_1, bp_clusters[s1.ref_id])
-            _, bp_2 = _normalize_coord(sign_2 * ref_bp_2, bp_clusters[s2.ref_id])
-
+            dir_2, bp_2 = _normalize_coord(s1.read_id,bp_clusters[s2.ref_id], sign_1 * ref_bp_2)
+            dir_1, bp_1 = _normalize_coord(s1.read_id,bp_clusters[s1.ref_id], sign_2 * ref_bp_1)
             if not None in [bp_1, bp_2]:
-                strand_1 = "+" if sign_1 > 0 else "-"
-                label_1 = "{0}{1}:{2}".format(strand_1, bp_1.ref_id, bp_1.position)
-                strand_2 = "+" if sign_2 > 0 else "-"
-                label_2 = "{0}{1}:{2}".format(strand_2, bp_2.ref_id, bp_2.position)
-                bp_names.append(label_1)
-                bp_names.append(label_2)
-
+                if abs(bp_1.position - bp_2.position)>= sv_size:
+                    strand_1 = "+" if sign_1 > 0 else "-"
+                    label_1 = "{0}{1}:{2}".format(strand_1, bp_1.ref_id, bp_1.position)
+                    strand_2 = "+" if sign_2 > 0 else "-"
+                    label_2 = "{0}{1}:{2}".format(strand_2, bp_2.ref_id, bp_2.position)
+                    bp_names.append(label_1)
+                    bp_names.append(label_2)
         if len(bp_names) > 0:
-            fout.write("Q {0} {1} {2}\n".format(genome_id, read_segments[0].read_id, " ".join(bp_names)))
-
-        #output all single breakpoints
-        single_bps = []
-        genome_id = read_segments[0].genome_id
-        for i, seg in enumerate(read_segments):
-            if seg.mapq < min_mapq:
-                continue
-
-            ref_bp_1 = seg.ref_start if seg.strand == "+" else seg.ref_end
-            sign_1 = -1 if seg.strand == "+" else 1
-            _, bp_1 = _normalize_coord(sign_1 * ref_bp_1, bp_clusters[seg.ref_id])
-
-            ref_bp_2 = seg.ref_end if seg.strand == "+" else seg.ref_start
-            sign_2 = 1 if seg.strand == "+" else -1
-            _, bp_2 = _normalize_coord(sign_2 * ref_bp_2, bp_clusters[seg.ref_id])
-
-            if i > 0 and bp_1 is not None:
-                strand_1 = "+" if sign_1 > 0 else "-"
-                label_1 = "{0}{1}:{2}".format(strand_1, bp_1.ref_id, bp_1.position)
-                single_bps.append(label_1)
-
-            if i < len(read_segments) - 1 and bp_2 is not None:
-                strand_2 = "+" if sign_2 > 0 else "-"
-                label_2 = "{0}{1}:{2}".format(strand_2, bp_2.ref_id, bp_2.position)
-                single_bps.append(label_2)
-
-        if len(single_bps) > 0:
-            fout.write("S {0} {1} {2}\n".format(genome_id, read_segments[0].read_id, " ".join(single_bps)))
+            fout.write("Q {0} {1} {2} {3} {4}\n".format(genome_id, read_segments[0].read_id,s1.haplotype,s2.haplotype, " ".join(bp_names)))
+        
+        if single_bp:
+            single_bps = []
+            genome_id = read_segments[0].genome_id
+            for i, seg in enumerate(read_segments):
+                if seg.mapq < min_mapq:
+                    continue
+                ref_bp_1 = seg.ref_start if seg.strand == "+" else seg.ref_end
+                sign_1 = -1 if seg.strand == "+" else 1
+                _, bp_1 = _normalize_coord(sign_1 * ref_bp_1, bp_clusters[seg.ref_id])
+                ref_bp_2 = seg.ref_end if seg.strand == "+" else seg.ref_start
+                sign_2 = 1 if seg.strand == "+" else -1
+                _, bp_2 = _normalize_coord(sign_2 * ref_bp_2, bp_clusters[seg.ref_id])
+                if i > 0 and bp_1 is not None:
+                    strand_1 = "+" if sign_1 > 0 else "-"
+                    label_1 = "{0}{1}:{2}".format(strand_1, bp_1.ref_id, bp_1.position)
+                    single_bps.append(label_1)
+                    hap =  s1.haplotype
+                if i < len(read_segments) - 1 and bp_2 is not None:
+                    strand_2 = "+" if sign_2 > 0 else "-"
+                    label_2 = "{0}{1}:{2}".format(strand_2, bp_2.ref_id, bp_2.position)
+                    single_bps.append(label_2)
+                    hap = s2.haplotype
+            if len(single_bps) > 0:
+                fout.write("S {0} {1} {2} {3}\n".format(genome_id, read_segments[0].read_id,hap, " ".join(single_bps)))
 
     #output reference segments
     segments = []
@@ -101,7 +92,7 @@ def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligne
 
     seg_coverage = {}
     if compute_coverage:
-        seg_coverage = get_segments_coverage(bam_files, segments, thread_pool)
+        seg_coverage = get_segments_coverage(bam_files, segments, thread_pool) 
 
     for seq, start, end in segments:
         label_1 = "-{0}:{1}".format(seq, start)
@@ -120,14 +111,16 @@ def main():
     MIN_BREAKPOINT_READS = 3
     MIN_MAPQ = 10
     #MIN_DOUBLE_BP_READS = 5
-    MIN_REF_FLANK = 0
+    MIN_REF_FLANK = 10000
     MAX_GENOMIC_LEN = 100000
+    HPV = False
 
     #breakpoint
-    BP_CLUSTER_SIZE = 100
+    BP_CLUSTER_SIZE = 20
     MIN_SEGMENT_OVERLAP = 100
-    MAX_SEGEMNT_OVERLAP = 500
+    MAX_SEGMENT_OVERLAP = 500
     MAX_UNALIGNED_LEN = 500
+    MIN_SV_SIZE = 50
     #MIN_GRAPH_SUPPORT = 3
 
     SAMTOOLS_BIN = "samtools"
@@ -155,6 +148,10 @@ def main():
     parser.add_argument("--min-reference-flank", dest="min_ref_flank",
                         default=MIN_REF_FLANK, metavar="int", type=int,
                         help="minimum distance between breakpoint and sequence ends [0]")
+    parser.add_argument("--bp_cluster_size", dest="bp_cluster_size",
+                        default=BP_CLUSTER_SIZE, metavar="int", type=int,help="maximum distance in bp cluster[100]")
+    parser.add_argument("--min_sv_size", dest="sv_size",
+                        default=MIN_SV_SIZE, metavar="int", type=int,help="minimim size for sv[50]")
     parser.add_argument("--max-read-error", dest="max_read_error",
                         default=MAX_READ_ERROR, metavar="float", type=float, help="maximum base alignment error [0.1]")
     parser.add_argument("--min-mapq", dest="min_mapping_quality",
@@ -163,9 +160,14 @@ def main():
     #                    default=True, help="add coverage info to breakpoint graphs")
     parser.add_argument("--reference-adjacencies", action="store_true", dest="reference_adjacencies",
                         default=False, help="draw reference adjacencies")
+    parser.add_argument("--write_splitreads", action="store_true", dest="write_splitreads",
+                        default=False, help="write split reads")
+    parser.add_argument("--single_bp", action="store_true", dest="single_bp",
+                        default=False, help="single_bp")
     parser.add_argument("--max-genomic-len", dest="max_genomic_len",
                         default=MAX_GENOMIC_LEN, metavar="int", type=int,
                         help="maximum length of genomic segment to form connected components [100000]")
+    parser.add_argument("--phasing_vcf", dest="hpv",default=HPV, metavar="path", help="vcf file used for phasing")
     args = parser.parse_args()
 
     if args.control_bam is None:
@@ -199,37 +201,34 @@ def main():
     thread_pool = Pool(args.threads)
 
     aln_dump_stream = open(os.path.join(args.out_dir, "read_alignments"), "w")
-    all_reads = []
     split_reads = []
+    ins_list_new=[]
+    all_reads_stat=[]
+    allreads_bisect = defaultdict(list)
+    lowmapq_reg= defaultdict(list)
+    ###AYSE TODO: update with new bamprocessing
     for bam_file in all_bams:
         genome_tag = os.path.basename(bam_file)
+        print('ver_3')
         print("Parsing reads from", genome_tag, file=sys.stderr)
-        genome_reads = get_all_reads_parallel(bam_file, thread_pool, aln_dump_stream, ref_lengths,
-                                              args.max_read_error, args.min_mapping_quality, genome_tag)
-        all_reads.extend(genome_reads)
+        lowmapq_reg,all_reads_stat,all_reads,all_reads_bisect , ins_list = get_all_reads_parallel(bam_file, args.threads, aln_dump_stream, ref_lengths,
+                                              args.max_read_error, args.min_mapping_quality, genome_tag,args.sv_size,args.write_splitreads,
+                                              allreads_bisect,lowmapq_reg,all_reads_stat)
+        split_reads.extend(all_reads)
+        ins_list_new.extend(ins_list)
+        print("Parsed {0} split reads".format(len(all_reads)), file=sys.stderr)
 
-        genome_split_reads = [r for r in genome_reads if len(r) > 1]
-        split_reads.extend(genome_split_reads)
-        print("Parsed {0} reads {1} split reads".format(len(all_reads), len(split_reads)), file=sys.stderr)
+    split_reads = resolve_overlaps(split_reads,  args.sv_size) 
+    print("Parsed {0} split reads".format(len(split_reads)), file=sys.stderr)
+    double_breaks = get_breakpoints(allreads_bisect, split_reads, args.bp_cluster_size, MAX_UNALIGNED_LEN,
+                                  args.bp_min_support, args.min_ref_flank, ref_lengths, args.min_mapping_quality, args.single_bp , lowmapq_reg,args.sv_size,ins_list_new)
+    print("Number of SV found: {0}".format(len(double_breaks)), file=sys.stderr)
+    genomicsegments , hb_points=get_genomicsegments(double_breaks,all_bams, thread_pool,args.hpv)
 
-    split_reads = resolve_overlaps(split_reads, MIN_SEGMENT_OVERLAP, MAX_SEGEMNT_OVERLAP)
-    bp_clusters = get_breakpoints(all_reads, split_reads, BP_CLUSTER_SIZE, MAX_UNALIGNED_LEN,
-                                  args.bp_min_support, args.min_ref_flank, ref_lengths, args.min_mapping_quality)
-    all_breaks, balanced_breaks = get_2_breaks(bp_clusters, BP_CLUSTER_SIZE, args.bp_min_support)
+    genome_tags = list(target_genomes) + list(control_genomes)
+    output_breaks(double_breaks, genome_tags,args.hpv, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
+    build_breakpoint_graph(double_breaks, genomicsegments, hb_points, args.max_genomic_len, args.reference_adjacencies, out_breakpoint_graph, target_genomes, control_genomes)
 
-    enumerate_read_breakpoints(split_reads, bp_clusters, BP_CLUSTER_SIZE, MAX_UNALIGNED_LEN, all_bams,
-                               True, thread_pool, ref_lengths, out_breakpoints_per_read, args.min_mapping_quality)
-
-    output_single_breakpoints(bp_clusters, out_single_bp)
-    output_breaks(all_breaks, open(out_breaks, "w"))
-
-    #out_balanced_breaks = os.path.join(args.out_dir, "breakpoints_balanced.csv")
-    #out_inversions = os.path.join(args.out_dir, "inversions.bed")
-    #output_breaks(balanced_breaks, open(out_balanced_breaks, "w"))
-    #output_inversions(balanced_breaks, open(out_inversions, "w"))
-
-    build_breakpoint_graph(out_breakpoints_per_read, args.bp_min_support, args.reference_adjacencies,
-                           out_breakpoint_graph, args.max_genomic_len, target_genomes, control_genomes)
 
 
 if __name__ == "__main__":
