@@ -52,8 +52,8 @@ class Breakpoint(object):
 
 
 class DoubleBreak(object):
-    __slots__ = "bp_1", "direction_1", "bp_2", "direction_2", "genome_id","haplotype1",'haplotype2',"supp",'length','edgeweight','edgestyle'
-    def __init__(self, bp_1, direction_1, bp_2, direction_2, genome_id,haplotype1,haplotype2,supp,length,edgeweight,edgestyle):
+    __slots__ = "bp_1", "direction_1", "bp_2", "direction_2", "genome_id","haplotype1",'haplotype2',"supp",'supp_read_ids','length','edgeweight','edgestyle','bp_id'
+    def __init__(self, bp_1, direction_1, bp_2, direction_2, genome_id,haplotype1,haplotype2,supp,supp_read_ids,length,edgeweight,edgestyle,bp_id):
         self.bp_1 = bp_1
         self.bp_2 = bp_2
         self.direction_1 = direction_1
@@ -62,9 +62,11 @@ class DoubleBreak(object):
         self.haplotype1 = haplotype1
         self.haplotype2 = haplotype2
         self.supp = supp
+        self.supp_read_ids = supp_read_ids
         self.length = length
         self.edgeweight = edgeweight
         self.edgestyle = edgestyle
+        self.bp_id = bp_id
     def directional_coord_1(self):
         return self.direction_1 * self.bp_1.position
     def directional_coord_2(self):
@@ -134,8 +136,8 @@ def get_phasingblocks(hb_vcf):
     hb_list = defaultdict(list)
     hb_points = defaultdict(list)
     for var in vccf:
-        if var.samples['SAMPLE']['PS']:
-            hb[(var.chrom, var.samples['SAMPLE']['PS'])].append(var.pos)
+        if 'PS' in var.samples.items()[0][1].items()[-1]:
+            hb[(var.chrom, var.samples.items()[0][1]['PS'])].append(var.pos)
     for key,hb1 in hb.items():
         hb_list[key[0]].append(min(hb1))
         hb_list[key[0]].append(max(hb1))
@@ -171,12 +173,13 @@ def get_genomicsegments(double_breaks,bam_files, thread_pool,hb_vcf):
 
 ##Ayse: haplotype info/ single_bp
 def get_breakpoints(allreads_bisect, split_reads, clust_len, max_unaligned_len,
-                    min_reads, min_ref_flank, ref_lengths, min_mapq,single_bp,lowmapq_reg,min_sv_size):
+                    min_reads, min_ref_flank, ref_lengths, min_mapq,single_bp,lowmapq_reg,min_sv_size,ins_list_new):
     """
     Finds regular 1-sided breakpoints, where split reads consistently connect
     two different parts of the genome
     """
     seq_breakpoints = defaultdict(list)
+    print('breakpoint_finder_1')
 
     def _signed_breakpoint(seg, direction):
         ref_bp, sign = None, None
@@ -216,7 +219,7 @@ def get_breakpoints(allreads_bisect, split_reads, clust_len, max_unaligned_len,
         bp_pos.sort(key=lambda bp: bp.pos_1)
         lowmapq = lowmapq_reg[seq]
         for rc in bp_pos:
-            if cur_cluster and rc.pos_1 - cur_cluster[-1].pos_1 > clust_len:
+            if cur_cluster and rc.pos_1 - cur_cluster[-1].pos_1 > clust_len: ### Add direction here
                 clusters.append(cur_cluster)
                 cur_cluster = [rc]
             else:
@@ -236,15 +239,14 @@ def get_breakpoints(allreads_bisect, split_reads, clust_len, max_unaligned_len,
                 by_genome_id[read[1]] += 1
             if max(by_genome_id.values()) >= min_reads:
                 position = int(np.median([x.pos_1 for x in cl]))
-                if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank and lowmapq[1][bisect.bisect_left(lowmapq[0],position)-1]<position:
-                    
+                if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank and lowmapq and lowmapq[1][bisect.bisect_left(lowmapq[0],position)-1]<position:
                     bp_cluster = Breakpoint(seq, position)
                     bp_cluster.connections = cl
                     bp_cluster.read_ids = read_ids
                     bp_cluster.pos2=pos2
                     bp_clusters[seq].append(bp_cluster)
                     
-    for key, bp_cluster in bp_clusters.items():
+    for key, bp_cluster in bp_clusters.items():####sort with end as well!!
         read_segments = allreads_bisect[key]
         read_segments[0], read_segments[1], read_segments[2], read_segments[3] = zip(*sorted(zip(read_segments[0],read_segments[1],read_segments[2],read_segments[3])))
         for bp in bp_cluster:
@@ -252,6 +254,9 @@ def get_breakpoints(allreads_bisect, split_reads, clust_len, max_unaligned_len,
             for gen_id,counts in count_all.items():
                 bp.spanning_reads[gen_id]=counts
     double_breaks = get_2_breaks(bp_clusters, clust_len, min_reads,min_sv_size)
+    ins_clusters = extract_insertions(ins_list_new, lowmapq_reg,clust_len,min_ref_flank,ref_lengths,min_reads,allreads_bisect)
+    double_breaks +=  ins_clusters             
+    double_breaks.sort(key=lambda b: (b.bp_1.ref_id, b.bp_1.position, b.direction_1))
 
     
     return double_breaks
@@ -264,6 +269,7 @@ def get_2_breaks(bp_clusters, clust_len, min_reads,min_sv_size):
                 return int(math.copysign(1, coord)), cl1
         return None, None
     double_breaks = []
+    bp_num = 1
     double_connections = defaultdict(list)
     chlist = list(bp_clusters.keys())
     for bp_cluster in bp_clusters.values():
@@ -282,16 +288,18 @@ def get_2_breaks(bp_clusters, clust_len, min_reads,min_sv_size):
                         double_connections[(bp_1, dir_1, bp_2, dir_2)].append(conn)
     for (bp_1, dir_1, bp_2, dir_2), conn_list in double_connections.items():
         support = defaultdict(int)
+        support_reads = defaultdict(list)
         hap1_support= defaultdict(int)
         hap2_support= defaultdict(int)
         for conn1 in conn_list:
             support[(conn1.genome_id, conn1.haplotype_1,conn1.haplotype_2)] +=1
+            support_reads[(conn1.genome_id, conn1.haplotype_1,conn1.haplotype_2)]+=[conn1.read_id]
             hap1_support[conn1.haplotype_1]+=1
             hap2_support[conn1.haplotype_1]+=1            
         if max(support.values())>= min_reads:
             for (genome_id,haplotype1,haplotype2),supp in support.items():
                 if supp>0:
-                    if (hap1_support['1'] and hap1_support['2']) or (hap2_support['1'] and hap2_support['2']):
+                    if (hap1_support[1] and hap1_support[2]) or (hap2_support[1] and hap2_support[2]):
                         edgeweight = 2
                     else:
                         edgeweight = 1
@@ -299,10 +307,10 @@ def get_2_breaks(bp_clusters, clust_len, min_reads,min_sv_size):
                         length_bp = abs(bp_1.position - bp_2.position)
                     else:
                         length_bp = 0
-                    
-                    double_breaks.append(DoubleBreak(bp_1, dir_1, bp_2, dir_2,genome_id,haplotype1, haplotype2,supp, length_bp, edgeweight , 'dashed'))
-                    
-    double_breaks.sort(key=lambda b: (b.bp_1.ref_id, b.bp_1.position, b.direction_1))
+                    bp_id = 'bp_'+str(bp_num)
+                    bp_num+=1
+                    double_breaks.append(DoubleBreak(bp_1, dir_1, bp_2, dir_2,genome_id,haplotype1, haplotype2,supp,support_reads[(genome_id,haplotype1,haplotype2)], length_bp, edgeweight , 'dashed',bp_id))
+    
     return double_breaks
 
 
@@ -311,6 +319,7 @@ def output_breaks(double_breaks, genome_tags,phasing, out_stream):
     t= 0
     header = '#BP_pos1:BP_pos2,'
     def_array = []
+    hp_list = [0,1,2]
     if phasing:
         for tag in genome_tags:
             for k in hp_list:
@@ -349,6 +358,70 @@ def output_breaks(double_breaks, genome_tags,phasing, out_stream):
         out_stream.write(bp_to_write)
         out_stream.write("\n")
         
+def extract_insertions(ins_list_new, lowmapq_reg,clust_len,min_ref_flank,ref_lengths,min_reads,allreads_bisect):
+    ins_list = defaultdict(list)
+    for ins in ins_list_new:
+        ins_list[ins[0]].append(ins)
+    ins_clusters = []
+    t = 0
+    for seq, ins_pos in ins_list.items():
+        clusters = []
+        cur_cluster = []
+        ins_pos.sort(key=lambda x:(x[1]))
+        lowmapq = lowmapq_reg[seq]
+        read_segments = allreads_bisect[seq]
+        read_segments[0], read_segments[1], read_segments[2], read_segments[3] = zip(*sorted(zip(read_segments[0],read_segments[1],read_segments[2],read_segments[3])))
+        for rc in ins_pos:
+            if cur_cluster and rc[1] - cur_cluster[-1][1] > clust_len:
+                cur_cluster.sort(key=lambda x:x[5])
+                cl_ins = []
+                for cl1 in cur_cluster:
+                    if cl_ins and abs(cl1[5] - cl_ins[-1][5]) > clust_len:
+                        clusters.append(cl_ins)
+                        cl_ins = [cl1]
+                    else:
+                        cl_ins.append(cl1)
+                if cl_ins:
+                    clusters.append( cl_ins)
+                cur_cluster = [rc]
+            else:
+                cur_cluster.append(rc)
+        if cur_cluster:
+            clusters.append(cur_cluster)
+        for cl in clusters:
+            unique_reads = set()
+            read_ids = []
+            pos2 = []
+            for x in cl:
+                unique_reads.add((x[2], (x[3],x[4])))
+                read_ids.append(x[2])
+                pos2.append(x[5])
+            by_genome_id = defaultdict(list)
+            for read in unique_reads:
+                by_genome_id[read[1]].append(read[0])
+            if max([len(value) for value in by_genome_id.values()]) >= min_reads:
+                position = int(np.median([x[1] for x in cl]))
+                length = int(np.median([x[5] for x in cl]))
+                edgeW = defaultdict(int)
+                for key in by_genome_id.keys():
+                    edgeW[key[0]]+=1
+                if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank and lowmapq and lowmapq[1][bisect.bisect_left(lowmapq[0],position)-1]<position:
+                    ins_id = 'INS_'+str(t)
+                    t+=1
+                    for key, value in by_genome_id.items():
+                        bp_1 = Breakpoint(seq, position)
+                        bp_2 = Breakpoint(seq, position)
+                        bp_1.read_ids = value
+                        bp_2.read_ids = value
+                        count_all = Counter(read_segments[3][bisect.bisect_left(read_segments[1],position):bisect.bisect_left(read_segments[0],position)])
+                        for gen_id,counts in count_all.items():
+                            bp_1.spanning_reads[gen_id]=counts
+                            bp_2.spanning_reads[gen_id]=counts
+                        db = DoubleBreak(bp_1, -1, bp_2, 1, key[0], key[1], key[1], len(value), value, length, edgeW[key[0]], 'dashed', ins_id)
+                        ins_clusters.append(db)
+    return(ins_clusters)
+                    
+     
         
 def get_segments_coverage(segments, thread_pool,phased):
     print("Computing segments coverage", file=sys.stderr)

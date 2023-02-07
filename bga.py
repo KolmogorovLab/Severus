@@ -9,8 +9,8 @@ import math
 from multiprocessing import Pool
 from collections import namedtuple, defaultdict, Counter
 from build_graph import build_breakpoint_graph
-from bam_processing import get_all_reads_parallel
-from breakpoint_finder import resolve_overlaps, get_breakpoints, output_breaks,get_genomicsegments
+from bam_processing_2 import get_all_reads_parallel
+from breakpoint_finder_6 import resolve_overlaps, get_breakpoints, output_breaks,get_genomicsegments
 
 def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligned_len, bam_files, compute_coverage,
                                thread_pool, ref_lengths, out_file, min_mapq,sv_size, single_bp):
@@ -221,7 +221,7 @@ def main():
     split_reads = resolve_overlaps(split_reads,  args.sv_size) 
     print("Parsed {0} split reads".format(len(split_reads)), file=sys.stderr)
     double_breaks = get_breakpoints(allreads_bisect, split_reads, args.bp_cluster_size, MAX_UNALIGNED_LEN,
-                                  args.bp_min_support, args.min_ref_flank, ref_lengths, args.min_mapping_quality, args.single_bp , lowmapq_reg,args.sv_size)
+                                  args.bp_min_support, args.min_ref_flank, ref_lengths, args.min_mapping_quality, args.single_bp , lowmapq_reg,args.sv_size,ins_list_new)
     print("Number of SV found: {0}".format(len(double_breaks)), file=sys.stderr)
     genomicsegments , hb_points=get_genomicsegments(double_breaks,all_bams, thread_pool,args.hpv)
 

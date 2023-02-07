@@ -51,19 +51,20 @@ def _get_segment_legacy(read_id, ref_id, ref_start, strand, cigar, num_mismatch,
     read_aligned = 0
     read_length = 0
     ref_aligned = 0
-    for token in re.findall("[\d]{0,}[A-Z]{1}", cigar):
+    for token in cigar_parser.findall(cigar):
         op = token[-1]
         op_len = int(token[:-1])
-        if op in "HS":
+
+        if op == "H" or op == "S":
             if first_clip:
                 read_start = op_len
             read_length += op_len
         first_clip = False
-        if op in "M=X":
+        if op == "M" or op == "=" or op == "X":
             read_aligned += op_len
             ref_aligned += op_len
             read_length += op_len
-        if op == "D":
+        if op == 'D':
             ref_aligned += op_len
         if op == "I":
             read_aligned += op_len
@@ -81,7 +82,6 @@ def _get_segment_legacy(read_id, ref_id, ref_start, strand, cigar, num_mismatch,
 def check_read_mapping_confidence(read_id, flags, ref_id, ref_start,strand,cigar, mapq, num_mismatches, sa_tag,min_aln_length, min_aligned_rate,
                                   max_read_error, max_segments):
     read_info = []
-    is_supplementary = int(flags) & 0x800
     is_secondary = int(flags) & 0x100
     segments = [_get_segment_legacy(read_id, ref_id, ref_start, strand, cigar, num_mismatches,mapq)]
     if sa_tag:
@@ -114,7 +114,7 @@ def check_read_mapping_confidence(read_id, flags, ref_id, ref_start,strand,cigar
     else:
         return True, read_info
 
-###AYSE: spliting reads with larger Ins and del in CIGAR and outputs Inslist with [(ref_id,ref_end,read_id,haplotype),op_len]
+
 cigar_parser = re.compile("[0-9]+[MIDNSHP=X]")
 def get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq, genome_id,sv_size):
     """
@@ -128,6 +128,7 @@ def get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq, geno
     #read_end = 0
     read =[]
     ins_list=[]
+    add_del = []
 
     for token in cigar_parser.findall(cigar):
         op = token[-1]
@@ -143,23 +144,18 @@ def get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq, geno
             read_aligned += op_len
             ref_aligned += op_len
             read_length += op_len
-        if op == "D":
+        if op == 'D':
             if op_len < sv_size:
                 ref_aligned += op_len
-            else:
+            elif op_len > sv_size:
                 ref_end = ref_start + ref_aligned
                 read_end = read_start + read_aligned
-                if strand == "-":
-                    read_start, read_end = read_length - read_end, read_length - read_start
-                    
-                read.append(ReadSegment(read_start, read_end, ref_start, ref_end, read_id,
-                       ref_id, strand, read_length, haplotype, mapq, genome_id))
-                
+                add_del.append((read_start, read_end,ref_start, ref_end))
                 read_start = read_end+1
                 read_aligned = 0
                 ref_aligned = 0
                 ref_start = ref_end+op_len
-        if op == "I":
+        if op == 'I':
             if op_len < sv_size:
                 read_aligned += op_len
                 read_length += op_len                
@@ -167,8 +163,7 @@ def get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq, geno
                 read_aligned += op_len
                 read_length += op_len
                 ref_end1 = ref_start + ref_aligned
-                ins_list.append([(ref_id,ref_end1,read_id,haplotype),op_len])
-                
+                ins_list.append([ref_id,ref_end1,read_id,genome_id,haplotype,op_len])
     if ref_aligned !=0:
         ref_end = ref_start + ref_aligned
         read_end = read_start + read_aligned
@@ -177,12 +172,19 @@ def get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq, geno
             read_start, read_end = read_length - read_end, read_length - read_start
         read.append(ReadSegment(read_start, read_end, ref_start, ref_end, read_id,
                        ref_id, strand, read_length, haplotype, mapq, genome_id))
-    
-    
-
+        if add_del:
+            if strand == "-":
+                for seg in add_del:
+                    read_start, read_end = read_length - seg[1], read_length - seg[0]
+                read.append(ReadSegment(read_start, read_end, seg[2], seg[3], read_id,
+                               ref_id, strand, read_length, haplotype, mapq, genome_id))
+            else:
+                for seg in add_del:
+                    read.append(ReadSegment(seg[0], seg[1], seg[2], seg[3], read_id,
+                               ref_id, strand, read_length, haplotype, mapq, genome_id))
     return read, ins_list
 
-##TODO: ADD INS FILTER/ FOR TANDEM and INS LENGTH
+
 
 
 def get_split_reads(bam_file, region, max_read_error, min_mapq, genome_id,sv_size):
@@ -239,11 +241,12 @@ def get_split_reads(bam_file, region, max_read_error, min_mapq, genome_id,sv_siz
                     inslist.append(ins)
     return lowmapq,all_reads, alignments , inslist 
 
-##AYSE:Updated with inslist and outputs hplist for segment coverage part
+
 
 def get_all_reads_parallel(bam_file, num_threads, aln_dump_stream, ref_lengths, max_read_error,
                            min_mapq, genome_id,sv_size,write_reads,all_reads_bisect,lowmapq_reg,all_reads_stat):
     CHUNK_SIZE = 10000000
+    print('bam_nre')
     all_reference_ids = [r for r in pysam.AlignmentFile(bam_file, "rb").references]
     fetch_list = []
     for ctg in all_reference_ids:

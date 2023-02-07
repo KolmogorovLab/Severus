@@ -32,6 +32,7 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
         return node_ids[node_str]
     def conv_dir(dir1):
         return '-' if dir1==-1 else '+'
+        
 
     def update_adjacencies(double_bp):
         left_kmer = node_to_id(":".join([conv_dir(double_bp.direction_1)+double_bp.bp_1.ref_id, str(double_bp.bp_1.position)]))
@@ -53,26 +54,22 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
         right_kmer = node_to_id(":".join([seg.dir2+seg.ref_id, str(seg.pos2)]))
         left_kmer_2 = node_to_id(":".join([seg.dir2+seg.ref_id, str(seg.pos1)]))
         right_kmer_2 = node_to_id(":".join([seg.dir1+seg.ref_id, str(seg.pos2)]))
-        ln = [ln for ln in [left_kmer, left_kmer_2] if g.has_node(ln)]
-        rn=[rn for rn in [right_kmer, right_kmer_2] if g.has_node(rn)]
-        if g.has_node(left_kmer) and not g.has_node(left_kmer_2):
+        if not g.has_node(left_kmer_2):
             g.add_node(left_kmer_2, label = id_to_kmers[left_kmer_2])
-            g.add_edge(left_kmer, left_kmer_2, key=SEQUENCE_KEY, style=ref_style)
-        elif g.has_node(left_kmer_2) and not g.has_node(left_kmer):
-            if seg.pos1 in hb_points[seg.ref_id]:
-                g.add_node(left_kmer,style="filled", fillcolor="grey", label = 'HB')
-            else:
-                g.add_node(left_kmer, label = id_to_kmers[left_kmer])
-            g.add_edge(left_kmer, left_kmer_2, key=SEQUENCE_KEY, style=ref_style)
-        if g.has_node(right_kmer) and not g.has_node(right_kmer_2):
+        if not g.has_node(left_kmer):
+            g.add_node(left_kmer, label = id_to_kmers[left_kmer])
+        g.add_edge(left_kmer, left_kmer_2, key=SEQUENCE_KEY, style=ref_style)
+        if not g.has_node(right_kmer_2):
             g.add_node(right_kmer_2, label = id_to_kmers[right_kmer_2])
-            g.add_edge(right_kmer, right_kmer_2, key=SEQUENCE_KEY, style=ref_style)
-        elif g.has_node(right_kmer_2) and not g.has_node(right_kmer):
-            if seg.pos2 in hb_points[seg.ref_id]:
-                g.add_node(right_kmer,style="filled", fillcolor="grey", label = 'HB')
-            else:
-                g.add_node(right_kmer, label = id_to_kmers[right_kmer])
-            g.add_edge(right_kmer, right_kmer_2, key=SEQUENCE_KEY, style=ref_style)
+        if not g.has_node(right_kmer):
+            g.add_node(right_kmer, label = id_to_kmers[right_kmer])
+        g.add_edge(right_kmer, right_kmer_2, key=SEQUENCE_KEY, style=ref_style)
+        if seg.pos1 in hb_points[seg.ref_id]:
+            hb_attr = {left_kmer: {'style':"filled", 'fillcolor':"grey", 'label' : 'HB'}, left_kmer_2:{'style':"filled", 'fillcolor':"grey", 'label':'HB'}}
+            nx.set_node_attributes(g, hb_attr )
+        if seg.pos2 in hb_points[seg.ref_id]:
+            hb_attr = {right_kmer:{'style':"filled", 'fillcolor':"grey", 'label': 'HB'}, right_kmer_2:{'style':"filled", 'fillcolor':"grey", 'label':'HB'}}
+            nx.set_node_attributes(g, hb_attr )
         if (g.has_edge(left_kmer, right_kmer, key = seg.genome_id) and g[left_kmer][right_kmer][seg.genome_id]["style"] == 'dashed'):
             edge_flag = False
         elif g.has_edge(left_kmer_2, right_kmer, key = seg.genome_id) and g[left_kmer_2][right_kmer][seg.genome_id]["style"] == 'dashed':
@@ -81,7 +78,7 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
             edge_flag = False
         elif g.has_edge(left_kmer_2, right_kmer_2, key = seg.genome_id)and g[left_kmer_2][right_kmer_2][seg.genome_id]["style"] == 'dashed':
             edge_flag = False
-        elif edge_flag:
+        if edge_flag:
             if g.has_edge(left_kmer, right_kmer, key = seg.genome_id):
                 g[left_kmer][right_kmer][seg.genome_id]["support"] =g[left_kmer][right_kmer][seg.genome_id]["support"]+ int(seg.coverage[0])
                 g[left_kmer][right_kmer][seg.genome_id]["penwidth"] = 2
@@ -96,7 +93,8 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
     ref_style = "dashed" if reference_adjacencies else "invis"
     for seg in genomicsegments:
         if seg.length_bp < max_genomic_len:
-            add_genomic_edge(seg, ref_style)
+            if not (seg.haplotype ==0 and seg.coverage ==0):
+                add_genomic_edge(seg, ref_style)
         
         
 
@@ -129,7 +127,6 @@ def add_legend(key_to_color, fout):
 
 def output_connected_components(graph, out_stream, target_genomes, control_genomes):
     components_list = []
-    t= 0
     for cc in nx.connected_components(graph):
         target_adj = set()
         control_adj = set()
