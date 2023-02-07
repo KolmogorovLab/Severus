@@ -9,8 +9,8 @@ import math
 from multiprocessing import Pool
 from collections import namedtuple, defaultdict, Counter
 from build_graph import build_breakpoint_graph
-from bam_processing_2 import get_all_reads_parallel
-from breakpoint_finder_6 import resolve_overlaps, get_breakpoints, output_breaks,get_genomicsegments
+from bam_processing import get_all_reads_parallel
+from breakpoint_finder import resolve_overlaps, get_breakpoints, output_breaks,get_genomicsegments
 
 def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligned_len, bam_files, compute_coverage,
                                thread_pool, ref_lengths, out_file, min_mapq,sv_size, single_bp):
