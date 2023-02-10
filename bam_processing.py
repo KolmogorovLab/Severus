@@ -14,7 +14,7 @@ MIN_ALIGNED_LENGTH = 5000
 MIN_ALIGNED_RATE = 0.5
 MAX_SEGMENTS = 10
 MIN_SEGMENT_LENGTH = 100
-
+cigar_parser = re.compile("[0-9]+[MIDNSHP=X]")
 
 #ReadSegment = namedtuple("ReadSegment", ["read_start", "read_end", "ref_start", "ref_end", "read_id", "ref_id",
 #                                         "strand", "read_length", "haplotype", "mapq", "genome_id"])
@@ -54,7 +54,7 @@ def _get_segment_legacy(read_id, ref_id, ref_start, strand, cigar, num_mismatch)
     ref_aligned = 0
     #read_end = 0
 
-    for token in re.findall("[\d]{0,}[A-Z]{1}", cigar):
+    for token in cigar_parser.findall(cigar):
         op = token[-1]
         op_len = int(token[:-1])
 
@@ -164,7 +164,6 @@ def check_read_mapping_confidence(sam_text_entry, min_aln_length, min_aligned_ra
 
 
 
-cigar_parser = re.compile("[0-9]+[MIDNSHP=X]")
 def get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq, genome_id):
     """
     Parses cigar and generate ReadSegment structure with alignment coordinates
