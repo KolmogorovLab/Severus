@@ -250,7 +250,9 @@ def get_breakpoints(allreads_bisect, split_reads, clust_len, max_unaligned_len,
         read_segments = allreads_bisect[key]
         read_segments[0], read_segments[1], read_segments[2], read_segments[3] = zip(*sorted(zip(read_segments[0],read_segments[1],read_segments[2],read_segments[3])))
         for bp in bp_cluster:
-            count_all = Counter(read_segments[3][bisect.bisect_left(read_segments[1],bp.position):bisect.bisect_left(read_segments[0],bp.position)])
+            strt=bisect.bisect_left(read_segments[1],bp.position)
+            end = bisect.bisect_left(read_segments[0],bp.position)
+            count_all = Counter([read_segments[3][i] for i in range(strt,end) if read_segments[1][i] > bp.position])
             for gen_id,counts in count_all.items():
                 bp.spanning_reads[gen_id]=counts
     double_breaks = get_2_breaks(bp_clusters, clust_len, min_reads,min_sv_size)
