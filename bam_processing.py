@@ -176,8 +176,8 @@ def get_segment(read_id, ref_id, ref_start, strand, cigar, haplotype, mapq, geno
             if strand == "-":
                 for seg in add_del:
                     read_start, read_end = read_length - seg[1], read_length - seg[0]
-                read.append(ReadSegment(read_start, read_end, seg[2], seg[3], read_id,
-                               ref_id, strand, read_length, haplotype, mapq, genome_id))
+                    read.append(ReadSegment(read_start, read_end, seg[2], seg[3], read_id,
+                                            ref_id, strand, read_length, haplotype, mapq, genome_id))
             else:
                 for seg in add_del:
                     read.append(ReadSegment(seg[0], seg[1], seg[2], seg[3], read_id,
