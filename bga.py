@@ -140,34 +140,35 @@ def main():
     parser.add_argument("-t", "--threads", dest="threads",
                         default=8, metavar="int", type=int, help="number of parallel threads [8]")
     parser.add_argument("--min-support", dest="bp_min_support",
-                        default=MIN_BREAKPOINT_READS, metavar="int", type=int, help="minimum reads supporting double breakpoint [5]")
+                        default=MIN_BREAKPOINT_READS, metavar="int", type=int,
+                        help=f"minimum reads supporting double breakpoint [{MIN_BREAKPOINT_READS}]")
     #parser.add_argument("--double-breakpoint-min-reads", dest="double_bp_min_reads",
     #                    default=MIN_DOUBLE_BP_READS, metavar="int", type=int, help="minimum reads in double breakpoint [5]")
-    #parser.add_argument("--cluster-size", dest="cluster_size",
-    #                    default=BP_CLUSTER_SIZE, metavar="int", type=int, help="size of breakpoint cluster in bp [100]")
     parser.add_argument("--min-reference-flank", dest="min_ref_flank",
                         default=MIN_REF_FLANK, metavar="int", type=int,
-                        help="minimum distance between breakpoint and sequence ends [0]")
+                        help=f"minimum distance between breakpoint and sequence ends [{MIN_REF_FLANK}]")
     parser.add_argument("--bp_cluster_size", dest="bp_cluster_size",
-                        default=BP_CLUSTER_SIZE, metavar="int", type=int,help="maximum distance in bp cluster[100]")
+                        default=BP_CLUSTER_SIZE, metavar="int", type=int,
+                        help=f"maximum distance in bp cluster [{BP_CLUSTER_SIZE}]")
     parser.add_argument("--min_sv_size", dest="sv_size",
-                        default=MIN_SV_SIZE, metavar="int", type=int,help="minimim size for sv[50]")
+                        default=MIN_SV_SIZE, metavar="int", type=int,
+                        help=f"minimim size for sv [{MIN_SV_SIZE}]")
     parser.add_argument("--max-read-error", dest="max_read_error",
-                        default=MAX_READ_ERROR, metavar="float", type=float, help="maximum base alignment error [0.1]")
+                        default=MAX_READ_ERROR, metavar="float", type=float,
+                        help=f"maximum base alignment error [{MAX_READ_ERROR}]")
     parser.add_argument("--min-mapq", dest="min_mapping_quality",
-                        default=MIN_MAPQ, metavar="int", type=int, help="minimum mapping quality for aligned segment [10]")
-    #parser.add_argument("--coverage", action="store_true", dest="coverage",
-    #                    default=True, help="add coverage info to breakpoint graphs")
+                        default=MIN_MAPQ, metavar="int", type=int,
+                        help=f"minimum mapping quality for aligned segment [{MIN_MAPQ}]")
     parser.add_argument("--reference-adjacencies", action="store_true", dest="reference_adjacencies",
-                        default=False, help="draw reference adjacencies")
+                        default=False, help="draw reference adjacencies [False]")
     parser.add_argument("--write_splitreads", action="store_true", dest="write_splitreads",
-                        default=False, help="write split reads")
+                        default=False, help="write split reads [False]")
     parser.add_argument("--single_bp", action="store_true", dest="single_bp",
-                        default=False, help="single_bp")
+                        default=False, help="Add hagning breakpoints [False]")
     parser.add_argument("--max-genomic-len", dest="max_genomic_len",
                         default=MAX_GENOMIC_LEN, metavar="int", type=int,
-                        help="maximum length of genomic segment to form connected components [100000]")
-    parser.add_argument("--phasing_vcf", dest="hpv",default=HPV, metavar="path", help="vcf file used for phasing")
+                        help=f"maximum length of genomic segment to form connected components [{MAX_GENOMIC_LEN}]")
+    parser.add_argument("--phasing_vcf", dest="hpv",default=HPV, metavar="path", help="vcf file used for phasing [None]")
     args = parser.parse_args()
 
     if args.control_bam is None:
