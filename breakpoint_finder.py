@@ -52,8 +52,10 @@ class Breakpoint(object):
 
 
 class DoubleBreak(object):
-    __slots__ = "bp_1", "direction_1", "bp_2", "direction_2", "genome_id","haplotype1",'haplotype2',"supp",'supp_read_ids','length','edgeweight','edgestyle','bp_id'
-    def __init__(self, bp_1, direction_1, bp_2, direction_2, genome_id,haplotype1,haplotype2,supp,supp_read_ids,length,edgeweight,edgestyle,bp_id):
+    __slots__ = ("bp_1", "direction_1", "bp_2", "direction_2", "genome_id","haplotype1",'haplotype2',
+                 "supp",'supp_read_ids','length','genotype','edgestyle','bp_id')
+    def __init__(self, bp_1, direction_1, bp_2, direction_2, genome_id,haplotype1,haplotype2,
+                 supp,supp_read_ids,length, genotype, edgestyle,bp_id):
         self.bp_1 = bp_1
         self.bp_2 = bp_2
         self.direction_1 = direction_1
@@ -64,7 +66,7 @@ class DoubleBreak(object):
         self.supp = supp
         self.supp_read_ids = supp_read_ids
         self.length = length
-        self.edgeweight = edgeweight
+        self.genotype = genotype
         self.edgestyle = edgestyle
         self.bp_id = bp_id
     def directional_coord_1(self):
@@ -302,16 +304,17 @@ def get_2_breaks(bp_clusters, clust_len, min_reads,min_sv_size):
             for (genome_id,haplotype1,haplotype2),supp in support.items():
                 if supp>0:
                     if (hap1_support[1] and hap1_support[2]) or (hap2_support[1] and hap2_support[2]):
-                        edgeweight = 2
+                        genotype = "hom"
                     else:
-                        edgeweight = 1
+                        genotype = "het"
                     if bp_1.ref_id == bp_1.ref_id:
                         length_bp = abs(bp_1.position - bp_2.position)
                     else:
                         length_bp = 0
                     bp_id = 'bp_'+str(bp_num)
                     bp_num+=1
-                    double_breaks.append(DoubleBreak(bp_1, dir_1, bp_2, dir_2,genome_id,haplotype1, haplotype2,supp,support_reads[(genome_id,haplotype1,haplotype2)], length_bp, edgeweight , 'dashed',bp_id))
+                    double_breaks.append(DoubleBreak(bp_1, dir_1, bp_2, dir_2,genome_id,haplotype1, haplotype2, supp,
+                                                     support_reads[(genome_id,haplotype1,haplotype2)], length_bp, genotype, 'dashed', bp_id))
     
     return double_breaks
 
@@ -419,7 +422,9 @@ def extract_insertions(ins_list_new, lowmapq_reg,clust_len,min_ref_flank,ref_len
                         for gen_id,counts in count_all.items():
                             bp_1.spanning_reads[gen_id]=counts
                             bp_2.spanning_reads[gen_id]=counts
-                        db = DoubleBreak(bp_1, -1, bp_2, 1, key[0], key[1], key[1], len(value), value, length, edgeW[key[0]], 'dashed', ins_id)
+
+                        genotype = "hom" if len(edgeW) > 1 else "het"
+                        db = DoubleBreak(bp_1, -1, bp_2, 1, key[0], key[1], key[1], len(value), value, length, genotype, 'dashed', ins_id)
                         ins_clusters.append(db)
     return(ins_clusters)
                     

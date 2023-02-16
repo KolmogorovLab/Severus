@@ -8,7 +8,7 @@ import os
 import math
 from multiprocessing import Pool
 from collections import namedtuple, defaultdict, Counter
-from build_graph import build_breakpoint_graph
+from build_graph import build_breakpoint_graph, output_clusters_graphvis, output_clusters_csv
 from bam_processing import get_all_reads_parallel
 from breakpoint_finder import resolve_overlaps, get_breakpoints, output_breaks,get_genomicsegments
 
@@ -194,9 +194,10 @@ def main():
         os.mkdir(args.out_dir)
 
     out_breaks = os.path.join(args.out_dir, "breakpoints_double.csv")
-    out_single_bp = os.path.join(args.out_dir, "breakpoints_single.csv")
-    out_breakpoints_per_read = os.path.join(args.out_dir, "read_breakpoints")
-    out_breakpoint_graph = os.path.join(args.out_dir, "breakpoint_graph.dot")
+    #out_single_bp = os.path.join(args.out_dir, "breakpoints_single.csv")
+    #out_breakpoints_per_read = os.path.join(args.out_dir, "read_breakpoints")
+    out_breakpoint_graph = os.path.join(args.out_dir, "breakpoint_graph.gv")
+    out_clustered_breakpoints = os.path.join(args.out_dir, "breakpoint_clusters.csv")
 
     thread_pool = Pool(args.threads)
 
@@ -227,9 +228,12 @@ def main():
 
     genome_tags = list(target_genomes) + list(control_genomes)
     output_breaks(double_breaks, genome_tags,args.hpv, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
-    build_breakpoint_graph(double_breaks, genomicsegments, hb_points, args.max_genomic_len, args.reference_adjacencies, out_breakpoint_graph, target_genomes, control_genomes)
 
-
+    #BP graph
+    graph, adj_clusters, key_to_color = build_breakpoint_graph(double_breaks, genomicsegments, hb_points, args.max_genomic_len,
+                                                                args.reference_adjacencies, target_genomes, control_genomes)
+    output_clusters_graphvis(graph, adj_clusters, key_to_color, out_breakpoint_graph)
+    output_clusters_csv(graph, adj_clusters, out_clustered_breakpoints)
 
 if __name__ == "__main__":
     main()
