@@ -136,20 +136,29 @@ def resolve_overlaps(split_reads, min_ovlp_len):
 
 ####AYSE: CHECK VCF FROM OTHER TOOLS
 def get_phasingblocks(hb_vcf):
-    vccf=pysam.VariantFile(hb_vcf)
-    hb = defaultdict(list)
-    hb_list = defaultdict(list)
-    hb_points = defaultdict(list)
-    for var in vccf:
+    MIN_BLOCK_LEN = 10000
+    MIN_SNP = 10
+
+    vcf = pysam.VariantFile(hb_vcf)
+    haplotype_blocks = defaultdict(list)
+    endpoint_list = defaultdict(list)
+    switch_points = defaultdict(list)
+
+    for var in vcf:
         if 'PS' in var.samples.items()[0][1].items()[-1]:
-            hb[(var.chrom, var.samples.items()[0][1]['PS'])].append(var.pos)
-    for key,hb1 in hb.items():
-        hb_list[key[0]].append(min(hb1))
-        hb_list[key[0]].append(max(hb1))
-    for key, values in hb_list.items():
+            haplotype_blocks[(var.chrom, var.samples.items()[0][1]['PS'])].append(var.pos)
+
+    for (chr_id, block_name), coords in haplotype_blocks.items():
+        if max(coords) - min(coords) > MIN_BLOCK_LEN and len(coords) >= MIN_SNP:
+            endpoint_list[chr_id].append(min(coords))
+            endpoint_list[chr_id].append(max(coords))
+            #print(len(coords), min(coords), max(coords))
+
+    for chr_id, values in endpoint_list.items():
         values.sort()
-        hb_points[key]=([int((a + b)/2) for a, b in zip(values[1::2], values[2::2])])
-    return hb_points
+        switch_points[chr_id] = [(a + b) // 2 for a, b in zip(values[:-1], values[1:])]
+
+    return switch_points
 
 
 def get_genomic_segments(double_breaks, coverage_histograms, thread_pool, hb_vcf):
