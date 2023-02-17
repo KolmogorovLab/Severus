@@ -60,6 +60,7 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
         if not g.has_node(left_kmer):
             g.add_node(left_kmer, label = id_to_kmers[left_kmer])
         g.add_edge(left_kmer, left_kmer_2, key=SEQUENCE_KEY, style=ref_style, adjacency=False)
+
         if not g.has_node(right_kmer_2):
             g.add_node(right_kmer_2, label = id_to_kmers[right_kmer_2])
         if not g.has_node(right_kmer):
@@ -86,11 +87,11 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
 
         if edge_flag:
             if g.has_edge(left_kmer, right_kmer, key = seg.genome_id):
-                g[left_kmer][right_kmer][seg.genome_id]["support"] += int(seg.coverage[0])
+                g[left_kmer][right_kmer][seg.genome_id]["support"] += seg.coverage
                 g[left_kmer][right_kmer][seg.genome_id]["penwidth"] = 2
             else:
                 g.add_edge(left_kmer, right_kmer, key=seg.genome_id,
-                           support=int(seg.coverage[0]), style='solid', penwidth = 1, adjacency=False)
+                           support=seg.coverage, style='solid', penwidth = 1, adjacency=False)
 
             label="L:{0} C:{1}".format(seg.length_bp, g[left_kmer][right_kmer][seg.genome_id]["support"])
             g[left_kmer][right_kmer][seg.genome_id]["label"] = label
@@ -101,7 +102,7 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
     ref_style = "dashed" if reference_adjacencies else "invis"
     for seg in genomicsegments:
         if seg.length_bp < max_genomic_len:
-            if not (seg.haplotype ==0 and seg.coverage ==0):
+            if not (seg.haplotype == 0 and seg.coverage == 0):
                 add_genomic_edge(seg, ref_style)
 
     #remove edges with low coverage
@@ -162,6 +163,7 @@ def output_clusters_csv(graph, connected_components, out_file):
                     all_adj[(u, v)].append(key)
 
             for (u, v), keys in all_adj.items():
+                keys.sort()
                 label_1 = graph.nodes[u]["label"]
                 label_2 = graph.nodes[v]["label"]
                 keys_text = ",".join(keys)

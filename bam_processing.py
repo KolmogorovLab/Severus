@@ -244,9 +244,9 @@ def get_split_reads(bam_file, region, max_read_error, min_mapq, genome_id,sv_siz
 
 
 def get_all_reads_parallel(bam_file, num_threads, aln_dump_stream, ref_lengths, max_read_error,
-                           min_mapq, genome_id,sv_size,write_reads,all_reads_bisect,lowmapq_reg,all_reads_stat):
+                           min_mapq, genome_id, sv_size, write_reads):
     CHUNK_SIZE = 10000000
-    print('bam_nre')
+    #print('bam_nre')
     all_reference_ids = [r for r in pysam.AlignmentFile(bam_file, "rb").references]
     fetch_list = []
     for ctg in all_reference_ids:
@@ -257,13 +257,12 @@ def get_all_reads_parallel(bam_file, num_threads, aln_dump_stream, ref_lengths, 
             if ctg_len - reg_end < CHUNK_SIZE:
                 reg_end = ctg_len
             fetch_list.append((ctg, reg_start, reg_end))
-            
+
     tasks = [(bam_file, region, max_read_error, min_mapq, genome_id,sv_size) for region in fetch_list]
 
     parsing_results = None
     thread_pool = Pool(num_threads)
     parsing_results = thread_pool.starmap(get_split_reads, tasks)
-    all_reads=[]
 
     segments_by_read = defaultdict(list)
     inslist = []
@@ -275,11 +274,11 @@ def get_all_reads_parallel(bam_file, num_threads, aln_dump_stream, ref_lengths, 
             segments_by_read[aln.read_id].append(aln)
         for ins in ins_list:
             inslist.append(ins)
-        for allr in read_stat:
-            all_reads_stat.append(allr)
-            
-    lowmapq_reads = dict(sorted(lowmapq_reads.items()))
+        #for allr in read_stat:
+        #    all_reads_stat.append(allr)
 
+    lowmapq_reads = dict(sorted(lowmapq_reads.items()))
+    lowmapq_reg = defaultdict(list)
     for key, value in lowmapq_reads.items():
         if value > min_lowmapq_reads:
             if not lowmapq_reg[key[0]]:
@@ -290,36 +289,61 @@ def get_all_reads_parallel(bam_file, num_threads, aln_dump_stream, ref_lengths, 
             else:
                 lowmapq_reg[key[0]][0].append(key[1]*10000)
                 lowmapq_reg[key[0]][1].append((key[1]+1)*10000)
+
+    all_reads_bisect = defaultdict(list)
+    split_reads = []
     for read in segments_by_read:
         segments = segments_by_read[read]
         segments.sort(key=lambda s: s.read_start)
         dedup_segments = []
+
         for seg in segments:
             if not dedup_segments or dedup_segments[-1].read_start != seg.read_start:
                 dedup_segments.append(seg)
+
                 if not all_reads_bisect[seg.ref_id]:
                     all_reads_bisect[seg.ref_id].append([seg.ref_start])
                     all_reads_bisect[seg.ref_id].append([seg.ref_end])
                     all_reads_bisect[seg.ref_id].append([seg.read_id])
                     all_reads_bisect[seg.ref_id].append([(seg.haplotype,seg.genome_id)])
-                else:    
+                else:
                     all_reads_bisect[seg.ref_id][0].append(seg.ref_start)
                     all_reads_bisect[seg.ref_id][1].append(seg.ref_end)
                     all_reads_bisect[seg.ref_id][2].append(seg.read_id)
                     all_reads_bisect[seg.ref_id][3].append((seg.haplotype,seg.genome_id))
-        if len(dedup_segments)>1:
-            all_reads.append(dedup_segments)
+
+        segments_by_read[read] = dedup_segments
+        if len(dedup_segments) > 1:
+            split_reads.append(dedup_segments)
+
         if write_reads:
             aln_dump_stream.write(str(read) + "\n")
             for seg in dedup_segments:
                 aln_dump_stream.write(str(seg) + "\n")
             aln_dump_stream.write("\n")
-    
-    return lowmapq_reg,all_reads_stat,all_reads,all_reads_bisect , inslist
+
+    return lowmapq_reg, segments_by_read, split_reads, all_reads_bisect, inslist
 
 
+COV_WINDOW = 500
+def update_coverage_hist(histograms, genome_id, ref_lengths, num_haplotypes, read_alignments):
+    for chr_id, chr_len in ref_lengths.items():
+        for hp in range(0, num_haplotypes):
+            histograms[(genome_id, hp, chr_id)] = [0 for _ in range(chr_len // COV_WINDOW + 1)]
+
+    for read in read_alignments.values():
+        for aln in read:
+            hist_start = aln.ref_start // COV_WINDOW
+            hist_end = aln.ref_end // COV_WINDOW
+            for i in range(hist_start, hist_end + 1):
+                histograms[(genome_id, aln.haplotype, aln.ref_id)][i] += 1
 
 
+def segment_coverage(histograms, genome_id, ref_id, ref_start, ref_end, haplotype):
+    hist_start = ref_start // COV_WINDOW
+    hist_end = ref_end // COV_WINDOW
+    cov_list = histograms[(genome_id, haplotype, ref_id)][hist_start : hist_end + 1]
 
-
-    
+    if not cov_list:
+        return 0
+    return int(np.median(cov_list))

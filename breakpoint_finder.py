@@ -19,6 +19,8 @@ import os
 import subprocess
 import bisect
 
+from bam_processing import segment_coverage
+
 
 class ReadConnection(object):
     __slots__ = ("ref_id_1", "pos_1", "sign_1", "ref_id_2", "pos_2", "sign_2",
@@ -83,10 +85,10 @@ class DoubleBreak(object):
         bp_name = label_1 + "|" + label_2
         return bp_name
 
-    
+
 class GenomicSegment(object):
-    __slots__ = "genome_id","haplotype", "ref_id", "dir1", "pos1", "dir2" , "pos2", "coverage","length_bp"
-    def __init__(self, genome_id,haplotype,ref_id, pos1, pos2,coverage,length_bp):
+    __slots__ = "genome_id","haplotype", "ref_id", "dir1", "pos1", "dir2" , "pos2", "coverage", "length_bp"
+    def __init__(self, genome_id, haplotype, ref_id, pos1, pos2, coverage, length_bp):
         self.genome_id=genome_id
         self.haplotype=haplotype
         self.ref_id = ref_id
@@ -96,6 +98,7 @@ class GenomicSegment(object):
         self.pos2 = pos2
         self.coverage = coverage
         self.length_bp=length_bp
+
 
 def resolve_overlaps(split_reads, min_ovlp_len):
     """
@@ -148,30 +151,33 @@ def get_phasingblocks(hb_vcf):
         hb_points[key]=([int((a + b)/2) for a, b in zip(values[1::2], values[2::2])])
     return hb_points
 
-def get_genomicsegments(double_breaks,bam_files, thread_pool,hb_vcf):
+
+def get_genomic_segments(double_breaks, coverage_histograms, thread_pool, hb_vcf):
     if hb_vcf:
         hb_points=get_phasingblocks(hb_vcf)
-        phased=True
+        phased = True
     else:
         hb_points = defaultdict(list)
         phased = False
+
     single_bp = defaultdict(list)
     genomicsegments=[]
-    segments=[]
-    for double_bp in double_breaks:        
-        single_bp[(double_bp.genome_id ,double_bp.haplotype1, double_bp.bp_1.ref_id)].append(double_bp.bp_1.position)
-        single_bp[(double_bp.genome_id ,double_bp.haplotype2, double_bp.bp_2.ref_id)].append(double_bp.bp_2.position)
-    for key,s_bp in single_bp.items():
-        s_bp1= s_bp+hb_points[key[2]]
+    segments = []
+    for double_bp in double_breaks:
+        single_bp[(double_bp.genome_id, double_bp.haplotype1, double_bp.bp_1.ref_id)].append(double_bp.bp_1.position)
+        single_bp[(double_bp.genome_id, double_bp.haplotype2, double_bp.bp_2.ref_id)].append(double_bp.bp_2.position)
+
+    for (genome_name, haplotype_name, ref_name), s_bp in single_bp.items():
+        s_bp1 = s_bp + hb_points[ref_name]
         s_bp1 = list(set(s_bp1))
         s_bp1.sort()
-        for a, b in zip(s_bp1[:-1], s_bp1[1:]):
-            bam = [bbam for bbam in bam_files if key[0] in bbam]
-            segments.append((bam,key[2], a, b,key[1]))
-    genomicsegments = get_segments_coverage(segments, thread_pool,phased)
-    return genomicsegments , hb_points
-                        
-  
+        for seg_start, seg_end in zip(s_bp1[:-1], s_bp1[1:]):
+            segments.append((genome_name, ref_name, seg_start, seg_end,
+                             haplotype_name if phased else None))
+
+    genomic_segments = get_segments_coverage(segments, coverage_histograms)
+    return genomic_segments, hb_points
+
 
 ##Ayse: haplotype info/ single_bp
 def get_breakpoints(allreads_bisect, split_reads, clust_len, max_unaligned_len,
@@ -181,7 +187,7 @@ def get_breakpoints(allreads_bisect, split_reads, clust_len, max_unaligned_len,
     two different parts of the genome
     """
     seq_breakpoints = defaultdict(list)
-    print('breakpoint_finder_1')
+    #print('breakpoint_finder_1')
 
     def _signed_breakpoint(seg, direction):
         ref_bp, sign = None, None
@@ -204,7 +210,7 @@ def get_breakpoints(allreads_bisect, split_reads, clust_len, max_unaligned_len,
         ref_bp, sign = _signed_breakpoint(seg, direction)
         seq_breakpoints[seg.ref_id].append(ReadConnection(seg.ref_id, ref_bp, sign, None, None, None,
                                                           seg.haplotype, None, seg.read_id, seg.genome_id))
-    
+
     for read_segments in split_reads:
         for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
             if s1.mapq >= min_mapq and s2.mapq >= min_mapq:
@@ -247,7 +253,7 @@ def get_breakpoints(allreads_bisect, split_reads, clust_len, max_unaligned_len,
                     bp_cluster.read_ids = read_ids
                     bp_cluster.pos2=pos2
                     bp_clusters[seq].append(bp_cluster)
-                    
+
     for key, bp_cluster in bp_clusters.items():####sort with end as well!!
         read_segments = allreads_bisect[key]
         read_segments[0], read_segments[1], read_segments[2], read_segments[3] = zip(*sorted(zip(read_segments[0],read_segments[1],read_segments[2],read_segments[3])))
@@ -262,8 +268,8 @@ def get_breakpoints(allreads_bisect, split_reads, clust_len, max_unaligned_len,
     double_breaks +=  ins_clusters             
     double_breaks.sort(key=lambda b: (b.bp_1.ref_id, b.bp_1.position, b.direction_1))
 
-    
     return double_breaks
+
 
 ## Fixed the _normalize_coord part with new clustering 
 def get_2_breaks(bp_clusters, clust_len, min_reads,min_sv_size):
@@ -299,7 +305,7 @@ def get_2_breaks(bp_clusters, clust_len, min_reads,min_sv_size):
             support[(conn1.genome_id, conn1.haplotype_1,conn1.haplotype_2)] +=1
             support_reads[(conn1.genome_id, conn1.haplotype_1,conn1.haplotype_2)]+=[conn1.read_id]
             hap1_support[conn1.haplotype_1]+=1
-            hap2_support[conn1.haplotype_1]+=1            
+            hap2_support[conn1.haplotype_1]+=1
         if max(support.values())>= min_reads:
             for (genome_id,haplotype1,haplotype2),supp in support.items():
                 if supp>0:
@@ -362,7 +368,8 @@ def output_breaks(double_breaks, genome_tags,phasing, out_stream):
         bp_to_write = ','.join([key, ','.join(bp_array)])
         out_stream.write(bp_to_write)
         out_stream.write("\n")
-        
+
+
 def extract_insertions(ins_list_new, lowmapq_reg,clust_len,min_ref_flank,ref_lengths,min_reads,allreads_bisect):
     ins_list = defaultdict(list)
     for ins in ins_list_new:
@@ -427,47 +434,13 @@ def extract_insertions(ins_list_new, lowmapq_reg,clust_len,min_ref_flank,ref_len
                         db = DoubleBreak(bp_1, -1, bp_2, 1, key[0], key[1], key[1], len(value), value, length, genotype, 'dashed', ins_id)
                         ins_clusters.append(db)
     return(ins_clusters)
-                    
-     
-        
-def get_segments_coverage(segments, thread_pool,phased):
-    print("Computing segments coverage", file=sys.stderr)
-    random.shuffle(segments)
-    tasks = [(s[0][0], s[1], s[2],s[3],s[4],phased) for s in segments]
-    seg_coverage = None
-    seg_coverage = thread_pool.starmap(_get_median_depth, tasks)
-    genomicsegments = []
-    for seg, coverage in zip(segments, seg_coverage):
-        genome_id = os.path.basename(seg[0][0])
-        genomicsegments.append(GenomicSegment(genome_id, seg[4], seg[1], seg[2], seg[3],coverage,abs(seg[3]-seg[2])))
-    return genomicsegments
 
-def _get_median_depth(bam, ref_id, ref_start, ref_end,hp,phased):
-    SAMTOOLS_BIN = "/data/KolmogorovLab/tahmad/tools/samtools/samtools"
-    cov_by_bam = []
-    try:
-        if not phased:
-            samtools_out = subprocess.Popen("{0} coverage {1} -r '{2}:{3}-{4}' -q 10 -l 100 -d 1000"
-                                            .format(SAMTOOLS_BIN, bam, ref_id, ref_start, ref_end),
-                                            shell=True, stdout=subprocess.PIPE).stdout
-        else:
-            samtools_out = subprocess.Popen("{0} coverage {1} -r '{2}:{3}-{4}' -p {5} -q 10 -l 100 -d 1000"
-                                            .format(SAMTOOLS_BIN, bam, ref_id, ref_start, ref_end, hp),
-                                            shell=True, stdout=subprocess.PIPE).stdout
-        for line in samtools_out:
-            if line.startswith(b"#"):
-                continue
-            fields = line.split()
-            coverage = float(fields[6])
-            cov_by_bam.append(coverage)
-            break
-    except Exception as e:
-        print(e)
-        print("{0} coverage {1} -r '{2}:{3}-{4}' -p {5} -q 10 -l 100 -d 1000"
-              .format(SAMTOOLS_BIN, bam, ref_id, ref_start, ref_end , hp))
-    if len(cov_by_bam) > 0:
-        return cov_by_bam
-    else:
-        return 0
-        
 
+def get_segments_coverage(segments, coverage_histograms):
+    genomic_segments = []
+    for (genome_id, seg_ref, seg_start, seg_end, seg_hp) in segments:
+        coverage = segment_coverage(coverage_histograms, genome_id, seg_ref, seg_start, seg_end, seg_hp)
+        genomic_segments.append(GenomicSegment(genome_id, seg_hp, seg_ref, seg_start, seg_end,
+                                               coverage, seg_end - seg_start))
+
+    return genomic_segments

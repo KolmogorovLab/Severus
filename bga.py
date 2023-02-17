@@ -9,8 +9,8 @@ import math
 from multiprocessing import Pool
 from collections import namedtuple, defaultdict, Counter
 from build_graph import build_breakpoint_graph, output_clusters_graphvis, output_clusters_csv
-from bam_processing import get_all_reads_parallel
-from breakpoint_finder import resolve_overlaps, get_breakpoints, output_breaks,get_genomicsegments
+from bam_processing import get_all_reads_parallel, update_coverage_hist
+from breakpoint_finder import resolve_overlaps, get_breakpoints, output_breaks, get_genomic_segments
 
 def enumerate_read_breakpoints(split_reads, bp_clusters, clust_len, max_unaligned_len, bam_files, compute_coverage,
                                thread_pool, ref_lengths, out_file, min_mapq,sv_size, single_bp):
@@ -113,7 +113,6 @@ def main():
     #MIN_DOUBLE_BP_READS = 5
     MIN_REF_FLANK = 10000
     MAX_GENOMIC_LEN = 100000
-    HPV = False
 
     #breakpoint
     BP_CLUSTER_SIZE = 20
@@ -121,7 +120,6 @@ def main():
     MAX_SEGMENT_OVERLAP = 500
     MAX_UNALIGNED_LEN = 500
     MIN_SV_SIZE = 50
-    #MIN_GRAPH_SUPPORT = 3
 
     SAMTOOLS_BIN = "samtools"
 
@@ -161,14 +159,14 @@ def main():
                         help=f"minimum mapping quality for aligned segment [{MIN_MAPQ}]")
     parser.add_argument("--reference-adjacencies", action="store_true", dest="reference_adjacencies",
                         default=False, help="draw reference adjacencies [False]")
-    parser.add_argument("--write_splitreads", action="store_true", dest="write_splitreads",
-                        default=False, help="write split reads [False]")
+    parser.add_argument("--write_alignments", action="store_true", dest="write_alignments",
+                        default=False, help="write read alignments to file [False]")
     parser.add_argument("--single_bp", action="store_true", dest="single_bp",
                         default=False, help="Add hagning breakpoints [False]")
     parser.add_argument("--max-genomic-len", dest="max_genomic_len",
                         default=MAX_GENOMIC_LEN, metavar="int", type=int,
                         help=f"maximum length of genomic segment to form connected components [{MAX_GENOMIC_LEN}]")
-    parser.add_argument("--phasing_vcf", dest="hpv",default=HPV, metavar="path", help="vcf file used for phasing [None]")
+    parser.add_argument("--phasing_vcf", dest="phase_vcf", metavar="path", help="vcf file used for phasing [None]")
     args = parser.parse_args()
 
     if args.control_bam is None:
@@ -204,34 +202,37 @@ def main():
 
     aln_dump_stream = open(os.path.join(args.out_dir, "read_alignments"), "w")
     split_reads = []
-    ins_list_new=[]
-    all_reads_stat=[]
-    allreads_bisect = defaultdict(list)
-    lowmapq_reg= defaultdict(list)
+    ins_list_new = []
+    coverage_histograms = {}
     ###AYSE TODO: update with new bamprocessing
+
+    NUM_HAPLOTYPES = 3  #TODO: infer this from bam files
     for bam_file in all_bams:
         genome_tag = os.path.basename(bam_file)
-        print('ver_3')
+        #print('ver_3')
         print("Parsing reads from", genome_tag, file=sys.stderr)
-        lowmapq_reg,all_reads_stat,all_reads,all_reads_bisect , ins_list = get_all_reads_parallel(bam_file, args.threads, aln_dump_stream, ref_lengths,
-                                              args.max_read_error, args.min_mapping_quality, genome_tag,args.sv_size,args.write_splitreads,
-                                              allreads_bisect,lowmapq_reg,all_reads_stat)
-        split_reads.extend(all_reads)
+        lowmapq_reg, bam_all_reads, bam_split_reads, all_reads_bisect, ins_list = \
+                get_all_reads_parallel(bam_file, args.threads, aln_dump_stream, ref_lengths, args.max_read_error,
+                                       args.min_mapping_quality, genome_tag, args.sv_size, args.write_alignments)
+        split_reads.extend(bam_split_reads)
         ins_list_new.extend(ins_list)
-        print("Parsed {0} split reads".format(len(all_reads)), file=sys.stderr)
+        print("Parsed {0} split reads".format(len(bam_split_reads)), file=sys.stderr)
 
-    split_reads = resolve_overlaps(split_reads,  args.sv_size) 
+        update_coverage_hist(coverage_histograms, genome_tag, ref_lengths, NUM_HAPLOTYPES, bam_all_reads)
+
+    split_reads = resolve_overlaps(split_reads,  args.sv_size)
     print("Parsed {0} split reads".format(len(split_reads)), file=sys.stderr)
-    double_breaks = get_breakpoints(allreads_bisect, split_reads, args.bp_cluster_size, MAX_UNALIGNED_LEN,
-                                  args.bp_min_support, args.min_ref_flank, ref_lengths, args.min_mapping_quality, args.single_bp , lowmapq_reg,args.sv_size,ins_list_new)
+    double_breaks = get_breakpoints(all_reads_bisect, split_reads, args.bp_cluster_size, MAX_UNALIGNED_LEN,
+                                    args.bp_min_support, args.min_ref_flank, ref_lengths, args.min_mapping_quality,
+                                    args.single_bp, lowmapq_reg,args.sv_size,ins_list_new)
     print("Number of SV found: {0}".format(len(double_breaks)), file=sys.stderr)
-    genomicsegments , hb_points=get_genomicsegments(double_breaks,all_bams, thread_pool,args.hpv)
+    genomic_segments, hb_points = get_genomic_segments(double_breaks, coverage_histograms, thread_pool, args.phase_vcf)
 
     genome_tags = list(target_genomes) + list(control_genomes)
-    output_breaks(double_breaks, genome_tags,args.hpv, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
+    output_breaks(double_breaks, genome_tags,args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
 
     #BP graph
-    graph, adj_clusters, key_to_color = build_breakpoint_graph(double_breaks, genomicsegments, hb_points, args.max_genomic_len,
+    graph, adj_clusters, key_to_color = build_breakpoint_graph(double_breaks, genomic_segments, hb_points, args.max_genomic_len,
                                                                 args.reference_adjacencies, target_genomes, control_genomes)
     output_clusters_graphvis(graph, adj_clusters, key_to_color, out_breakpoint_graph)
     output_clusters_csv(graph, adj_clusters, out_clustered_breakpoints)
