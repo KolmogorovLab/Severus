@@ -162,12 +162,9 @@ def get_phasingblocks(hb_vcf):
 
 
 def get_genomic_segments(double_breaks, coverage_histograms, thread_pool, hb_vcf):
+    hb_points = defaultdict(list)
     if hb_vcf:
-        hb_points=get_phasingblocks(hb_vcf)
-        phased = True
-    else:
-        hb_points = defaultdict(list)
-        phased = False
+        hb_points = get_phasingblocks(hb_vcf)
 
     single_bp = defaultdict(list)
     genomicsegments=[]
@@ -181,8 +178,7 @@ def get_genomic_segments(double_breaks, coverage_histograms, thread_pool, hb_vcf
         s_bp1 = list(set(s_bp1))
         s_bp1.sort()
         for seg_start, seg_end in zip(s_bp1[:-1], s_bp1[1:]):
-            segments.append((genome_name, ref_name, seg_start, seg_end,
-                             haplotype_name if phased else None))
+            segments.append((genome_name, ref_name, seg_start, seg_end, haplotype_name))
 
     genomic_segments = get_segments_coverage(segments, coverage_histograms)
     return genomic_segments, hb_points
