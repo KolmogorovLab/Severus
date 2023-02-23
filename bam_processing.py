@@ -3,11 +3,6 @@ from multiprocessing import Pool
 import numpy as np
 from collections import  defaultdict
 
-#read alignment constants
-MIN_ALIGNED_LENGTH = 5000
-MIN_ALIGNED_RATE = 0.5
-MAX_SEGMENTS = 10
-MIN_SEGMENT_LENGTH = 100
 
 
 class ReadSegment(object):
@@ -174,10 +169,20 @@ def extract_lowmapq_regions(segments_by_read , min_mapq):
 
         
 def filter_allreads(segments_by_read,min_mapq, max_read_error):
+    MIN_ALIGNED_LENGTH = 5000
+    MIN_ALIGNED_RATE = 0.5
+    MAX_SEGMENTS = 10
+    MIN_SEGMENT_LENGTH = 100
+    
     segments_by_read_filtered=[]
     for read_id, segments in segments_by_read.items():
         dedup_segments = []
         segments.sort(key=lambda s: s.read_start)
+        aligned_len = sum([seg.segment_length for seg in segments if not seg.is_insertion])
+        aligned_ratio = aligned_len/segments[0].read_length
+        if aligned_len < MIN_ALIGNED_LENGTH or aligned_ratio < MIN_ALIGNED_RATE or len(segments) > MAX_SEGMENTS:
+            continue
+        
         for seg in segments:
             if not dedup_segments or dedup_segments[-1].read_start != seg.read_start:            
                 if seg.is_insertion and seg.mapq>min_mapq:
@@ -196,11 +201,13 @@ def all_reads_position(allsegments):
             allreads_pos[seg.ref_id].append([seg.ref_end])
             allreads_pos[seg.ref_id].append([seg.read_id])
             allreads_pos[seg.ref_id].append([(seg.haplotype,seg.genome_id)])
+            allreads_pos[seg.ref_id].append([(seg.read_id)])
         else:    
             allreads_pos[seg.ref_id][0].append(seg.ref_start)
             allreads_pos[seg.ref_id][1].append(seg.ref_end)
             allreads_pos[seg.ref_id][2].append(seg.read_id)
             allreads_pos[seg.ref_id][3].append((seg.haplotype,seg.genome_id))
+            allreads_pos[seg.ref_id][4].append((seg.read_id))
     return allreads_pos
 
 

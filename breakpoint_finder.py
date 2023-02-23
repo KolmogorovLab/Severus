@@ -135,6 +135,7 @@ def resolve_vntrs(seq_breakpoints,vntr_list):
                         rc.pos_1 = rc.pos_2 + length
     return seq_breakpoints
 
+
 def get_breakpoints(allreads_pos, split_reads,vntr_list, thread_pool,clust_len, max_unaligned_len,
                     min_reads, min_ref_flank, ref_lengths, min_mapq,single_bp,lowmapq_reg,min_sv_size):
     """
@@ -151,29 +152,19 @@ def get_breakpoints(allreads_pos, split_reads,vntr_list, thread_pool,clust_len, 
             ref_bp = seg.ref_start if seg.strand == "+" else seg.ref_end
             sign = -1 if seg.strand == "+" else 1
         return ref_bp, sign
-
     def _add_double(seg_1, seg_2):
         ref_bp_1, sign_1 = _signed_breakpoint(s1, "right")
         ref_bp_2, sign_2 = _signed_breakpoint(s2, "left")
+        if ref_bp_1 > ref_bp_2:
+            ref_bp_1, sign_1,ref_bp_2, sign_2 = ref_bp_2, sign_2, ref_bp_1, sign_1 
         seq_breakpoints[s1.ref_id].append(ReadConnection(s1.ref_id, ref_bp_1, sign_1, s2.ref_id, ref_bp_2, sign_2,
                                                          s1.haplotype, s2.haplotype, s1.read_id, s1.genome_id))
-    def _add_single(seg, direction):
-        ref_bp, sign = _signed_breakpoint(seg, direction)
-        seq_breakpoints[seg.ref_id].append(ReadConnection(seg.ref_id, ref_bp, sign, None, None, None,
-                                                          seg.haplotype, None, seg.read_id, seg.genome_id))
-    
     for read_segments in split_reads:
         for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
             if s1.mapq >= min_mapq and s2.mapq >= min_mapq:
                 _add_double(s1, s2)
-            elif single_bp:
-                if s1.mapq >= min_mapq:
-                    _add_single(s1, "right")
-                if s2.mapq >= min_mapq:
-                    _add_single(s2, "left")
     if vntr_list:
         seq_breakpoints = resolve_vntrs(seq_breakpoints,vntr_list)
-                    
     bp_clusters = defaultdict(list)
     for seq, bp_pos in seq_breakpoints.items():
         clusters = []
@@ -201,7 +192,8 @@ def get_breakpoints(allreads_pos, split_reads,vntr_list, thread_pool,clust_len, 
                 by_genome_id[read[1]] += 1
             if max(by_genome_id.values()) >= min_reads:
                 position = int(np.median([x.pos_1 for x in cl]))
-                if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank and lowmapq and lowmapq[1][bisect.bisect_left(lowmapq[0],position)-1]<position:
+                low_mapq_pass = low_mapq_check(lowmapq,position)
+                if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank and low_mapq_pass:
                     bp_cluster = Breakpoint(seq, position, x.sign_1)
                     bp_cluster.connections = connections
                     bp_cluster.read_ids = read_ids
@@ -217,10 +209,8 @@ def get_breakpoints(allreads_pos, split_reads,vntr_list, thread_pool,clust_len, 
             for gen_id,counts in count_all.items():
                 bp.spanning_reads[gen_id]=counts
                 bp_list.append(bp)
-    
     tasks = [(bp_1, clust_len, min_reads, lowmapq_reg,ref_lengths,min_ref_flank,allreads_pos) for bp_1 in bp_list]
     double_break = thread_pool.starmap(get_left_break, tasks)
-         
     double_breaks=[]
     for db in double_break:
         if db:
@@ -252,10 +242,8 @@ def get_left_break(bp_1, clust_len, min_reads, lowmapq_reg,ref_lengths,min_ref_f
         if len(cur_cluster) > min_reads:
             clusters.append(cur_cluster)
             n_conn +=1
-            
         if n_conn > MAX_BP_CONNECTIONS or not clusters:
             continue
-        
         for cl in clusters:
             unique_reads = defaultdict(set)
             for x in cl:
@@ -269,7 +257,8 @@ def get_left_break(bp_1, clust_len, min_reads, lowmapq_reg,ref_lengths,min_ref_f
                 happ_support_2[key[0]].append(key[2])
             if max(by_genome_id.values()) >= min_reads:
                 position = int(np.median([x.pos_2 for x in cl]))
-                if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank and lowmapq and lowmapq[1][bisect.bisect_left(lowmapq[0],position)-1]<position:
+                low_mapq_pass = low_mapq_check(lowmapq,position)
+                if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank and low_mapq_pass:
                     bp_2 = Breakpoint(seq, position, x.sign_2)
                     strt=bisect.bisect_left(read_segments[1],bp_2.position)
                     end = bisect.bisect_left(read_segments[0],bp_2.position)
@@ -292,7 +281,7 @@ def get_left_break(bp_1, clust_len, min_reads, lowmapq_reg,ref_lengths,min_ref_f
                         double_break.append(DoubleBreak(bp_1, bp_1.dir_1, bp_2, bp_2.dir_1,genome_id,haplotype1, haplotype2,supp,support_reads, length_bp, genotype , 'dashed'))
         return double_break
 
-
+### Make it optional
 def support_read_filter(bp_cluster, read_segments, by_genome_id, true_bp_threshold):
     LOW_SUPP_THR = 3
     HIGH_SUPP_THR= 0.75
@@ -322,6 +311,10 @@ def resolve_vntr_ins(ins_list,vntr_list):
                 rc.ref_end = tr_reg[0][end]
     return ins_list
 
+def low_mapq_check(lowmapq, position):
+    if lowmapq and bisect.bisect_left(lowmapq[0],position) == 0 or lowmapq[1][bisect.bisect_left(lowmapq[0],position)-1]<position:
+        return True
+        
       
 def extract_insertions(ins_list_all, lowmapq_reg, vntr_list, clust_len, min_ref_flank, ref_lengths, min_reads, allreads_pos):
     ins_list = defaultdict(list)
@@ -370,8 +363,8 @@ def extract_insertions(ins_list_all, lowmapq_reg, vntr_list, clust_len, min_ref_
             if max(by_genome_id.values()) >= min_reads:
                 position = int(np.median([x.ref_end for x in cl]))
                 ins_length = int(np.median([x.segment_length for x in cl]))
-                if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank and lowmapq and lowmapq[1][bisect.bisect_left(lowmapq[0],position)-1]<position:
-                    #t+=1
+                low_mapq_pass = low_mapq_check(lowmapq,position)
+                if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank and low_mapq_pass:
                     for key, value in unique_reads.items():
                         bp_1 = Breakpoint(seq, position,-1)
                         bp_2 = Breakpoint(seq, position,1)
