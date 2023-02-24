@@ -195,20 +195,31 @@ def filter_allreads(segments_by_read,min_mapq, max_read_error):
 
 def all_reads_position(allsegments):
     allreads_pos = defaultdict(list)
+    allreads_pos_ordered = defaultdict(list)
+    t=0
     for seg in allsegments:
         if not allreads_pos[seg.ref_id]:
+            t+=1
             allreads_pos[seg.ref_id].append([seg.ref_start])
             allreads_pos[seg.ref_id].append([seg.ref_end])
             allreads_pos[seg.ref_id].append([seg.read_id])
             allreads_pos[seg.ref_id].append([(seg.haplotype,seg.genome_id)])
-            allreads_pos[seg.ref_id].append([(seg.read_id)])
+            allreads_pos[seg.ref_id].append([seg.read_id])
+            allreads_pos[seg.ref_id].append([t])
         else:    
+            t+=1
             allreads_pos[seg.ref_id][0].append(seg.ref_start)
             allreads_pos[seg.ref_id][1].append(seg.ref_end)
             allreads_pos[seg.ref_id][2].append(seg.read_id)
-            allreads_pos[seg.ref_id][3].append((seg.haplotype,seg.genome_id))
-            allreads_pos[seg.ref_id][4].append((seg.read_id))
-    return allreads_pos
+            allreads_pos[seg.ref_id][3].append((seg.haplotype, seg.genome_id))
+            allreads_pos[seg.ref_id][4].append(seg.read_id)
+            allreads_pos[seg.ref_id][5].append(t)
+            
+    for key, values in allreads_pos.items():
+        read_segments_start = list(zip(*sorted(zip(values[0], values[5]))))
+        read_segments_end = list(zip(*sorted(zip(values[1], values[5]))))
+        allreads_pos_ordered[key] = [read_segments_start, read_segments_end, values[2], values[3], values[4], values[5]]            
+    return allreads_pos_ordered
 
 
 def get_insertionreads(segments_by_read_filtered):

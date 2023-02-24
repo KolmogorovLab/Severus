@@ -136,6 +136,17 @@ def resolve_vntrs(seq_breakpoints,vntr_list):
     return seq_breakpoints
 
 
+def count_spanning_reads(read_segments, position, read_ids):
+    read_segments_start = read_segments[0]
+    read_segments_end = read_segments[1]
+    strt = read_segments_start[1][:bisect.bisect_left(read_segments_start[0],position)]
+    end = read_segments_end[1][bisect.bisect_left(read_segments_end[0],position):]
+    idx = list(set.intersection(set(strt), set(end)))
+    idx_filt = [i for i in idx if read_segments[4][read_segments[5].index(i)] not in read_ids]
+    count_all = Counter([read_segments[3][read_segments[5].index(i)] for i in idx_filt])
+    return count_all
+
+
 def get_breakpoints(allreads_pos, split_reads,vntr_list, thread_pool,clust_len, max_unaligned_len,
                     min_reads, min_ref_flank, ref_lengths, min_mapq,single_bp,lowmapq_reg,min_sv_size):
     """
@@ -201,11 +212,8 @@ def get_breakpoints(allreads_pos, split_reads,vntr_list, thread_pool,clust_len, 
     bp_list = []           
     for key, bp_cluster in bp_clusters.items():
         read_segments = allreads_pos[key]
-        read_segments[0], read_segments[1], read_segments[2], read_segments[3] = zip(*sorted(zip(read_segments[0],read_segments[1],read_segments[2],read_segments[3])))
         for bp in bp_cluster:
-            strt=bisect.bisect_left(read_segments[1],bp.position)
-            end = bisect.bisect_left(read_segments[0],bp.position)
-            count_all = Counter([read_segments[3][i] for i in range(strt,end) if read_segments[1][i] > bp.position]) 
+            count_all =count_spanning_reads(read_segments, bp.position, bp.read_ids) 
             for gen_id,counts in count_all.items():
                 bp.spanning_reads[gen_id]=counts
                 bp_list.append(bp)
@@ -227,8 +235,6 @@ def get_left_break(bp_1, clust_len, min_reads, lowmapq_reg,ref_lengths,min_ref_f
     for seq, conn in left_break.items():
         lowmapq = lowmapq_reg[seq]
         read_segments = allreads_pos[seq]
-        read_segments[0], read_segments[1], read_segments[2], read_segments[3] = zip(*sorted(zip(read_segments[0],read_segments[1],read_segments[2],read_segments[3])))
-        
         cur_cluster = []
         conn.sort(key=lambda cn:cn.pos_2)
         for rc in conn:
@@ -251,18 +257,18 @@ def get_left_break(bp_1, clust_len, min_reads, lowmapq_reg,ref_lengths,min_ref_f
             by_genome_id = defaultdict(int)
             happ_support_1 = defaultdict(list)
             happ_support_2 = defaultdict(list)
+            read_ids=[]
             for key, values in unique_reads.items():
                 by_genome_id[key] = len(values)
                 happ_support_1[key[0]].append(key[1])
                 happ_support_2[key[0]].append(key[2])
+                read_ids.append(values)
             if max(by_genome_id.values()) >= min_reads:
                 position = int(np.median([x.pos_2 for x in cl]))
                 low_mapq_pass = low_mapq_check(lowmapq,position)
                 if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank and low_mapq_pass:
                     bp_2 = Breakpoint(seq, position, x.sign_2)
-                    strt=bisect.bisect_left(read_segments[1],bp_2.position)
-                    end = bisect.bisect_left(read_segments[0],bp_2.position)
-                    count_all = Counter([read_segments[3][i] for i in range(strt,end) if read_segments[1][i] > bp_2.position]) 
+                    count_all =count_spanning_reads(read_segments, bp_2.position, read_ids)
                     for gen_id,counts in count_all.items():
                         bp_2.spanning_reads[gen_id]=counts
                     for keys , support_reads in unique_reads.items():
@@ -332,7 +338,7 @@ def extract_insertions(ins_list_all, lowmapq_reg, vntr_list, clust_len, min_ref_
         ins_pos.sort(key=lambda x:x.ref_end)
         lowmapq = lowmapq_reg[seq]
         read_segments = allreads_pos[seq]
-        read_segments[0], read_segments[1], read_segments[2], read_segments[3] = zip(*sorted(zip(read_segments[0],read_segments[1],read_segments[2],read_segments[3])))
+        
         for rc in ins_pos:
             if cur_cluster and rc.ref_end - cur_cluster[-1].ref_end > clust_len:
                 cur_cluster.sort(key=lambda x:x.segment_length)
@@ -344,7 +350,7 @@ def extract_insertions(ins_list_all, lowmapq_reg, vntr_list, clust_len, min_ref_
                     else:
                         cl_ins.append(cl1)
                 if cl_ins:
-                    clusters.append( cl_ins)
+                    clusters.append(cl_ins)
                 cur_cluster = [rc]
             else:
                 cur_cluster.append(rc)
@@ -357,10 +363,13 @@ def extract_insertions(ins_list_all, lowmapq_reg, vntr_list, clust_len, min_ref_
                 unique_reads[(x.genome_id,x.haplotype)].add(x.read_id)
             by_genome_id = defaultdict(int)
             happ_support_1 = defaultdict(list)
+            read_ids=[]
             for key, values in unique_reads.items():
                 by_genome_id[key] = len(values)
                 happ_support_1[key[0]].append(key[1])
+                read_ids.append(values)
             if max(by_genome_id.values()) >= min_reads:
+                print('a')
                 position = int(np.median([x.ref_end for x in cl]))
                 ins_length = int(np.median([x.segment_length for x in cl]))
                 low_mapq_pass = low_mapq_check(lowmapq,position)
@@ -376,14 +385,15 @@ def extract_insertions(ins_list_all, lowmapq_reg, vntr_list, clust_len, min_ref_
                             genotype = 'hom'
                         else:
                             genotype = 'het'
-                        count_all = Counter(read_segments[3][bisect.bisect_left(read_segments[1],position):bisect.bisect_left(read_segments[0],position)])
+                        count_all =count_spanning_reads(read_segments, position, read_ids)
                         for gen_id,counts in count_all.items():
-                            bp_1.spanning_reads[gen_id]=counts-len(value)
-                            bp_2.spanning_reads[gen_id]=counts-len(value)
-                            bp_3.spanning_reads[gen_id]=counts-len(value)
-                        db = DoubleBreak(bp_1, -1, bp_3, 1, genome_id, key[1], key[1], len(value), value, ins_length, genotype, 'dashed')
-                        db = DoubleBreak(bp_3, 1, bp_2, 1, genome_id, key[1], key[1], len(value), value, ins_length, genotype, 'dashed')
-                        ins_clusters.append(db)
+                            bp_1.spanning_reads[gen_id]=counts
+                            bp_2.spanning_reads[gen_id]=counts
+                            bp_3.spanning_reads[gen_id]=counts
+                        db_1 = DoubleBreak(bp_1, -1, bp_3, 1, genome_id, key[1], key[1], len(value), value, ins_length, genotype, 'dashed')
+                        db_2 = DoubleBreak(bp_3, 1, bp_2, 1, genome_id, key[1], key[1], len(value), value, ins_length, genotype, 'dashed')
+                        ins_clusters.append(db_1)
+                        ins_clusters.append(db_2)
     return(ins_clusters)
 
 
