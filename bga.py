@@ -5,12 +5,12 @@ import shutil
 import pysam
 import argparse
 import os
-import math
 from multiprocessing import Pool
-from collections import namedtuple, defaultdict, Counter
+from collections import defaultdict
 from build_graph import build_breakpoint_graph, output_clusters_graphvis, output_clusters_csv
-from bam_processing import get_all_reads_parallel,get_splitreads,get_insertionreads,get_allsegments,update_coverage_hist,resolve_overlaps,extract_lowmapq_regions,filter_allreads,all_reads_position,write_alignments
-from breakpoint_finder import call_breakpoints, output_breaks,get_genomic_segments
+from breakpoint_finder import call_breakpoints, output_breaks, get_genomic_segments
+from bam_processing import get_all_reads_parallel, update_coverage_hist
+
 
 def main():
     # default tunable parameters
@@ -67,13 +67,13 @@ def main():
                         default=False, help="draw reference adjacencies [False]")
     parser.add_argument("--write_alignments", action="store_true", dest="write_alignments",
                         default=False, help="write read alignments to file [False]")
-    parser.add_argument("--single_bp", action="store_true", dest="single_bp",
+    parser.add_argument("--single-bp", action="store_true", dest="single_bp",
                         default=False, help="Add hagning breakpoints [False]")
     parser.add_argument("--max-genomic-len", dest="max_genomic_len",
                         default=MAX_GENOMIC_LEN, metavar="int", type=int,
                         help=f"maximum length of genomic segment to form connected components [{MAX_GENOMIC_LEN}]")
-    parser.add_argument("--phasing_vcf", dest="phase_vcf", metavar="path", help="vcf file used for phasing [None]")
-    parser.add_argument("--vntr_bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
+    parser.add_argument("--phasing-vcf", dest="phase_vcf", metavar="path", help="vcf file used for phasing [None]")
+    parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
     args = parser.parse_args()
 
     if args.control_bam is None:
@@ -101,7 +101,6 @@ def main():
     
     segments_by_read = defaultdict(list)
     genome_ids=[]
-    NUM_HAPLOTYPES = 3  #TODO: infer this from bam files
     for bam_file in all_bams:
         genome_id = os.path.basename(bam_file)
         genome_ids.append(genome_id)
@@ -110,33 +109,15 @@ def main():
                                    args.min_mapping_quality, genome_id,args.sv_size)
         segments_by_read.update(segments_by_read_bam)
         print("Parsed {0} segments".format(len(segments_by_read_bam)), file=sys.stderr)
-    
-    print('Detecting low mapping quality regions')
-    lowmapq_reg= extract_lowmapq_regions(segments_by_read , args.min_mapping_quality)
-    print('Filtering reads')
-    segments_by_read_filtered = filter_allreads(segments_by_read,args.min_mapping_quality, args.max_read_error)
-    
-    allsegments = get_allsegments(segments_by_read_filtered)
-    if args.write_alignments:
-        outpath_alignments = os.path.join(args.out_dir, "read_alignments")
-        write_alignments(allsegments, outpath_alignments)
-    allreads_pos = all_reads_position(allsegments)
-    
-    split_reads = get_splitreads(segments_by_read_filtered)
-    print(len(split_reads))
-    print('Resolving overlaps')
-    split_reads = resolve_overlaps(split_reads,  args.sv_size)
-    
-    ins_list_all = get_insertionreads(segments_by_read_filtered)
-    double_breaks = call_breakpoints(split_reads,allreads_pos,ins_list_all, lowmapq_reg,args.vntr_file, thread_pool,args.bp_cluster_size, MAX_UNALIGNED_LEN,
-                                  args.bp_min_support, args.min_ref_flank, ref_lengths, args.min_mapping_quality, args.single_bp , args.sv_size, args.max_read_error) 
+     
+    print('Computing coverage histogram')
+    coverage_histograms = update_coverage_hist(genome_ids, ref_lengths, segments_by_read, args.min_mapping_quality, args.max_read_error)
+    double_breaks = call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histograms, args)
     print('Computing segment coverage')
-    coverage_histograms = update_coverage_hist(genome_ids, ref_lengths, NUM_HAPLOTYPES, allsegments)
     genomic_segments, hb_points = get_genomic_segments(double_breaks, coverage_histograms, thread_pool, args.phase_vcf)
 
-    genome_tags = list(target_genomes) + list(control_genomes)
     print('Writing breakpoints')
-    output_breaks(double_breaks, genome_tags,args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
+    output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
     print('Preparing graph')
     graph, adj_clusters, key_to_color = build_breakpoint_graph(double_breaks, genomic_segments, hb_points, args.max_genomic_len,
                                                                 args.reference_adjacencies, target_genomes, control_genomes)
