@@ -536,18 +536,20 @@ def filter_all_reads(segments_by_read,min_mapq, max_read_error):
     for read_id, segments in segments_by_read.items():
         dedup_segments = []
         segments.sort(key=lambda s: s.read_start)
-        aligned_len = sum([seg.segment_length for seg in segments if not seg.is_insertion])
-        aligned_ratio = aligned_len/segments[0].read_length
-        if aligned_len < MIN_ALIGNED_LENGTH or aligned_ratio < MIN_ALIGNED_RATE or len(segments) > MAX_SEGMENTS:
-            continue
         
         for seg in segments:
             if not dedup_segments or dedup_segments[-1].read_start != seg.read_start:            
                 if seg.is_insertion and seg.mapq>min_mapq:
                     dedup_segments.append(seg)
-                elif seg.mapq>min_mapq and seg.segment_length > MIN_SEGMENT_LENGTH and seg.mismatch_rate< max_read_error:
+                elif seg.mapq>min_mapq and seg.segment_length > MIN_SEGMENT_LENGTH and seg.mismatch_rate < max_read_error:
                     dedup_segments.append(seg)
+                    
+        aligned_len = sum([seg.segment_length for seg in dedup_segments if not seg.is_insertion])
+        aligned_ratio = aligned_len/segments[0].read_length
+        if aligned_len < MIN_ALIGNED_LENGTH or aligned_ratio < MIN_ALIGNED_RATE or len(segments) > MAX_SEGMENTS:
+            continue
         segments_by_read_filtered.append(dedup_segments)
+        
     return segments_by_read_filtered
 
 
