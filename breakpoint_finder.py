@@ -123,18 +123,19 @@ def read_vntr_file(vntr_file):
 def resolve_vntrs(seq_breakpoints,vntr_list):
     for seq, bp_pos in seq_breakpoints.items():
         tr_reg = vntr_list[seq]
-        for rc in bp_pos:
-            if rc.ref_id_1 == rc.ref_id_2:
-                strt = bisect.bisect_left(tr_reg[0],rc.pos_1)
-                end = bisect.bisect_left(tr_reg[1],rc.pos_2)
-                if strt - end == 1:
-                    length = abs(rc.pos_1 - rc.pos_2)
-                    if rc.pos_1 < rc.pos_2:
-                        rc.pos_1 = tr_reg[0][end]
-                        rc.pos_2 = rc.pos_1 + length
-                    else:
-                        rc.pos_2 = tr_reg[0][end]
-                        rc.pos_1 = rc.pos_2 + length
+        if tr_reg:
+            for rc in bp_pos:
+                if rc.ref_id_1 == rc.ref_id_2:
+                    strt = bisect.bisect_left(tr_reg[0],rc.pos_1)
+                    end = bisect.bisect_left(tr_reg[1],rc.pos_2)
+                    if strt - end == 1:
+                        length = abs(rc.pos_1 - rc.pos_2)
+                        if rc.pos_1 < rc.pos_2:
+                            rc.pos_1 = tr_reg[0][end]
+                            rc.pos_2 = rc.pos_1 + length
+                        else:
+                            rc.pos_2 = tr_reg[0][end]
+                            rc.pos_1 = rc.pos_2 + length
     return seq_breakpoints
 
 
@@ -321,19 +322,21 @@ def support_read_filter(bp_cluster, read_segments, by_genome_id, true_bp_thresho
 def resolve_vntr_ins(ins_list,vntr_list):
     for seq, reads in ins_list.items():
         tr_reg = vntr_list[seq]
-        for rc in reads:
-            strt = bisect.bisect_right(tr_reg[0],rc.ref_end)
-            end = bisect.bisect_left(tr_reg[1],rc.ref_end)
-            if strt - end == 1:
-                rc.ref_end = tr_reg[0][end]
+        if tr_reg:
+            for rc in reads:
+                strt = bisect.bisect_right(tr_reg[0],rc.ref_end)
+                end = bisect.bisect_left(tr_reg[1],rc.ref_end)
+                if strt - end == 1:
+                    rc.ref_end = tr_reg[0][end]
     return ins_list
 
 def low_mapq_check(lowmapq, position):
-    if lowmapq and bisect.bisect_left(lowmapq[0],position) == 0 or lowmapq[1][bisect.bisect_left(lowmapq[0],position)-1]<position:
+    if lowmapq and (bisect.bisect_left(lowmapq[0], position) == 0 or lowmapq[1][bisect.bisect_left(lowmapq[0], position) - 1] < position):
         return True
         
       
 def extract_insertions(ins_list_all, lowmapq_reg, vntr_list, clust_len, min_ref_flank, ref_lengths, min_reads):
+    NUM_HAPLOTYPES = 3
     ins_list = defaultdict(list)
     for ins in ins_list_all:
         ins_list[ins.ref_id].append(ins)
@@ -391,7 +394,7 @@ def extract_insertions(ins_list_all, lowmapq_reg, vntr_list, clust_len, min_ref_
                         bp_2.read_ids = value
                         bp_3 = Breakpoint('INS', ins_length,1)
                         genome_id = key[0]
-                        if sum(happ_support_1[genome_id]) == 3:
+                        if sum(happ_support_1[genome_id]) == NUM_HAPLOTYPES:
                             genotype = 'hom'
                         else:
                             genotype = 'het'
