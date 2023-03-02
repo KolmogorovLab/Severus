@@ -163,6 +163,7 @@ def get_breakpoints(split_reads,vntr_list, thread_pool, ref_lengths, lowmapq_reg
     min_reads = args.bp_min_support
     min_ref_flank = args.min_ref_flank 
     min_mapq = args.min_mapping_quality
+    MAX_SEGMENT_DIST= 5000
     
     seq_breakpoints = defaultdict(list)
     def _signed_breakpoint(seg, direction):
@@ -186,7 +187,7 @@ def get_breakpoints(split_reads,vntr_list, thread_pool, ref_lengths, lowmapq_reg
             
     for read_segments in split_reads:
         for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
-            if s1.mapq >= min_mapq and s2.mapq >= min_mapq:
+            if s1.mapq >= min_mapq and s2.mapq >= min_mapq and abs(s2.read_start - s1.read_end) < MAX_SEGMENT_DIST:
                 _add_double(s1, s2)
     if vntr_list:
         seq_breakpoints = resolve_vntrs(seq_breakpoints,vntr_list)
@@ -250,14 +251,13 @@ def get_left_break(bp_1, clust_len, min_reads, lowmapq_reg,ref_lengths,min_ref_f
     double_break=[]
     for seq, conn in left_break.items():
         lowmapq = lowmapq_reg[seq]
-        #read_segments = allreads_pos[seq]
         cur_cluster = []
         conn.sort(key=lambda cn:cn.pos_2)
         for rc in conn:
             if cur_cluster and rc.pos_2 - cur_cluster[-1].pos_2 > clust_len: 
                 if len(cur_cluster) > min_reads:
                     clusters.append(cur_cluster)
-                    n_conn +=1
+                n_conn +=1
                 cur_cluster = [rc]
             else:
                 cur_cluster.append(rc)
