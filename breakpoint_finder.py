@@ -18,6 +18,10 @@ import random
 import os
 import subprocess
 import bisect
+import logging
+
+
+logger = logging.getLogger()
 
 
 MAX_LOWMAPQ_READS = 10
@@ -703,9 +707,9 @@ def output_breaks(double_breaks, genome_tags, phasing, out_stream):
 
         
 def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histograms, args):
-    print('Detecting low mapping quality regions')
+    logger.info('Detecting low mapping quality regions')
     lowmapq_reg = extract_lowmapq_regions(segments_by_read, args.min_mapping_quality)
-    print('Filtering reads')
+    logger.info('Filtering reads')
     segments_by_read_filtered = filter_all_reads(segments_by_read,args.min_mapping_quality, args.max_read_error)
     
     allsegments = get_allsegments(segments_by_read_filtered)
@@ -715,7 +719,7 @@ def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histog
     #allreads_pos = all_reads_position(allsegments)
     
     split_reads = get_splitreads(segments_by_read_filtered)
-    print('Resolving overlaps')
+    logger.info('Resolving overlaps')
     split_reads = resolve_overlaps(split_reads,  args.sv_size)
     
     ins_list_all = get_insertionreads(segments_by_read_filtered)
@@ -723,11 +727,11 @@ def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histog
     vntr_list = []
     if args.vntr_file:
         vntr_list=read_vntr_file(args.vntr_file)
-    print('Starting breakpoint detection')
+    logger.info('Starting breakpoint detection')
     double_breaks = get_breakpoints(split_reads,vntr_list, thread_pool, ref_lengths, lowmapq_reg, args)
     double_breaks.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position, b.direction_1))
     
-    print('Clustering unmapped insertions')
+    logger.info('Clustering unmapped insertions')
     ins_clusters = extract_insertions(ins_list_all, lowmapq_reg, vntr_list, args.bp_cluster_size, args.min_ref_flank, ref_lengths,args.bp_min_support)
     double_breaks +=  ins_clusters 
             

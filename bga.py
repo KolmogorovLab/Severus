@@ -10,6 +10,33 @@ from collections import defaultdict
 from build_graph import build_breakpoint_graph, output_clusters_graphvis, output_clusters_csv
 from breakpoint_finder import call_breakpoints, output_breaks, get_genomic_segments
 from bam_processing import get_all_reads_parallel, update_coverage_hist
+import logging
+
+
+logger = logging.getLogger()
+
+
+def _enable_logging(log_file, debug, overwrite):
+    """
+    Turns on logging, sets debug levels and assigns a log file
+    """
+    log_formatter = logging.Formatter("[%(asctime)s] %(name)s: %(levelname)s: "
+                                      "%(message)s", "%Y-%m-%d %H:%M:%S")
+    console_formatter = logging.Formatter("[%(asctime)s] %(levelname)s: "
+                                          "%(message)s", "%Y-%m-%d %H:%M:%S")
+    console_log = logging.StreamHandler()
+    console_log.setFormatter(console_formatter)
+    if not debug:
+        console_log.setLevel(logging.INFO)
+
+    if overwrite:
+        open(log_file, "w").close()
+    file_handler = logging.FileHandler(log_file, mode="a")
+    file_handler.setFormatter(log_formatter)
+
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(console_log)
+    logger.addHandler(file_handler)
 
 
 def main():
@@ -82,8 +109,12 @@ def main():
     target_genomes = set(os.path.basename(b) for b in args.target_bam)
     control_genomes = set(os.path.basename(b) for b in args.control_bam)
 
+    log_file = os.path.join(args.out_dir, "bga.log")
+    _enable_logging(log_file, debug=False, overwrite=True)
+    logger.debug("Cmd: " + " ".join(sys.argv[1:]))
+
     if not shutil.which(SAMTOOLS_BIN):
-        print("samtools not found", file=sys.stderr)
+        logger.error("samtools not found")
         return 1
 
     #TODO: check that all bams have the same reference
@@ -104,21 +135,22 @@ def main():
     for bam_file in all_bams:
         genome_id = os.path.basename(bam_file)
         genome_ids.append(genome_id)
-        print("Parsing reads from", genome_id, file=sys.stderr)
+        logger.info(f"Parsing reads from {genome_id}")
         segments_by_read_bam =  get_all_reads_parallel(bam_file, thread_pool, ref_lengths,
                                    args.min_mapping_quality, genome_id,args.sv_size)
         segments_by_read.update(segments_by_read_bam)
-        print("Parsed {0} segments".format(len(segments_by_read_bam)), file=sys.stderr)
+        num_seg = len(segments_by_read_bam)
+        logger.info(f"Parsed {num_seg} segments")
      
-    print('Computing coverage histogram')
+    logger.info('Computing coverage histogram')
     coverage_histograms = update_coverage_hist(genome_ids, ref_lengths, segments_by_read, args.min_mapping_quality, args.max_read_error)
     double_breaks = call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histograms, args)
-    print('Computing segment coverage')
+    logger.info('Computing segment coverage')
     genomic_segments, hb_points = get_genomic_segments(double_breaks, coverage_histograms, thread_pool, args.phase_vcf)
 
-    print('Writing breakpoints')
+    logger.info('Writing breakpoints')
     output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
-    print('Preparing graph')
+    logger.info('Preparing graph')
     graph, adj_clusters, key_to_color = build_breakpoint_graph(double_breaks, genomic_segments, hb_points, args.max_genomic_len,
                                                                 args.reference_adjacencies, target_genomes, control_genomes)
     output_clusters_graphvis(graph, adj_clusters, key_to_color, out_breakpoint_graph)
