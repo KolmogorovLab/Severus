@@ -21,6 +21,10 @@ import bisect
 import logging
 
 
+from resolve_vntr import resolve_vntr
+from bam_processing import filter_all_reads, get_allsegments
+
+
 logger = logging.getLogger()
 
 
@@ -109,39 +113,6 @@ class GenomicSegment(object):
         self.coverage = coverage
         self.length_bp = length_bp
 
-def read_vntr_file(vntr_file):
-    vntr_list = defaultdict(list)
-    vntrs = []
-    with open(vntr_file)as f:
-        for line in f:
-            vntrs.append(line.strip().split())
-        for tr in vntrs:
-            if not vntr_list[tr[0]]:
-                vntr_list[tr[0]].append([int(tr[1])])
-                vntr_list[tr[0]].append([int(tr[2])])
-            else:
-                vntr_list[tr[0]][0].append(int(tr[1]))
-                vntr_list[tr[0]][1].append(int(tr[2]))
-    return vntr_list
-
-def resolve_vntrs(seq_breakpoints,vntr_list):
-    for seq, bp_pos in seq_breakpoints.items():
-        tr_reg = vntr_list[seq]
-        if tr_reg:
-            for rc in bp_pos:
-                if rc.ref_id_1 == rc.ref_id_2:
-                    strt = bisect.bisect_left(tr_reg[0],rc.pos_1)
-                    end = bisect.bisect_left(tr_reg[1],rc.pos_2)
-                    if strt - end == 1:
-                        length = abs(rc.pos_1 - rc.pos_2)
-                        if rc.pos_1 < rc.pos_2:
-                            rc.pos_1 = tr_reg[0][end]
-                            rc.pos_2 = rc.pos_1 + length
-                        else:
-                            rc.pos_2 = tr_reg[0][end]
-                            rc.pos_1 = rc.pos_2 + length
-    return seq_breakpoints
-
 
 def count_spanning_reads(read_segments, position, read_ids):
     read_segments_start = read_segments[0]
@@ -154,7 +125,7 @@ def count_spanning_reads(read_segments, position, read_ids):
     return count_all
     
 
-def get_breakpoints(split_reads,vntr_list, thread_pool, ref_lengths, lowmapq_reg, args):
+def get_breakpoints(split_reads, thread_pool, ref_lengths, lowmapq_reg, args):
     """
     Finds regular 1-sided breakpoints, where split reads consistently connect
     two different parts of the genome
@@ -163,7 +134,7 @@ def get_breakpoints(split_reads,vntr_list, thread_pool, ref_lengths, lowmapq_reg
     min_reads = args.bp_min_support
     min_ref_flank = args.min_ref_flank 
     min_mapq = args.min_mapping_quality
-    MAX_SEGMENT_DIST= 5000
+    MAX_SEGMENT_DIST= 500
     
     seq_breakpoints = defaultdict(list)
     def _signed_breakpoint(seg, direction):
@@ -189,8 +160,6 @@ def get_breakpoints(split_reads,vntr_list, thread_pool, ref_lengths, lowmapq_reg
         for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
             if s1.mapq >= min_mapq and s2.mapq >= min_mapq and abs(s2.read_start - s1.read_end) < MAX_SEGMENT_DIST:
                 _add_double(s1, s2)
-    if vntr_list:
-        seq_breakpoints = resolve_vntrs(seq_breakpoints,vntr_list)
     #bp_clusters = defaultdict(list)
     bp_list = []
     for seq, bp_pos in seq_breakpoints.items():
@@ -244,7 +213,7 @@ def get_breakpoints(split_reads,vntr_list, thread_pool, ref_lengths, lowmapq_reg
     
 
 def get_left_break(bp_1, clust_len, min_reads, lowmapq_reg,ref_lengths,min_ref_flank):
-    MAX_BP_CONNECTIONS = 3 ## if segment is connected to more than two bp
+    MAX_BP_CONNECTIONS = 33 ## if segment is connected to more than two bp
     left_break = bp_1.connections
     n_conn  = 0
     clusters = []
@@ -323,30 +292,16 @@ def support_read_filter(bp_cluster, read_segments, by_genome_id, true_bp_thresho
     return True
 
 
-def resolve_vntr_ins(ins_list,vntr_list):
-    for seq, reads in ins_list.items():
-        tr_reg = vntr_list[seq]
-        if tr_reg:
-            for rc in reads:
-                strt = bisect.bisect_right(tr_reg[0],rc.ref_end)
-                end = bisect.bisect_left(tr_reg[1],rc.ref_end)
-                if strt - end == 1:
-                    rc.ref_end = tr_reg[0][end]
-    return ins_list
-
 def low_mapq_check(lowmapq, position):
     if lowmapq and (bisect.bisect_left(lowmapq[0], position) == 0 or lowmapq[1][bisect.bisect_left(lowmapq[0], position) - 1] < position):
         return True
         
       
-def extract_insertions(ins_list_all, lowmapq_reg, vntr_list, clust_len, min_ref_flank, ref_lengths, min_reads):
+def extract_insertions(ins_list_all, lowmapq_reg, clust_len, min_ref_flank, ref_lengths, min_reads):
     NUM_HAPLOTYPES = 3
     ins_list = defaultdict(list)
     for ins in ins_list_all:
         ins_list[ins.ref_id].append(ins)
-    
-    if vntr_list:
-        ins_list = resolve_vntr_ins(ins_list, vntr_list)
    
     #t = 0
     ins_clusters = []
@@ -533,61 +488,6 @@ def extract_lowmapq_regions(segments_by_read , min_mapq):
     return lowmapq_reg
 
 
-def filter_all_reads(segments_by_read,min_mapq, max_read_error):
-    MIN_ALIGNED_LENGTH = 5000
-    MIN_ALIGNED_RATE = 0.5
-    MAX_SEGMENTS = 10
-    MIN_SEGMENT_LENGTH = 100
-    
-    segments_by_read_filtered=[]
-    for read_id, segments in segments_by_read.items():
-        dedup_segments = []
-        segments.sort(key=lambda s: s.read_start)
-        
-        for seg in segments:
-            if not dedup_segments or dedup_segments[-1].read_start != seg.read_start:            
-                if seg.is_insertion and seg.mapq>min_mapq:
-                    dedup_segments.append(seg)
-                elif seg.mapq>min_mapq and seg.segment_length > MIN_SEGMENT_LENGTH and seg.mismatch_rate < max_read_error:
-                    dedup_segments.append(seg)
-                    
-        aligned_len = sum([seg.segment_length for seg in dedup_segments if not seg.is_insertion])
-        aligned_ratio = aligned_len/segments[0].read_length
-        if aligned_len < MIN_ALIGNED_LENGTH or aligned_ratio < MIN_ALIGNED_RATE or len(segments) > MAX_SEGMENTS:
-            continue
-        segments_by_read_filtered.append(dedup_segments)
-        
-    return segments_by_read_filtered
-
-
-def all_reads_position(allsegments):
-    allreads_pos = defaultdict(list)
-    allreads_pos_ordered = defaultdict(list)
-    t=0
-    for seg in allsegments:
-        if not allreads_pos[seg.ref_id]:
-            t+=1
-            allreads_pos[seg.ref_id].append([seg.ref_start])
-            allreads_pos[seg.ref_id].append([seg.ref_end])
-            allreads_pos[seg.ref_id].append([seg.read_id])
-            allreads_pos[seg.ref_id].append([(seg.haplotype,seg.genome_id)])
-            allreads_pos[seg.ref_id].append([seg.read_id])
-            allreads_pos[seg.ref_id].append([t])
-        else:    
-            t+=1
-            allreads_pos[seg.ref_id][0].append(seg.ref_start)
-            allreads_pos[seg.ref_id][1].append(seg.ref_end)
-            allreads_pos[seg.ref_id][2].append(seg.read_id)
-            allreads_pos[seg.ref_id][3].append((seg.haplotype, seg.genome_id))
-            allreads_pos[seg.ref_id][4].append(seg.read_id)
-            allreads_pos[seg.ref_id][5].append(t)
-            
-    for key, values in allreads_pos.items():
-        read_segments_start = list(zip(*sorted(zip(values[0], values[5]))))
-        read_segments_end = list(zip(*sorted(zip(values[1], values[5]))))
-        allreads_pos_ordered[key] = [read_segments_start, read_segments_end, values[2], values[3], values[4], values[5]]            
-    return allreads_pos_ordered
-
 
 def get_insertionreads(segments_by_read_filtered):
     ins_list_all = []
@@ -597,15 +497,6 @@ def get_insertionreads(segments_by_read_filtered):
                 ins_list_all.append(seg)
     return ins_list_all
     
-
-def get_allsegments(segments_by_read_filtered):
-    allsegments = []
-    for read in segments_by_read_filtered:
-        for seg in read:
-            if not seg.is_insertion:
-                allsegments.append(seg)
-    return allsegments
-
 
 def get_splitreads(segments_by_read_filtered):
     split_reads = []
@@ -710,6 +601,8 @@ def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histog
     logger.info('Detecting low mapping quality regions')
     lowmapq_reg = extract_lowmapq_regions(segments_by_read, args.min_mapping_quality)
     logger.info('Filtering reads')
+    if args.vntr_file:
+        segments_by_read = resolve_vntr(segments_by_read, args.vntr_file, args.sv_size)
     segments_by_read_filtered = filter_all_reads(segments_by_read,args.min_mapping_quality, args.max_read_error)
     
     allsegments = get_allsegments(segments_by_read_filtered)
@@ -723,16 +616,13 @@ def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histog
     split_reads = resolve_overlaps(split_reads,  args.sv_size)
     
     ins_list_all = get_insertionreads(segments_by_read_filtered)
-    
-    vntr_list = []
-    if args.vntr_file:
-        vntr_list=read_vntr_file(args.vntr_file)
+   
     logger.info('Starting breakpoint detection')
-    double_breaks = get_breakpoints(split_reads,vntr_list, thread_pool, ref_lengths, lowmapq_reg, args)
+    double_breaks = get_breakpoints(split_reads,thread_pool, ref_lengths, lowmapq_reg, args)
     double_breaks.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position, b.direction_1))
     
     logger.info('Clustering unmapped insertions')
-    ins_clusters = extract_insertions(ins_list_all, lowmapq_reg, vntr_list, args.bp_cluster_size, args.min_ref_flank, ref_lengths,args.bp_min_support)
+    ins_clusters = extract_insertions(ins_list_all, lowmapq_reg,  args.bp_cluster_size, args.min_ref_flank, ref_lengths,args.bp_min_support)
     double_breaks +=  ins_clusters 
             
     compute_bp_coverage(double_breaks,coverage_histograms)

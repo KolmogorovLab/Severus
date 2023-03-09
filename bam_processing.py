@@ -2,7 +2,6 @@ import pysam
 from multiprocessing import Pool
 import numpy as np
 from collections import  defaultdict
-from breakpoint_finder import filter_all_reads, get_allsegments
 
 class ReadSegment(object):
     __slots__ = ("read_start", "read_end", "ref_start", "ref_end", "read_id", "ref_id",
@@ -165,8 +164,40 @@ def update_coverage_hist(genome_ids, ref_lengths, segments_by_read, min_mapq, ma
     return coverage_histograms
 
 
+def filter_all_reads(segments_by_read,min_mapq, max_read_error):
+    MIN_ALIGNED_LENGTH = 5000
+    MIN_ALIGNED_RATE = 0.5
+    MAX_SEGMENTS = 10
+    MIN_SEGMENT_LENGTH = 100
+    
+    segments_by_read_filtered=[]
+    for read_id, segments in segments_by_read.items():
+        dedup_segments = []
+        segments.sort(key=lambda s: s.read_start)
+        
+        for seg in segments:
+            if not dedup_segments or dedup_segments[-1].read_start != seg.read_start:            
+                if seg.is_insertion and seg.mapq>min_mapq:
+                    dedup_segments.append(seg)
+                elif seg.mapq>min_mapq and seg.segment_length > MIN_SEGMENT_LENGTH and seg.mismatch_rate < max_read_error:
+                    dedup_segments.append(seg)
+                    
+        aligned_len = sum([seg.segment_length for seg in dedup_segments if not seg.is_insertion])
+        aligned_ratio = aligned_len/segments[0].read_length
+        if aligned_len < MIN_ALIGNED_LENGTH or aligned_ratio < MIN_ALIGNED_RATE or len(segments) > MAX_SEGMENTS:
+            continue
+        segments_by_read_filtered.append(dedup_segments)
+        
+    return segments_by_read_filtered
 
 
+def get_allsegments(segments_by_read_filtered):
+    allsegments = []
+    for read in segments_by_read_filtered:
+        for seg in read:
+            if not seg.is_insertion:
+                allsegments.append(seg)
+    return allsegments
     
 
 

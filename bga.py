@@ -8,8 +8,8 @@ import os
 from multiprocessing import Pool
 from collections import defaultdict
 from build_graph import build_breakpoint_graph, output_clusters_graphvis, output_clusters_csv
-from breakpoint_finder import call_breakpoints, output_breaks, get_genomic_segments
 from bam_processing import get_all_reads_parallel, update_coverage_hist
+from breakpoint_finder import call_breakpoints, output_breaks, get_genomic_segments
 import logging
 
 
@@ -109,6 +109,9 @@ def main():
     target_genomes = set(os.path.basename(b) for b in args.target_bam)
     control_genomes = set(os.path.basename(b) for b in args.control_bam)
 
+    if not os.path.isdir(args.out_dir):
+        os.mkdir(args.out_dir)
+
     log_file = os.path.join(args.out_dir, "bga.log")
     _enable_logging(log_file, debug=False, overwrite=True)
     logger.debug("Cmd: " + " ".join(sys.argv[1:]))
@@ -122,9 +125,6 @@ def main():
     ref_lengths = None
     with pysam.AlignmentFile(first_bam, "rb") as a:
         ref_lengths = dict(zip(a.references, a.lengths))
-
-    if not os.path.isdir(args.out_dir):
-        os.mkdir(args.out_dir)
 
     thread_pool = Pool(args.threads)
     out_breakpoint_graph = os.path.join(args.out_dir, "breakpoint_graph.gv")
