@@ -46,7 +46,7 @@ def main():
     MIN_MAPQ = 10
     #MIN_DOUBLE_BP_READS = 5
     MIN_REF_FLANK = 10000
-    MAX_GENOMIC_LEN = 200000
+    MAX_GENOMIC_LEN = 10000
 
     #breakpoint
     BP_CLUSTER_SIZE = 50
