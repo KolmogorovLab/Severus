@@ -57,8 +57,8 @@ class ReadConnection(object):
 
 
 class Breakpoint(object):
-    __slots__ = ("ref_id", "position","dir_1", "spanning_reads", "connections",
-                 "read_ids", "pos2", "_ins_reference", "_ins_size")
+    __slots__ = ("ref_id", "position","dir_1", "spanning_reads", "connections", 
+                 "read_ids", "pos2", "is_insertion", "insertion_size")
     def __init__(self, ref_id, ref_position, dir_1):
         self.ref_id = ref_id
         self.position = ref_position
@@ -67,21 +67,21 @@ class Breakpoint(object):
         self.connections = defaultdict(list)
         self.read_ids=[]
         self.pos2 = []
-        self._ins_reference = None
-        self._ins_size = None
+        self.is_insertion = False
+        self.insertion_size = 0
 
     def fancy_name(self):
-        if not self.ref_id == "INS":
+        if not self.is_insertion:
             return self.unique_name()
         else:
-            return f"INS:{self._ins_size}"
+            return f"INS:{self.insertion_size}"
 
     def unique_name(self):
-        if not self.ref_id == "INS":
+        if not self.is_insertion:
             sign = '-' if self.dir_1 == -1 else '+'
             return f"{sign}{self.ref_id}:{self.position}"
         else:
-            return f"INS:{self._ins_reference}:{self.position}"
+            return f"INS:{self.ref_id}:{self.position}"
 
 
 class DoubleBreak(object):
@@ -367,9 +367,11 @@ def extract_insertions(ins_list_all, lowmapq_reg, clust_len, min_ref_flank, ref_
                         bp_2 = Breakpoint(seq, position,1)
                         bp_1.read_ids = value
                         bp_2.read_ids = value
-                        bp_3 = Breakpoint('INS', position, 1)
-                        bp_3._ins_reference = seq
-                        bp_3._ins_size = ins_length
+
+                        bp_3 = Breakpoint(seq, position, 1)
+                        bp_3.is_insertion = True
+                        bp_3.insertion_size = ins_length
+
                         genome_id = key[0]
                         if sum(happ_support_1[genome_id]) == NUM_HAPLOTYPES:
                             genotype = 'hom'
@@ -389,9 +391,9 @@ def extract_insertions(ins_list_all, lowmapq_reg, clust_len, min_ref_flank, ref_
 
 def compute_bp_coverage(double_breaks,coverage_histograms):
     for db in double_breaks:
-        if not db.bp_1.ref_id == 'INS':
+        if not db.bp_1.is_insertion:
             db.bp_1.spanning_reads[(db.genome_id, db.haplotype_1)] = bp_coverage(db.bp_1, db.genome_id, db.haplotype_1, coverage_histograms)
-        if not db.bp_2.ref_id == 'INS':
+        if not db.bp_2.is_insertion:
             db.bp_2.spanning_reads[(db.genome_id, db.haplotype_2)] = bp_coverage(db.bp_2, db.genome_id, db.haplotype_2, coverage_histograms)
         
 
@@ -458,9 +460,9 @@ def get_genomic_segments(double_breaks, coverage_histograms, thread_pool, hb_vcf
     genomic_segments=[]
     segments = []
     for double_bp in double_breaks:
-        if not double_bp.bp_1.ref_id == 'INS':
+        if not double_bp.bp_1.is_insertion:
             single_bp[(double_bp.genome_id, double_bp.haplotype_1, double_bp.bp_1.ref_id)].append(double_bp.bp_1.position)
-        if not double_bp.bp_2.ref_id == 'INS':
+        if not double_bp.bp_2.is_insertion:
             single_bp[(double_bp.genome_id, double_bp.haplotype_2, double_bp.bp_2.ref_id)].append(double_bp.bp_2.position)          
 
     for (genome_name, haplotype_name, ref_name), s_bp in single_bp.items():
@@ -595,7 +597,7 @@ def output_breaks(double_breaks, genome_tags, phasing, out_stream):
             t += 1
     summary_csv = defaultdict(list)
     for br in double_breaks:
-        if not br.bp_1.ref_id == "INS":
+        if not br.bp_1.is_insertion:
             if not summary_csv[br.to_string()]:
                 summary_csv[br.to_string()] = def_array[:]
                 idd=(br.genome_id, br.haplotype_1)
