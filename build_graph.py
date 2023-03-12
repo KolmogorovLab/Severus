@@ -19,7 +19,7 @@ SEQUENCE_KEY = "__genomic"
 
 
 def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, reference_adjacencies):
-    kmer_size = 1
+    #kmer_size = 1
     g = nx.MultiGraph()
 
     node_ids = {}
@@ -30,23 +30,32 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
             id_to_kmers[node_ids[node_str]] = node_str
         return node_ids[node_str]
 
-    def conv_dir(dir1):
-        return '-' if dir1==-1 else '+'
+    #def conv_dir(dir1):
+    #    return '-' if dir1==-1 else '+'
 
-    def update_adjacencies(double_bp):
-        left_kmer = node_to_id(":".join([conv_dir(double_bp.direction_1)+double_bp.bp_1.ref_id, str(double_bp.bp_1.position)]))
-        right_kmer = node_to_id(":".join([conv_dir(double_bp.direction_2)+double_bp.bp_2.ref_id, str(double_bp.bp_2.position)]))
+    ### Adding adjacency edges
+    #def update_adjacencies(double_bp):
+    for double_bp in double_breaks:
+        #left_kmer = node_to_id(":".join([conv_dir(double_bp.direction_1) + double_bp.bp_1.ref_id, str(double_bp.bp_1.position)]))
+        #right_kmer = node_to_id(":".join([conv_dir(double_bp.direction_2) + double_bp.bp_2.ref_id, str(double_bp.bp_2.position)]))
+        left_kmer = node_to_id(double_bp.bp_1.unique_name())
+        right_kmer = node_to_id(double_bp.bp_2.unique_name())
+
         if not g.has_node(left_kmer):
-            g.add_node(left_kmer,label = id_to_kmers[left_kmer])
+            g.add_node(left_kmer,label=double_bp.bp_1.fancy_name())
         if not g.has_node(right_kmer):
-            g.add_node(right_kmer, label = id_to_kmers[right_kmer])
+            g.add_node(right_kmer, label=double_bp.bp_2.fancy_name())
+
         if g.has_edge(left_kmer, right_kmer, key=double_bp.genome_id):
             g[left_kmer][right_kmer][double_bp.genome_id]["support"] += double_bp.supp
         else:
             edge_weight = 2 if double_bp.genotype == "hom" else 1
             g.add_edge(left_kmer, right_kmer, key=double_bp.genome_id, support=double_bp.supp,
-                       style=double_bp.edgestyle, penwidth=edge_weight, adjacency=True, genotype=double_bp.genotype)
-        g[left_kmer][right_kmer][double_bp.genome_id]["label"] = "R:{0}".format(g[left_kmer][right_kmer][double_bp.genome_id]["support"])
+                       style=double_bp.edgestyle, penwidth=edge_weight, adjacency=True,
+                       genotype=double_bp.genotype)
+
+        read_support = g[left_kmer][right_kmer][double_bp.genome_id]["support"]
+        g[left_kmer][right_kmer][double_bp.genome_id]["label"] = f"R:{read_support}"
 
     def add_genomic_edge(seg, ref_style):
         edge_flag = True
@@ -96,8 +105,8 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
             label="L:{0} C:{1}".format(seg.length_bp, g[left_kmer][right_kmer][seg.genome_id]["support"])
             g[left_kmer][right_kmer][seg.genome_id]["label"] = label
 
-    for double_bp in double_breaks:
-        update_adjacencies(double_bp)
+    #for double_bp in double_breaks:
+    #    update_adjacencies(double_bp)
 
     ref_style = "dashed" if reference_adjacencies else "invis"
     for seg in genomicsegments:

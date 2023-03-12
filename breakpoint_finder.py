@@ -57,15 +57,31 @@ class ReadConnection(object):
 
 
 class Breakpoint(object):
-    __slots__ = "ref_id", "position","dir_1", "spanning_reads", "connections" , "read_ids", "pos2"
-    def __init__(self, ref_id, ref_position,dir_1):
+    __slots__ = ("ref_id", "position","dir_1", "spanning_reads", "connections",
+                 "read_ids", "pos2", "_ins_reference", "_ins_size")
+    def __init__(self, ref_id, ref_position, dir_1):
         self.ref_id = ref_id
         self.position = ref_position
         self.dir_1 = dir_1
         self.spanning_reads = defaultdict(int)
-        self.connections =defaultdict(list)
+        self.connections = defaultdict(list)
         self.read_ids=[]
         self.pos2 = []
+        self._ins_reference = None
+        self._ins_size = None
+
+    def fancy_name(self):
+        if not self.ref_id == "INS":
+            return self.unique_name()
+        else:
+            return f"INS:{self._ins_size}"
+
+    def unique_name(self):
+        if not self.ref_id == "INS":
+            sign = '-' if self.dir_1 == -1 else '+'
+            return f"{sign}{self.ref_id}:{self.position}"
+        else:
+            return f"INS:{self._ins_reference}:{self.position}"
 
 
 class DoubleBreak(object):
@@ -85,10 +101,10 @@ class DoubleBreak(object):
         self.length = length
         self.genotype = genotype
         self.edgestyle = edgestyle
-    def directional_coord_1(self):
-        return self.direction_1 * self.bp_1.position
-    def directional_coord_2(self):
-        return self.direction_2 * self.bp_2.position
+    #def directional_coord_1(self):
+    #    return self.direction_1 * self.bp_1.position
+    #def directional_coord_2(self):
+    #    return self.direction_2 * self.bp_2.position
     def to_string(self):
         strand_1 = "+" if self.direction_1 > 0 else "-"
         strand_2 = "+" if self.direction_2 > 0 else "-"
@@ -351,7 +367,9 @@ def extract_insertions(ins_list_all, lowmapq_reg, clust_len, min_ref_flank, ref_
                         bp_2 = Breakpoint(seq, position,1)
                         bp_1.read_ids = value
                         bp_2.read_ids = value
-                        bp_3 = Breakpoint('INS', ins_length,1)
+                        bp_3 = Breakpoint('INS', position, 1)
+                        bp_3._ins_reference = seq
+                        bp_3._ins_size = ins_length
                         genome_id = key[0]
                         if sum(happ_support_1[genome_id]) == NUM_HAPLOTYPES:
                             genotype = 'hom'
