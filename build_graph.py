@@ -186,13 +186,15 @@ def cluster_adjacencies(graph, target_genomes, control_genomes):
     for cc in nx.connected_components(graph):
         target_adj = set()
         control_adj = set()
-        for u, v, key in graph.edges(cc, keys=True):
-            if key in target_genomes:
+        for u, v, key, data in graph.edges(cc, keys=True, data=True):
+            if key in target_genomes and data["adjacency"]:
                 target_adj.add((u, v))
-            if key in control_genomes:
+            if key in control_genomes and data["adjacency"]:
                 control_adj.add((u, v))
+
         target_adj = len(target_adj)
         control_adj = len(control_adj)
+
         rank = None
         if target_adj > 0 and control_adj == 0:
             rank = target_adj + 100
@@ -202,7 +204,9 @@ def cluster_adjacencies(graph, target_genomes, control_genomes):
             rank = -control_adj
         else:
             rank = target_adj / control_adj
-        components_list.append((rank, cc, target_adj, control_adj))
+
+        if target_adj + control_adj:
+            components_list.append((rank, cc, target_adj, control_adj))
     components_list.sort(key=lambda p: p[0], reverse=True)
 
     return components_list
