@@ -217,27 +217,30 @@ def cluster_adjacencies(graph, target_genomes, control_genomes):
     for cc in nx.connected_components(graph):
         target_adj = set()
         control_adj = set()
+        num_somatic_adj = 0
         for u, v, key, data in graph.edges(cc, keys=True, data=True):
             if key in target_genomes and data["adjacency"]:
                 target_adj.add((u, v))
             if key in control_genomes and data["adjacency"]:
                 control_adj.add((u, v))
 
-        target_adj = len(target_adj)
-        control_adj = len(control_adj)
+        for adj in target_adj:
+            if adj not in control_adj:
+                num_somatic_adj += 1
 
         rank = None
-        if target_adj > 0 and control_adj == 0:
-            rank = target_adj + 100
-        elif target_adj == 0 and control_adj == 0:
+        if len(target_adj) > 0 and len(control_adj) == 0:
+            rank = len(target_adj) + 100
+        elif len(target_adj) == 0 and len(control_adj) == 0:
             rank = -100
-        elif target_adj == 0 and control_adj > 0:
-            rank = -control_adj
+        elif len(target_adj) == 0 and len(control_adj) > 0:
+            rank = -len(control_adj)
         else:
-            rank = target_adj / control_adj
+            rank = len(target_adj) / len(control_adj)
 
-        if target_adj + control_adj:
-            components_list.append((rank, cc, target_adj, control_adj))
+        if len(target_adj) + len(control_adj) and num_somatic_adj > 0:
+            components_list.append((rank, cc, len(target_adj), len(control_adj)))
+
     components_list.sort(key=lambda p: p[0], reverse=True)
 
     return components_list
