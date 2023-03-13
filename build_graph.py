@@ -52,9 +52,32 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
         read_support = g[left_kmer][right_kmer][double_bp.genome_id]["support"]
         g[left_kmer][right_kmer][double_bp.genome_id]["label"] = f"R:{read_support}"
 
+    ### Break long genomic segments
+    new_segments = []
+    genomic_breaks = {}
+    for seq, points in hb_points.items():
+        genomic_breaks[seq] = set(points)
+
+    #new_segments = genomicsegments
+    for seg in genomicsegments:
+        if seg.length_bp < max_genomic_len:
+            new_segments.append(seg)
+        else:
+            mid_point = seg.pos1 + seg.length_bp // 2
+            genomic_breaks[seg.ref_id].add(mid_point)
+
+            seg_1, seg_2 = copy(seg), copy(seg)
+            seg_1.pos2 = mid_point
+            seg_1.length_bp = seg.length_bp // 2
+            new_segments.append(seg_1)
+
+            seg_2.pos1 = mid_point
+            seg_2.length_bp = seg.length_bp // 2
+            new_segments.append(seg_2)
+
     ### Linking complementary nodes + haplotype switches style
     compl_link_style = "dashed" if reference_adjacencies else "invis"
-    for seg in genomicsegemnts:
+    for seg in new_segments:
         for coord in [seg.pos1, seg.pos2]:
             pos_bp, neg_bp = f"+{seg.ref_id}:{coord}", f"-{seg.ref_id}:{coord}"
             pos_node, neg_node = node_to_id(pos_bp), node_to_id(neg_bp)
@@ -72,7 +95,7 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
                 nx.set_node_attributes(g, hb_attr)
 
     ### Add genomic edges wth coverages
-    for seg in genomicsegments:
+    for seg in new_segments:
         if seg.length_bp > max_genomic_len or (seg.haplotype == 0 and seg.coverage == 0):
             continue
 
