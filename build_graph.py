@@ -171,7 +171,10 @@ def output_clusters_graphvis(graph, connected_components, key_to_color, out_file
         fout.write("}\n};\n")
 
     def _draw_components(components_list, out_stream):
-        for subgr_num, (rank, cc, target_adj, control_adj) in enumerate(components_list):
+        for subgr_num, (rank, cc, target_adj, control_adj, num_somatic) in enumerate(components_list):
+            if num_somatic == 0:
+                continue
+
             out_stream.write("subgraph cluster{0} {{\n".format(subgr_num))
             for n in cc:
                 properties = []
@@ -196,7 +199,7 @@ def output_clusters_graphvis(graph, connected_components, key_to_color, out_file
 def output_clusters_csv(graph, connected_components, out_file):
     with open(out_file, "w") as fout:
         fout.write("#cluster_id\tadj_1\tadj_2\tgenome_ids\tread_support\tgenotype\n")
-        for subgr_num, (rank, cc, target_adj, control_adj) in enumerate(connected_components):
+        for subgr_num, (rank, cc, target_adj, control_adj, _num_somatic) in enumerate(connected_components):
             all_adj = defaultdict(list)
             for u, v, key in graph.edges(cc, keys=True):
                 if key != SEQUENCE_KEY and graph[u][v][key]["adjacency"] == True:
@@ -238,8 +241,8 @@ def cluster_adjacencies(graph, target_genomes, control_genomes):
         else:
             rank = len(target_adj) / len(control_adj)
 
-        if len(target_adj) + len(control_adj) and num_somatic_adj > 0:
-            components_list.append((rank, cc, len(target_adj), len(control_adj)))
+        if len(target_adj) + len(control_adj):
+            components_list.append((rank, cc, len(target_adj), len(control_adj), num_somatic_adj))
 
     components_list.sort(key=lambda p: p[0], reverse=True)
 
