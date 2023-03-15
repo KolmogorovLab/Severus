@@ -5,9 +5,10 @@ from collections import  defaultdict
 
 class ReadSegment(object):
     __slots__ = ("read_start", "read_end", "ref_start", "ref_end", "read_id", "ref_id",
-                 "strand", "read_length",'segment_length', "haplotype", "mapq", "genome_id",'mismatch_rate', "is_insertion", "is_clipped", 'is_end')
+                 "strand", "read_length",'segment_length', "haplotype", "mapq", "genome_id",
+                 'mismatch_rate', "is_insertion", "is_clipped", 'is_end')
     def __init__(self, read_start, read_end, ref_start, ref_end, read_id, ref_id,
-                 strand, read_length,segment_length, haplotype, mapq, genome_id,mismatch_rate, is_insertion):
+                 strand, read_length,segment_length, haplotype, mapq, genome_id, mismatch_rate, is_insertion):
         self.read_start = read_start
         self.read_end = read_end
         self.ref_start = ref_start
@@ -35,7 +36,7 @@ def get_segment(read, genome_id,sv_size):
     Parses cigar and generate ReadSegment structure with alignment coordinates
     """
     CIGAR_MATCH = [0, 7, 8]
-    CIGAR_MM = 8
+    #CIGAR_MM = 8
     CIGAR_DEL = 2
     CIGAR_INS = 1
     CIGAR_CLIP = [4, 5]
@@ -48,7 +49,12 @@ def get_segment(read, genome_id,sv_size):
     read_segments =[]
     cigar = read.cigartuples
     read_length = np.sum([k[1] for k in cigar if k[0]!=2])
-    num_of_mismatch = 0
+    #num_of_mismatch = 0
+    nm = read.get_tag('NM')
+    indel = sum([b for a, b in cigar if a in [CIGAR_INS, CIGAR_DEL]])
+    num_of_mismatch = nm - indel 
+    total_segment_length = sum([b for a, b in cigar if a not in [CIGAR_CLIP, CIGAR_DEL]])
+    mm_rate = num_of_mismatch / total_segment_length
     strand = '-' if read.is_reverse else '+'
     if read.has_tag('HP'):
         haplotype = read.get_tag('HP')
@@ -64,8 +70,8 @@ def get_segment(read, genome_id,sv_size):
         if op in CIGAR_MATCH:
             read_aligned += op_len
             ref_aligned += op_len
-            if op == CIGAR_MM:
-                num_of_mismatch +=1
+            #if op == CIGAR_MM:
+                #num_of_mismatch +=1
         if op == CIGAR_DEL:
             if op_len < sv_size:
                 ref_aligned += op_len
@@ -76,14 +82,14 @@ def get_segment(read, genome_id,sv_size):
                     del_start, del_end = read_length - read_end, read_length - read_start
                 else:
                     del_start, del_end = read_start , read_end
-                mm_rate = num_of_mismatch/read_aligned
+                #mm_rate = num_of_mismatch/read_aligned
                 read_segments.append(ReadSegment(del_start, del_end, ref_start, ref_end, read.query_name,
                                         read.reference_name, strand, read_length,read_aligned, haplotype, read.mapping_quality, genome_id, mm_rate, False))
                 read_start = read_end+1
                 ref_start = ref_end+op_len+1
                 read_aligned = 0
                 ref_aligned = 0
-                num_of_mismatch = 0
+                #num_of_mismatch = 0
         if op == CIGAR_INS:
             if op_len < sv_size:
                 read_aligned += op_len  
@@ -92,13 +98,13 @@ def get_segment(read, genome_id,sv_size):
                 read_aligned += op_len
                 ins_pos= ref_start + ref_aligned
                 ins_end = read_start +read_aligned
-                mm_rate = 0
+                #mm_rate = 0
                 read_segments.append(ReadSegment(ins_start, ins_end, ins_pos, ins_pos, read.query_name,
                                         read.reference_name, strand, read_length,op_len, haplotype, read.mapping_quality, genome_id,mm_rate, True))
     if ref_aligned !=0:
         ref_end = ref_start + ref_aligned
         read_end = read_start + read_aligned
-        mm_rate = num_of_mismatch/read_aligned
+        #mm_rate = num_of_mismatch/read_aligned
         if read.is_reverse:
             read_start, read_end = read_length - read_end, read_length - read_start
         read_segments.append(ReadSegment(read_start, read_end, ref_start, ref_end, read.query_name,
