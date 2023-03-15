@@ -150,6 +150,7 @@ def get_breakpoints(split_reads, thread_pool, ref_lengths, lowmapq_reg, args):
     min_reads = args.bp_min_support
     min_ref_flank = args.min_ref_flank 
     min_mapq = args.min_mapping_quality
+    sv_size = args.sv_final_size
     MAX_SEGMENT_DIST= 500
     
     seq_breakpoints = defaultdict(list)
@@ -191,6 +192,7 @@ def get_breakpoints(split_reads, thread_pool, ref_lengths, lowmapq_reg, args):
                 cur_cluster.append(rc)
         if cur_cluster:
             clusters.append(cur_cluster)
+            
         for cl in clusters:
             unique_reads = set()
             read_ids = []
@@ -211,7 +213,7 @@ def get_breakpoints(split_reads, thread_pool, ref_lengths, lowmapq_reg, args):
                     bp.read_ids = read_ids
                     bp_list.append(bp)
                     
-    tasks = [(bp_1, clust_len, min_reads, lowmapq_reg,ref_lengths,min_ref_flank) for bp_1 in bp_list]
+    tasks = [(bp_1, clust_len, min_reads, sv_size, lowmapq_reg,ref_lengths,min_ref_flank) for bp_1 in bp_list]
     double_break = thread_pool.starmap(get_left_break, tasks)
     double_breaks=[]
     for db in double_break:
@@ -220,16 +222,18 @@ def get_breakpoints(split_reads, thread_pool, ref_lengths, lowmapq_reg, args):
     return double_breaks
     
 
-def get_left_break(bp_1, clust_len, min_reads, lowmapq_reg,ref_lengths,min_ref_flank):
+def get_left_break(bp_1, clust_len, min_reads, sv_size, lowmapq_reg,ref_lengths,min_ref_flank):
     MAX_BP_CONNECTIONS = 33 ## if segment is connected to more than two bp
     left_break = bp_1.connections
     n_conn  = 0
     clusters = []
     double_break=[]
+    
     for seq, conn in left_break.items():
         lowmapq = lowmapq_reg[seq]
         cur_cluster = []
         conn.sort(key=lambda cn:cn.pos_2)
+        
         for rc in conn:
             if cur_cluster and rc.pos_2 - cur_cluster[-1].pos_2 > clust_len: 
                 if len(cur_cluster) > min_reads:
@@ -243,6 +247,7 @@ def get_left_break(bp_1, clust_len, min_reads, lowmapq_reg,ref_lengths,min_ref_f
             n_conn +=1
         if n_conn > MAX_BP_CONNECTIONS or not clusters:
             continue
+        
         for cl in clusters:
             unique_reads = defaultdict(set)
             for x in cl:
@@ -256,6 +261,7 @@ def get_left_break(bp_1, clust_len, min_reads, lowmapq_reg,ref_lengths,min_ref_f
                 happ_support_1[key[0]].append(key[1])
                 happ_support_2[key[0]].append(key[2])
                 read_ids.append(values)
+                
             if max(by_genome_id.values()) >= min_reads:
                 position = int(np.median([x.pos_2 for x in cl]))
                 low_mapq_pass = low_mapq_check(lowmapq,position)
@@ -272,6 +278,8 @@ def get_left_break(bp_1, clust_len, min_reads, lowmapq_reg,ref_lengths,min_ref_f
                         supp= len(support_reads)
                         if bp_1.ref_id == bp_2.ref_id:
                             length_bp = abs(bp_1.position - bp_2.position)
+                            if length_bp < sv_size:
+                                continue
                         else:
                             length_bp = 0
                         double_break.append(DoubleBreak(bp_1, bp_1.dir_1, bp_2, bp_2.dir_1,genome_id,haplotype_1, haplotype_2,supp,support_reads, length_bp, genotype , 'dashed'))
@@ -302,22 +310,32 @@ def low_mapq_check(lowmapq, position):
         return True
         
       
-def extract_insertions(ins_list_all, lowmapq_reg, clipped_clusters, clust_len, min_ref_flank, ref_lengths, min_reads):
+def extract_insertions(ins_list_all, lowmapq_reg, clipped_clusters,ref_lengths, args):
+    
+    clust_len = args.bp_cluster_size
+    min_reads = args.bp_min_support
+    min_ref_flank = args.min_ref_flank 
+    sv_size = args.sv_final_size
+    
     MIN_FULL_READ_SUPP = 2
     NUM_HAPLOTYPES = 3
     ins_list = defaultdict(list)
+    
     for ins in ins_list_all:
         ins_list[ins.ref_id].append(ins)
+        
     ins_clusters = []
     for seq, ins_pos in ins_list.items():
         clusters = []
         cur_cluster = []
         ins_pos.sort(key=lambda x:x.ref_end)
         lowmapq = lowmapq_reg[seq]
+        
         if clipped_clusters:
             clipped_clusters_seq = clipped_clusters[seq]
             clipped_clusters_seq.sort(key=lambda x:x.position)
             clipped_clusters_pos = [bp.position for bp in clipped_clusters_seq]
+            
         for rc in ins_pos:
             if cur_cluster and rc.ref_end - cur_cluster[-1].ref_end > clust_len:
                 cur_cluster.sort(key=lambda x:x.segment_length)
@@ -335,19 +353,27 @@ def extract_insertions(ins_list_all, lowmapq_reg, clipped_clusters, clust_len, m
                 cur_cluster.append(rc)
         if cur_cluster:
             clusters.append(cur_cluster)
+            
         for cl in clusters:
             unique_reads = defaultdict(set)
+            
             for x in cl:
                 unique_reads[(x.genome_id,x.haplotype)].add(x.read_id)
             by_genome_id = defaultdict(int)
             happ_support_1 = defaultdict(list)
+            
             for key, values in unique_reads.items():
                 by_genome_id[key] = len(values)
                 happ_support_1[key[0]].append(key[1])
+                
             if max(by_genome_id.values()) >= MIN_FULL_READ_SUPP:
                 position = int(np.median([x.ref_end for x in cl]))
                 ins_length = int(np.median([x.segment_length for x in cl]))
                 low_mapq_pass = low_mapq_check(lowmapq,position)
+                
+                if ins_length < sv_size:
+                    continue
+                
                 if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank and low_mapq_pass:
                     if clipped_clusters:
                         add_clipped_end(position, clipped_clusters_pos, clipped_clusters_seq, by_genome_id, happ_support_1, unique_reads)
@@ -384,6 +410,7 @@ def get_clipped_reads(segments_by_read_filtered):
     
 def cluster_clipped_ends(clipped_reads, lowmapq_reg, clust_len, min_ref_flank, ref_lengths):
     bp_list = defaultdict(list)
+    
     for seq, read in clipped_reads.items():
         clusters = []
         cur_cluster = []
@@ -397,6 +424,7 @@ def cluster_clipped_ends(clipped_reads, lowmapq_reg, clust_len, min_ref_flank, r
                 cur_cluster.append(rc)
         if cur_cluster:
             clusters.append(cur_cluster)
+            
         for cl in clusters:
             position = int(np.median([x.ref_end for x in cl]))
             low_mapq_pass = low_mapq_check(lowmapq,position)
@@ -408,12 +436,15 @@ def cluster_clipped_ends(clipped_reads, lowmapq_reg, clust_len, min_ref_flank, r
 
 
 def add_clipped_end(position, clipped_clusters_pos, clipped_clusters_seq, by_genome_id, happ_support_1, unique_reads):
+    
     ind = bisect.bisect_left(clipped_clusters_pos, position)
     cl = []
+    
     if ind < len(clipped_clusters_pos)-1 and abs(clipped_clusters_pos[ind] - position) < 50:
         cl = clipped_clusters_seq[ind]
     elif ind > 0 and abs(clipped_clusters_pos[ind - 1] - position) < 50:
         cl = clipped_clusters_seq[ind - 1]
+        
     if cl:
         cl.pos2.append(position)
         for x in cl.connections:
@@ -682,9 +713,7 @@ def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histog
     
     logger.info('Clustering unmapped insertions')
     
-    ins_clusters = extract_insertions(ins_list_all, lowmapq_reg, clipped_clusters,  args.bp_cluster_size, args.min_ref_flank, ref_lengths,args.bp_min_support)
-    print(len(double_breaks))
-    print(len(ins_clusters))
+    ins_clusters = extract_insertions(ins_list_all, lowmapq_reg, clipped_clusters, ref_lengths, args)
     double_breaks +=  ins_clusters 
             
     compute_bp_coverage(double_breaks,coverage_histograms)

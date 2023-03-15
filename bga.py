@@ -52,6 +52,8 @@ def main():
     BP_CLUSTER_SIZE = 50
     MAX_UNALIGNED_LEN = 500
     MIN_SV_SIZE = 50
+    MIN_SV_THR = 15
+    SV_SIZE_RPT = 5
     #MIN_GRAPH_SUPPORT = 3
 
     SAMTOOLS_BIN = "samtools"
@@ -81,7 +83,7 @@ def main():
     parser.add_argument("--bp_cluster_size", dest="bp_cluster_size",
                         default=BP_CLUSTER_SIZE, metavar="int", type=int,
                         help=f"maximum distance in bp cluster [{BP_CLUSTER_SIZE}]")
-    parser.add_argument("--min_sv_size", dest="sv_size",
+    parser.add_argument("--min_sv_size", dest="min_sv_size",
                         default=MIN_SV_SIZE, metavar="int", type=int,
                         help=f"minimim size for sv [{MIN_SV_SIZE}]")
     parser.add_argument("--max-read-error", dest="max_read_error",
@@ -116,6 +118,9 @@ def main():
     log_file = os.path.join(args.out_dir, "bga.log")
     _enable_logging(log_file, debug=False, overwrite=True)
     logger.debug("Cmd: " + " ".join(sys.argv[1:]))
+    
+    args.sv_size = max(args.min_sv_size - MIN_SV_THR, MIN_SV_THR)
+    args.sv_final_size = args.sv_size + SV_SIZE_RPT
 
     if not shutil.which(SAMTOOLS_BIN):
         logger.error("samtools not found")
