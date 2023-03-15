@@ -26,7 +26,7 @@ def resolve_vntr_ins(seg,vntr_list):
         strt = bisect.bisect_right(tr_reg[0],seg.ref_end)
         end = bisect.bisect_left(tr_reg[1],seg.ref_end)
         if strt - end == 1:
-            return([(seg.ref_id, tr_reg[0][end]), (seg, '', seg.segment_length)])
+            return([(seg.ref_id, tr_reg[0][end], tr_reg[1][end]), (seg, '', seg.segment_length)])
     
     
 def order_bp(seg1, seg2):
@@ -48,23 +48,130 @@ def resolve_vntr_split(s1, s2, vntr_list):
         strt = bisect.bisect_left(tr_reg[0],bp_order[0][0])
         end = bisect.bisect_left(tr_reg[1],bp_order[1][0])
         if strt - end == 1:
-            return([(s1.ref_id, tr_reg[0][end]),(bp_order[0][2], bp_order[1][2], bp_length)])
-                
-                
+            return([(s1.ref_id, tr_reg[0][end], tr_reg[1][end]),(bp_order[0][2], bp_order[1][2], bp_length)])
+        
+def filter_vntr_only_segments(split_segs, vntr_list):
+    OVERLAP_THR = 0.9
+    for s1 in split_segs:
+        tr_reg = vntr_list[s1.ref_id]
+        if tr_reg:
+            strt = bisect.bisect_left(tr_reg[0],s1.ref_start)
+            end = bisect.bisect_left(tr_reg[1],s1.ref_end)
+            if strt - end == 1:
+                vntr_len = tr_reg[1][end] - tr_reg[0][end]
+                if s1.segment_length > vntr_len * OVERLAP_THR:
+                    return True
+        
+def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, split_seg_vntr, min_sv_size):
+    seg_span=[]
+    is_end = False
+    seg_len = 0
+    for seg in segments:
+        if seg.ref_start >= vntr_strt and seg.ref_end <= vntr_end:
+            seg_len += seg.segment_length
+            if seg.is_end:
+                is_end = True
+        else:
+            seg_span.append(seg)
+    mm_rate = 0
+    vntr_len = vntr_end - vntr_strt
+    if len(seg_span) == 0:
+        return clipped_segs
+    if len(seg_span) == 1:
+        s1 = seg_span[0]
+        if abs(bp_len) < min_sv_size:
+            if s1.ref_start > vntr_strt:
+                s1.ref_start = vntr_strt
+            else:
+                s1.ref_end = vntr_end
+            s1.segment_length = s1.ref_end - s1.ref_start
+            return [s1] + clipped_segs 
+        if is_end:
+            if bp_len < -1 * min_sv_size:
+                return [s1] + clipped_segs
+            elif bp_len > min_sv_size:
+                new_seg = ReadSegment(0, bp_len, vntr_strt, vntr_strt, s1.read_id,
+                                        s1.ref_id, s1.strand, s1.read_length,0, s1.haplotype, s1.mapq, s1.genome_id,mm_rate, False)
+                new_seg.is_clipped = True
+                return [s1, new_seg]
+        else:
+            if bp_len > min_sv_size:
+                new_seg = ReadSegment(0, bp_len, vntr_strt, vntr_strt, s1.read_id,
+                                        s1.ref_id, s1.strand, s1.read_length,bp_len, s1.haplotype, s1.mapq, s1.genome_id,mm_rate, True)
+                if s1.ref_start > vntr_strt:
+                    s1.ref_start = vntr_strt
+                else:
+                    s1.ref_end = vntr_end
+                s1.segment_length = s1.ref_end - s1.ref_start
+                clipped_segs += [s1, new_seg]
+                return clipped_segs
+            else:
+                if s1.ref_start > vntr_strt:
+                    s1.ref_start -= seg_len
+                else:
+                    s1.ref_end += seg_len
+                    s1.segment_length += seg_len
+                return [s1] + clipped_segs 
+    else:
+        s1 = seg_span[0]
+        s2 = seg_span[-1]
+        if bp_len < -1 * min_sv_size:
+            s1.ref_end = vntr_strt
+            s1_segment_length = abs(s1.ref_end - s1.ref_start)
+            s2_segment_length = abs(s2.ref_end - s2.ref_start)
+            s2.ref_start = vntr_strt - bp_len
+            if s1.strand == '+':
+                s1.read_end = s1.read_start + s1_segment_length
+                s2.read_start = s1.read_end + 1
+            if s1.strand == '-':
+                s2.read_start = s2.read_end - s2_segment_length
+                s1.read_end = s2.read_start + 1
+            s1.segment_length = abs(s1.read_end - s1.read_start)
+            s2.segment_length = abs(s2.read_end - s2.read_start)
+            return [s1, s2] + clipped_segs
+        elif bp_len > min_sv_size:
+            s1.ref_end = s2.ref_end
+            s1_segment_length = s1.ref_end - s1.ref_start
+            dist = vntr_strt - s1.ref_start
+            mm_rate = 0
+            ins_start = s1.read_start + dist
+            ins_end = ins_start + bp_len
+            s2_new = ReadSegment(ins_start, ins_end, vntr_strt, vntr_strt, s1.read_id,
+                                    s1.ref_id, s1.strand, s1.read_length, bp_len, s1.haplotype, s1.mapq, s1.genome_id, mm_rate, True)
+            if split_seg_vntr:
+                if s1.strand == '+':
+                    s1.read_end = s2.read_end
+                else:
+                    s1.read_start = s2.read_start
+            return [s1, s2_new] + clipped_segs 
+        else:
+            s1.ref_end = s2.ref_end
+            s1_segment_length = s1.ref_end - s1.ref_start
+            if s1.strand == '+':
+                s1.read_end = s2.read_end
+            else:
+                s1.read_start = s2.read_start
+            return [s1] + clipped_segs 
+        
     
 def resolve_read_vntr(read, vntr_list, min_sv_size):
     seg_in_vntr = defaultdict(list)
     read.sort(key = lambda s:s.read_start)
     ins_segs = []
     split_segs = []
+    clipped_segs = []
     new_read = []
     split_seg_vntr = []
     s2 = []
     for s in read:
         if s.is_insertion:
             ins_segs.append(s)
+        elif s.is_clipped:
+            clipped_segs.append(s)
         else:
             split_segs.append(s)
+    #if filter_vntr_only_segments(split_segs, vntr_list):
+    #    return new_read
     for ins in ins_segs:
         ins_vntr = resolve_vntr_ins(ins, vntr_list)
         if not ins_vntr:
@@ -73,6 +180,7 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
             seg_in_vntr[ins_vntr[0]].append(ins_vntr[1])
     if len(split_segs) < 2:
         new_read.append(split_segs[0])
+        new_read += clipped_segs
     else:
         for s1, s2  in zip(split_segs[:-1], split_segs[1:]):
             if not s1.ref_id == s2.ref_id:
@@ -89,61 +197,22 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
         if not split_seg_vntr and s2:
             new_read.append(s2)
     for key, bp_in_vntr in seg_in_vntr.items():
-        bp_len = 0
         segments = []
+        bp_len = 0
         for bp in bp_in_vntr:
             bp_len += bp[2]
-            segments.append(bp[0])
             if not bp[0].is_insertion:
+                segments.append(bp[0])
                 segments.append(bp[1])
-        segments.sort(key = lambda s:s.ref_start)
-        s1 = segments[0]
-        s2 = segments[-1]
-        if bp_len < -1 * min_sv_size:
-            s1.ref_end = key[1]
-            s1_segment_length = abs(s1.ref_end - s1.ref_start)
-            s2.ref_start = key[1] - bp_len
-            if s1.strand == '+':
-                s1.read_start = s1.read_start
-                s1.read_end = s1.read_start + s1_segment_length
-                s2.read_start = s1.read_start + s1_segment_length + 1
-                s2.read_end = s2.read_end
-            if s1.strand == '-':
-                s1.read_start = s1.read_end - s1_segment_length
-                s1.read_end = s1.read_end
-                s2.read_start = s2.read_start
-                s2.read_end = s1.read_end - s1_segment_length+1
-            s1.segment_length = abs(s1.read_end - s1.read_start)
-            s2.segment_length = abs(s2.read_end - s2.read_start)
-            new_read.append(s1)
-            new_read.append(s2)
-        elif bp_len > min_sv_size:
-            s1_segment_length = s2.ref_end - s1.ref_start
-            dist = key[1] - s1.ref_start
-            mm_rate = 0
-            ins_start = s1.read_start + dist
-            ins_end = ins_start + bp_len
-            new_read.append(ReadSegment(ins_start, ins_end, key[1], key[1], s1.read_id,
-                                    s1.ref_id, s1.strand, s1.read_length, bp_len, s1.haplotype, s1.mapq, s1.genome_id, mm_rate, True))
-            if split_seg_vntr:
-                if s1.strand == '+':
-                    s1_read_end = s2.read_end
-                    s1_read_start = s1.read_start
-                else:
-                    s1_read_start = s2.read_start
-                    s1_read_end = s1.read_end
-                new_read.append(ReadSegment(s1_read_start, s1_read_end, s1.ref_start, s2.ref_end, s1.read_id,s1.ref_id, s1.strand, 
-                                            s1.read_length, s1_segment_length, s1.haplotype, s1.mapq, s1.genome_id, s1.mismatch_rate, False))
+        if not segments:
+            s1 = bp[0]
+            new_read.append(ReadSegment(s1.read_start + 1, s1.read_start + bp_len, key[1], key[1], s1.read_id,
+                                        s1.ref_id, s1.strand, s1.read_length,bp_len, s1.haplotype, s1.mapq, s1.genome_id,0, True))
         else:
-            s1_segment_length = s2.ref_end - s1.ref_start
-            if s1.strand == '+':
-                s1_read_end = s2.read_end
-                s1_read_start = s1.read_start
-            else:
-                s1_read_start = s2.read_start
-                s1_read_end = s1.read_end
-            new_read.append(ReadSegment(s1_read_start, s1_read_end, s1.ref_start, s2.ref_end, s1.read_id, s1.ref_id, s1.strand, 
-                                        s1.read_length, s1_segment_length, s1.haplotype, s1.mapq, s1.genome_id, s1.mismatch_rate, False))
+            segments.sort(key = lambda s:s.ref_start)
+            new_segments = calc_new_segments(segments, clipped_segs, key[1], key[2],bp_len, split_seg_vntr, min_sv_size)
+            if new_segments:
+                new_read += new_segments
     new_read.sort(key = lambda s:s.read_start)
     return new_read
 
@@ -151,5 +220,7 @@ def resolve_vntr(segments_by_read, vntr_file, min_sv_size):
     vntr_list = read_vntr_file(vntr_file)
     resolved_reads = defaultdict(list)
     for read_id, read in segments_by_read.items():
-        resolved_reads[read_id] = resolve_read_vntr(read, vntr_list, min_sv_size)
+        new_read = resolve_read_vntr(read, vntr_list, min_sv_size)
+        if new_read:
+            resolved_reads[read_id] = new_read
     return resolved_reads

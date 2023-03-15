@@ -5,7 +5,7 @@ from collections import  defaultdict
 
 class ReadSegment(object):
     __slots__ = ("read_start", "read_end", "ref_start", "ref_end", "read_id", "ref_id",
-                 "strand", "read_length",'segment_length', "haplotype", "mapq", "genome_id",'mismatch_rate', "is_insertion")
+                 "strand", "read_length",'segment_length', "haplotype", "mapq", "genome_id",'mismatch_rate', "is_insertion", "is_clipped", 'is_end')
     def __init__(self, read_start, read_end, ref_start, ref_end, read_id, ref_id,
                  strand, read_length,segment_length, haplotype, mapq, genome_id,mismatch_rate, is_insertion):
         self.read_start = read_start
@@ -22,6 +22,8 @@ class ReadSegment(object):
         self.genome_id = genome_id
         self.mismatch_rate = mismatch_rate
         self.is_insertion = is_insertion
+        self.is_clipped = False
+        self.is_end = False
     def __str__(self):
         return "".join(["read_start=", str(self.read_start), " read_end=", str(self.read_end), " ref_start=", str(self.ref_start),
                          " ref_end=", str(self.ref_end), " read_id=", str(self.read_id), " ref_id=", str(self.ref_id), " strand=", str(self.strand),
@@ -76,7 +78,7 @@ def get_segment(read, genome_id,sv_size):
                     del_start, del_end = read_start , read_end
                 mm_rate = num_of_mismatch/read_aligned
                 read_segments.append(ReadSegment(del_start, del_end, ref_start, ref_end, read.query_name,
-                                        read.reference_name, strand, read_length,read_aligned, haplotype, read.mapping_quality, genome_id, mm_rate,False))
+                                        read.reference_name, strand, read_length,read_aligned, haplotype, read.mapping_quality, genome_id, mm_rate, False))
                 read_start = read_end+1
                 ref_start = ref_end+op_len+1
                 read_aligned = 0
@@ -104,6 +106,31 @@ def get_segment(read, genome_id,sv_size):
     return read_segments 
 
 
+def add_clipped_end(segments_by_read):
+    MAX_CLIPPED_LENGTH = 200
+    for read in segments_by_read.values():
+        read2 = [seg for seg  in read if not seg.is_insertion]
+        read2.sort(key=lambda s: s.read_start)
+        s1 = read2[0]
+        s2 = read2[-1]
+        s1.is_end = True
+        s2.is_end = True
+        if s1.read_start > MAX_CLIPPED_LENGTH:
+            pos = s1.ref_start if s1.strand == '+' else s1.ref_end
+            read.append(ReadSegment(0, s1.read_start, pos, pos, s1.read_id,
+                                    s1.ref_id, s1.strand, s1.read_length,0, s1.haplotype, s1.mapq, s1.genome_id,0, False))
+            read[-1].is_clipped = True
+        end_clip_length = s2.read_length - s2.read_end
+        if end_clip_length > MAX_CLIPPED_LENGTH:
+            pos = s2.ref_end if s2.strand == '+' else s2.ref_start
+            read.append(ReadSegment(s2.read_end, s2.read_length, pos, pos, s2.read_id,
+                                    s2.ref_id, s2.strand, s2.read_length, 0, s2.haplotype, s2.mapq, s2.genome_id,0, False))
+            read[-1].is_clipped = True
+        read.sort(key=lambda s: s.read_start)
+    return segments_by_read
+    
+            
+
 def get_all_reads(bam_file, region, genome_id,sv_size):
     """
     Yields set of split reads for each contig separately. Only reads primary alignments
@@ -120,8 +147,8 @@ def get_all_reads(bam_file, region, genome_id,sv_size):
     return alignments
 
 
-def get_all_reads_parallel(bam_file, thread_pool, ref_lengths,
-                           min_mapq, genome_id,sv_size):
+def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
+                           min_mapq, sv_size, add_clipped_ends):
     CHUNK_SIZE = 10000000
     all_reference_ids = [r for r in pysam.AlignmentFile(bam_file, "rb").references]
     fetch_list = []
@@ -142,6 +169,8 @@ def get_all_reads_parallel(bam_file, thread_pool, ref_lengths,
     for alignments in parsing_results:
         for aln in alignments:
             segments_by_read[aln.read_id].append(aln)
+    if add_clipped_ends:
+        segments_by_read = add_clipped_end(segments_by_read)
     return segments_by_read        
        
             
@@ -177,12 +206,12 @@ def filter_all_reads(segments_by_read,min_mapq, max_read_error):
         
         for seg in segments:
             if not dedup_segments or dedup_segments[-1].read_start != seg.read_start:            
-                if seg.is_insertion and seg.mapq>min_mapq:
+                if (seg.is_insertion or seg.is_clipped) and seg.mapq > min_mapq:
                     dedup_segments.append(seg)
                 elif seg.mapq>min_mapq and seg.segment_length > MIN_SEGMENT_LENGTH and seg.mismatch_rate < max_read_error:
                     dedup_segments.append(seg)
                     
-        aligned_len = sum([seg.segment_length for seg in dedup_segments if not seg.is_insertion])
+        aligned_len = sum([seg.segment_length for seg in dedup_segments if not seg.is_insertion and not seg.is_clipped])
         aligned_ratio = aligned_len/segments[0].read_length
         if aligned_len < MIN_ALIGNED_LENGTH or aligned_ratio < MIN_ALIGNED_RATE or len(segments) > MAX_SEGMENTS:
             continue

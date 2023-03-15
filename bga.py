@@ -46,7 +46,7 @@ def main():
     MIN_MAPQ = 10
     #MIN_DOUBLE_BP_READS = 5
     MIN_REF_FLANK = 10000
-    MAX_GENOMIC_LEN = 10000
+    MAX_GENOMIC_LEN = 200000
 
     #breakpoint
     BP_CLUSTER_SIZE = 50
@@ -101,6 +101,7 @@ def main():
                         help=f"maximum length of genomic segment to form connected components [{MAX_GENOMIC_LEN}]")
     parser.add_argument("--phasing-vcf", dest="phase_vcf", metavar="path", help="vcf file used for phasing [None]")
     parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
+    parser.add_argument("--add-clipped-ends", action="store_true", dest="add_clipped_ends", default=False) ## remove once confirmed
     args = parser.parse_args()
 
     if args.control_bam is None:
@@ -136,8 +137,8 @@ def main():
         genome_id = os.path.basename(bam_file)
         genome_ids.append(genome_id)
         logger.info(f"Parsing reads from {genome_id}")
-        segments_by_read_bam =  get_all_reads_parallel(bam_file, thread_pool, ref_lengths,
-                                   args.min_mapping_quality, genome_id,args.sv_size)
+        segments_by_read_bam =  get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
+                                   args.min_mapping_quality, args.sv_size, args.add_clipped_ends)
         segments_by_read.update(segments_by_read_bam)
         num_seg = len(segments_by_read_bam)
         logger.info(f"Parsed {num_seg} segments")
