@@ -51,7 +51,7 @@ def resolve_vntr_split(s1, s2, vntr_list):
             return([(s1.ref_id, tr_reg[0][end], tr_reg[1][end]),(bp_order[0][2], bp_order[1][2], bp_length)])
         
 def filter_vntr_only_segments(split_segs, vntr_list):
-    OVERLAP_THR = 0.9
+    OVERLAP_THR = 0.95
     for s1 in split_segs:
         tr_reg = vntr_list[s1.ref_id]
         if tr_reg:
@@ -170,8 +170,8 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
             clipped_segs.append(s)
         else:
             split_segs.append(s)
-    #if filter_vntr_only_segments(split_segs, vntr_list):
-    #    return new_read
+    if filter_vntr_only_segments(split_segs, vntr_list):
+        return new_read
     for ins in ins_segs:
         ins_vntr = resolve_vntr_ins(ins, vntr_list)
         if not ins_vntr:
