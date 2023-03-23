@@ -98,14 +98,14 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
         if seg.length_bp < max_genomic_len:
             left_break = seg.pos1 in hb_points[seg.ref_id]
             right_break = seg.pos2 in hb_points[seg.ref_id]
-            if left_break:
-                left_node = node_to_id(f"split_{seg_num}")
-            if right_break:
-                right_node = node_to_id(f"split_{seg_num}")
+            #if left_break:
+            #    left_node = node_to_id(left_label + "_hb_1")
+            #if right_break:
+            #    right_node = node_to_id(right_label + "_hb_2")
             _update_nx(left_node, left_label, left_break, right_node, right_label, right_break, seg.genome_id, seg.coverage)
 
         else:
-            split_1, split_2 = node_to_id(f"split_{seg_num}_1"), node_to_id(f"split_{seg_num}_2")
+            split_1, split_2 = node_to_id(right_label + "_split"), node_to_id(left_label + "_split")
             _update_nx(left_node, left_label, False, split_1, right_label, True, seg.genome_id, seg.coverage)
             _update_nx(split_2, left_label, True, right_node, right_label, False, seg.genome_id, seg.coverage)
 
@@ -155,11 +155,11 @@ def output_clusters_graphvis(graph, connected_components, key_to_color, out_file
                 v_sign, (v_chr, v_pos) = v_label[0], v_label[1:].split(":")
 
                 if ("INS" not in u_label) and ("INS" not in v_label):
-                    if (v_chr, int(v_pos), v_sign) > (u_chr, int(u_pos), u_sign):
+                    if (u_chr, int(u_pos), u_sign) > (v_chr, int(v_pos), v_sign):
                         u, v = v, u
-                elif "INS" in u_label and v_sign == "-":
+                elif "INS" in u_label and v_sign == "+":
                     u, v = v, u
-                elif "INS" in v_label and u_sign == "+":
+                elif "INS" in v_label and u_sign == "-":
                     u, v = v, u
 
                 #double edges for homozygous variants
@@ -170,7 +170,7 @@ def output_clusters_graphvis(graph, connected_components, key_to_color, out_file
                 properties = []
                 if graph[u][v][key]["adjacency"] == True:
                     properties.append("dir=none")
-                    properties.append("weight=0")
+                    #properties.append("weight=0")
 
                 for prop, val in graph[u][v][key].items():
                     properties.append(f"{prop}=\"{val}\"")
