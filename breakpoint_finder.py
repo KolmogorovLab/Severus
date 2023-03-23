@@ -109,9 +109,12 @@ class DoubleBreak(object):
         strand_1 = "+" if self.direction_1 > 0 else "-"
         strand_2 = "+" if self.direction_2 > 0 else "-"
         label_1 = "{0}{1}:{2}".format(strand_1, self.bp_1.ref_id, self.bp_1.position)
-        label_2 = "{0}{1}:{2}".format(strand_2, self.bp_2.ref_id, self.bp_2.position)
-        if label_2[1:] < label_1[1:]:
-            label_1, label_2 = label_2, label_1
+        if self.bp_2.is_insertion:
+            label_2 = "{0}:{1}".format('INS', self.length)
+        else:
+            label_2 = "{0}{1}:{2}".format(strand_2, self.bp_2.ref_id, self.bp_2.position)
+            if label_2[1:] < label_1[1:]:
+                label_1, label_2 = label_2, label_1
         bp_name = label_1 + "|" + label_2
         return bp_name
     
@@ -402,7 +405,7 @@ def extract_insertions(ins_list_all, lowmapq_reg, clipped_clusters,ref_lengths, 
 
 def get_clipped_reads(segments_by_read_filtered):
     clipped_reads = defaultdict(list)
-    for read in segments_by_read_filtered:
+    for read in segments_by_read_filtered.values():
         for seg in read:
             if seg.is_clipped:
                 clipped_reads[seg.ref_id].append(seg)
@@ -576,7 +579,7 @@ def extract_lowmapq_regions(segments_by_read , min_mapq):
 
 def get_insertionreads(segments_by_read_filtered):
     ins_list_all = []
-    for read in segments_by_read_filtered:
+    for read in segments_by_read_filtered.values():
         for seg in read:
             if seg.is_insertion:
                 ins_list_all.append(seg)
@@ -585,7 +588,7 @@ def get_insertionreads(segments_by_read_filtered):
 
 def get_splitreads(segments_by_read_filtered):
     split_reads = []
-    for read in segments_by_read_filtered:
+    for read in segments_by_read_filtered.values():
         split_reads_add = []
         if len(read)>1:
             for seg in read:
