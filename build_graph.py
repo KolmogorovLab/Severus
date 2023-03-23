@@ -44,10 +44,9 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
         if g.has_edge(left_kmer, right_kmer, key=double_bp.genome_id):
             g[left_kmer][right_kmer][double_bp.genome_id]["support"] += double_bp.supp
         else:
-            edge_weight = 2 if double_bp.genotype == "hom" else 1
+            #edge_weight = 2 if double_bp.genotype == "hom" else 1
             g.add_edge(left_kmer, right_kmer, key=double_bp.genome_id, support=double_bp.supp,
-                       style=double_bp.edgestyle, penwidth=edge_weight, adjacency=True,
-                       genotype=double_bp.genotype)
+                       style=double_bp.edgestyle, adjacency=True, genotype=double_bp.genotype)
 
         read_support = g[left_kmer][right_kmer][double_bp.genome_id]["support"]
         g[left_kmer][right_kmer][double_bp.genome_id]["label"] = f"R:{read_support}"
@@ -64,28 +63,28 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
             if not g.has_node(neg_node):
                 g.add_node(neg_node, label=neg_bp)
             if coord not in hb_points[seg.ref_id]:
-                g.add_edge(pos_node, neg_node, key=SEQUENCE_KEY, style=compl_link_style, adjacency=False)
+                g.add_edge(pos_node, neg_node, key=SEQUENCE_KEY, style=compl_link_style, adjacency=False, genotype="het")
 
     #helper function to add a new or update an existing genomic edge
     def _update_nx(left_node, left_label, left_break, right_node, right_label, right_break, genome_id, coverage):
         if g.has_edge(left_node, right_node, key=genome_id):
             g[left_node][right_node][genome_id]["support"] += coverage
-            g[left_node][right_node][genome_id]["penwidth"] = 2
+            g[left_node][right_node][genome_id]["genotype"] = "hom"
         else:
             g.add_edge(left_node, right_node, key=genome_id,
-                       support=coverage, style='solid', penwidth=1, adjacency=False)
+                       support=coverage, style='solid', genotype="het", adjacency=False)
 
         support = g[left_node][right_node][seg.genome_id]["support"]
         g[left_node][right_node][seg.genome_id]["label"] = f"L:{seg.length_bp} C:{support}"
 
         g.nodes[left_node]["label"] = left_label
         if left_break:
-            g.nodes[left_node]["style"] = "filled"
+            g.nodes[left_node]["style"] = "rounded, filled"
             g.nodes[left_node]["fillcolor"] = "grey"
 
         g.nodes[right_node]["label"] = right_label
         if right_break:
-            g.nodes[right_node]["style"] = "filled"
+            g.nodes[right_node]["style"] = "rounded, filled"
             g.nodes[right_node]["fillcolor"] = "grey"
 
     ### Add genomic edges
@@ -128,9 +127,9 @@ def output_clusters_graphvis(graph, connected_components, key_to_color, out_file
     def _add_legend(key_to_color, fout):
         fout.write("subgraph cluster_01 {\n\tlabel = \"Legend\";\n\tnode [shape=point]\n{\n\trank=same\n")
         for i, (key, color) in enumerate(key_to_color.items()):
-            node_1 = "legend_{0}_1".format(i)
-            node_2 = "legend_{0}_2".format(i)
-            fout.write("\t{0} -- {1} [color={2}, label=\"{3}\"];\n".format(node_1, node_2, color, key))
+            node_1 = f"legend_{i}_1"
+            node_2 = f"legend_{i}_2"
+            fout.write(f"\t{node_1} -> {node_2} [color={color}, label=\"{key}\", dir=none];\n")
         fout.write("}\n};\n")
 
     def _draw_components(components_list, out_stream):
@@ -139,21 +138,51 @@ def output_clusters_graphvis(graph, connected_components, key_to_color, out_file
                 continue
 
             out_stream.write("subgraph cluster{0} {{\n".format(subgr_num))
+            #Nodes properties
             for n in cc:
                 properties = []
-                for key in graph.nodes[n]:
-                    properties.append("{0}=\"{1}\"".format(key, graph.nodes[n][key]))
-                out_stream.write("{0} [{1}];\n".format(n, ",".join(properties)))
+                for key, val in graph.nodes[n].items():
+                    properties.append(f"{key}=\"{val}\"")
+                prop_str = ",".join(properties)
+                out_stream.write(f"{n} [{prop_str}];\n")
+
+            #Edges
             for u, v, key in graph.edges(cc, keys=True):
+                #switching nodes order to maintain genomic direction
+                u_label = graph.nodes[u]["label"]
+                v_label = graph.nodes[v]["label"]
+                u_sign, (u_chr, u_pos) = u_label[0], u_label[1:].split(":")
+                v_sign, (v_chr, v_pos) = v_label[0], v_label[1:].split(":")
+
+                if ("INS" not in u_label) and ("INS" not in v_label):
+                    if (v_chr, int(v_pos), v_sign) > (u_chr, int(u_pos), u_sign):
+                        u, v = v, u
+                elif "INS" in u_label and v_sign == "-":
+                    u, v = v, u
+                elif "INS" in v_label and u_sign == "+":
+                    u, v = v, u
+
+                #double edges for homozygous variants
+                if graph[u][v][key]["genotype"] == "hom":
+                    graph[u][v][key]["color"] = graph[u][v][key]["color"] + ":" + graph[u][v][key]["color"]
+
+                #no arrows for adjacency edges + no weight in ranking
                 properties = []
-                for prop in graph[u][v][key]:
-                    properties.append("{0}=\"{1}\"".format(prop, graph[u][v][key][prop]))
-                out_stream.write("{0} -- {1} [{2}];\n".format(u, v, ",".join(properties)))
+                if graph[u][v][key]["adjacency"] == True:
+                    properties.append("dir=none")
+                    properties.append("weight=0")
+
+                for prop, val in graph[u][v][key].items():
+                    properties.append(f"{prop}=\"{val}\"")
+                prop_str = ",".join(properties)
+                out_stream.write(f"{u} -> {v} [{prop_str}];\n")
+
             out_stream.write("}\n\n")
 
     with open(out_file, "w") as out_stream:
-        out_stream.write("graph {\n")
-        out_stream.write("edge [penwidth=2];\n")
+        out_stream.write("digraph {\n")
+        #out_stream.write("edge [penwidth=2];\n")
+        out_stream.write("node [shape=\"box\", style=\"rounded\"];\n")
         _add_legend(key_to_color, out_stream)
         _draw_components(connected_components, out_stream)
         out_stream.write("}\n")
