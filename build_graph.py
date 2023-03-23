@@ -52,32 +52,9 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
         read_support = g[left_kmer][right_kmer][double_bp.genome_id]["support"]
         g[left_kmer][right_kmer][double_bp.genome_id]["label"] = f"R:{read_support}"
 
-    ### Break long genomic segments
-    new_segments = []
-    genomic_breaks = {}
-    for seq, points in hb_points.items():
-        genomic_breaks[seq] = set(points)
-
-    #new_segments = genomicsegments
-    for seg in genomicsegments:
-        if seg.length_bp < max_genomic_len:
-            new_segments.append(seg)
-        else:
-            mid_point = seg.pos1 + seg.length_bp // 2
-            genomic_breaks[seg.ref_id].add(mid_point)
-
-            seg_1, seg_2 = copy(seg), copy(seg)
-            seg_1.pos2 = mid_point
-            seg_1.length_bp = seg.length_bp // 2
-            new_segments.append(seg_1)
-
-            seg_2.pos1 = mid_point
-            seg_2.length_bp = seg.length_bp // 2
-            new_segments.append(seg_2)
-
     ### Linking complementary nodes + haplotype switches style
     compl_link_style = "dashed" if reference_adjacencies else "invis"
-    for seg in new_segments:
+    for seg in genomicsegments:
         for coord in [seg.pos1, seg.pos2]:
             pos_bp, neg_bp = f"+{seg.ref_id}:{coord}", f"-{seg.ref_id}:{coord}"
             pos_node, neg_node = node_to_id(pos_bp), node_to_id(neg_bp)
@@ -86,66 +63,52 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
                 g.add_node(pos_node, label=pos_bp)
             if not g.has_node(neg_node):
                 g.add_node(neg_node, label=neg_bp)
-            if coord not in genomic_breaks[seg.ref_id]:
+            if coord not in hb_points[seg.ref_id]:
                 g.add_edge(pos_node, neg_node, key=SEQUENCE_KEY, style=compl_link_style, adjacency=False)
 
-            if coord in genomic_breaks[seg.ref_id]:
-                hb_attr = {pos_node: {'style':"filled", 'fillcolor': "grey", 'label': ''},
-                           neg_node: {'style':"filled", 'fillcolor': "grey", 'label': ''}}
-                nx.set_node_attributes(g, hb_attr)
-
-    ### Add genomic edges wth coverages
-    for seg in new_segments:
-        if seg.length_bp > max_genomic_len or (seg.haplotype == 0 and seg.coverage == 0):
-            continue
-
-        left_bp, right_bp = f"{seg.dir1}{seg.ref_id}:{seg.pos1}", f"{seg.dir2}{seg.ref_id}:{seg.pos2}"
-        left_node, right_node = node_to_id(left_bp), node_to_id(right_bp)
-
-        if g.has_edge(left_node, right_node, key=seg.genome_id):
-            g[left_node][right_node][seg.genome_id]["support"] += seg.coverage
-            g[left_node][right_node][seg.genome_id]["penwidth"] = 2
+    #helper function to add a new or update an existing genomic edge
+    def _update_nx(left_node, left_label, left_break, right_node, right_label, right_break, genome_id, coverage):
+        if g.has_edge(left_node, right_node, key=genome_id):
+            g[left_node][right_node][genome_id]["support"] += coverage
+            g[left_node][right_node][genome_id]["penwidth"] = 2
         else:
-            g.add_edge(left_node, right_node, key=seg.genome_id,
-                       support=seg.coverage, style='solid', penwidth=1, adjacency=False)
+            g.add_edge(left_node, right_node, key=genome_id,
+                       support=coverage, style='solid', penwidth=1, adjacency=False)
 
         support = g[left_node][right_node][seg.genome_id]["support"]
         g[left_node][right_node][seg.genome_id]["label"] = f"L:{seg.length_bp} C:{support}"
 
-    """
-    def add_genomic_edge(seg, ref_style):
-        left_kmer = node_to_id(":".join([seg.dir1+seg.ref_id, str(seg.pos1)]))
-        right_kmer = node_to_id(":".join([seg.dir2+seg.ref_id, str(seg.pos2)]))
-        left_kmer_2 = node_to_id(":".join([seg.dir2+seg.ref_id, str(seg.pos1)]))
-        right_kmer_2 = node_to_id(":".join([seg.dir1+seg.ref_id, str(seg.pos2)]))
+        g.nodes[left_node]["label"] = left_label
+        if left_break:
+            g.nodes[left_node]["style"] = "filled"
+            g.nodes[left_node]["fillcolor"] = "grey"
 
-        edge_flag = True
-        if (g.has_edge(left_kmer, right_kmer, key = seg.genome_id) and g[left_kmer][right_kmer][seg.genome_id]["style"] == 'dashed'):
-            edge_flag = False
-        elif g.has_edge(left_kmer_2, right_kmer, key = seg.genome_id) and g[left_kmer_2][right_kmer][seg.genome_id]["style"] == 'dashed':
-            edge_flag = False
-        elif g.has_edge(left_kmer, right_kmer_2, key = seg.genome_id) and g[left_kmer][right_kmer_2][seg.genome_id]["style"] == 'dashed':
-            edge_flag = False
-        elif g.has_edge(left_kmer_2, right_kmer_2, key = seg.genome_id)and g[left_kmer_2][right_kmer_2][seg.genome_id]["style"] == 'dashed':
-            edge_flag = False
+        g.nodes[right_node]["label"] = right_label
+        if right_break:
+            g.nodes[right_node]["style"] = "filled"
+            g.nodes[right_node]["fillcolor"] = "grey"
 
-        if edge_flag:
-            if g.has_edge(left_kmer, right_kmer, key = seg.genome_id):
-                g[left_kmer][right_kmer][seg.genome_id]["support"] += seg.coverage
-                g[left_kmer][right_kmer][seg.genome_id]["penwidth"] = 2
-            else:
-                g.add_edge(left_kmer, right_kmer, key=seg.genome_id,
-                           support=seg.coverage, style='solid', penwidth = 1, adjacency=False)
+    ### Add genomic edges
+    for seg_num, seg in enumerate(genomicsegments):
+        if seg.haplotype == 0 and seg.coverage == 0:
+            continue
 
-            label="L:{0} C:{1}".format(seg.length_bp, g[left_kmer][right_kmer][seg.genome_id]["support"])
-            g[left_kmer][right_kmer][seg.genome_id]["label"] = label
+        left_label, right_label = f"{seg.dir1}{seg.ref_id}:{seg.pos1}", f"{seg.dir2}{seg.ref_id}:{seg.pos2}"
+        left_node, right_node = node_to_id(left_label), node_to_id(right_label)
 
-    ref_style = "dashed" if reference_adjacencies else "invis"
-    for seg in genomicsegments:
         if seg.length_bp < max_genomic_len:
-            if not (seg.haplotype == 0 and seg.coverage == 0):
-                add_genomic_edge(seg, ref_style)
-    """
+            left_break = seg.pos1 in hb_points[seg.ref_id]
+            right_break = seg.pos2 in hb_points[seg.ref_id]
+            if left_break:
+                left_node = node_to_id(f"split_{seg_num}")
+            if right_break:
+                right_node = node_to_id(f"split_{seg_num}")
+            _update_nx(left_node, left_label, left_break, right_node, right_label, right_break, seg.genome_id, seg.coverage)
+
+        else:
+            split_1, split_2 = node_to_id(f"split_{seg_num}_1"), node_to_id(f"split_{seg_num}_2")
+            _update_nx(left_node, left_label, False, split_1, right_label, True, seg.genome_id, seg.coverage)
+            _update_nx(split_2, left_label, True, right_node, right_label, False, seg.genome_id, seg.coverage)
 
     #adding colors
     key_to_color = {}
