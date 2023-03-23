@@ -5,9 +5,9 @@ from collections import  defaultdict
 
 
 class ReadSegment(object):
-    __slots__ = ("read_start", "read_end", "ref_start", "ref_end", "read_id", "ref_id",
-                 "strand", "read_length",'segment_length', "haplotype", "mapq", "genome_id",
-                 'mismatch_rate', "is_insertion", "is_clipped", 'is_end')
+    __slots__ = ("read_start", "read_end", "ref_start", "ref_end", "read_id", "ref_id","strand", "read_length",
+                 'segment_length', "haplotype", "mapq", "genome_id",'mismatch_rate', 'is_pass', "is_insertion", 
+                 "is_clipped", 'is_end', 'bg_mm_rate')
     def __init__(self, read_start, read_end, ref_start, ref_end, read_id, ref_id,
                  strand, read_length,segment_length, haplotype, mapq, genome_id, mismatch_rate, is_insertion):
         self.read_start = read_start
@@ -23,9 +23,11 @@ class ReadSegment(object):
         self.mapq = mapq
         self.genome_id = genome_id
         self.mismatch_rate = mismatch_rate
+        self.is_pass = 'PASS'
         self.is_insertion = is_insertion
         self.is_clipped = False
         self.is_end = False
+        self.bg_mm_rate = 1
     def __str__(self):
         return "".join(["read_start=", str(self.read_start), " read_end=", str(self.read_end), " ref_start=", str(self.ref_start),
                          " ref_end=", str(self.ref_end), " read_id=", str(self.read_id), " ref_id=", str(self.ref_id), " strand=", str(self.strand),
@@ -55,7 +57,7 @@ def get_segment(read, genome_id,sv_size):
     
     #num_of_mismatch = 0
     nm = read.get_tag('NM')
-    indel = sum([b for a, b in cigar if a in [CIGAR_INS, CIGAR_DEL] and b < sv_size])
+    indel = sum([b for a, b in cigar if a in [CIGAR_INS, CIGAR_DEL]])
     num_of_mismatch = nm - indel 
     total_segment_length = sum([b for a, b in cigar if a not in [CIGAR_CLIP, CIGAR_DEL]])
     mm_rate = num_of_mismatch / total_segment_length
@@ -192,7 +194,7 @@ COV_WINDOW = 500
 def update_coverage_hist(genome_ids, ref_lengths, segments_by_read, min_mapq, max_read_error):
     NUM_HAPLOTYPES = 3
     segments_by_read_filtered = filter_all_reads(segments_by_read, min_mapq, max_read_error)
-    allsegments = get_allsegments(segments_by_read_filtered)
+    allsegments = get_allsegments(segments_by_read)
     coverage_histograms = {}
     for genome_id in genome_ids:
         for chr_id, chr_len in ref_lengths.items():
@@ -213,7 +215,7 @@ def filter_all_reads(segments_by_read,min_mapq, max_read_error):
     MAX_SEGMENTS = 10
     MIN_SEGMENT_LENGTH = 100
     
-    segments_by_read_filtered=[]
+    segments_by_read_filtered = defaultdict(list)
     for read_id, segments in segments_by_read.items():
         dedup_segments = []
         segments.sort(key=lambda s: s.read_start)
@@ -229,14 +231,14 @@ def filter_all_reads(segments_by_read,min_mapq, max_read_error):
         aligned_ratio = aligned_len/segments[0].read_length
         if aligned_len < MIN_ALIGNED_LENGTH or aligned_ratio < MIN_ALIGNED_RATE or len(segments) > MAX_SEGMENTS:
             continue
-        segments_by_read_filtered.append(dedup_segments)
+        segments_by_read_filtered[read_id] = dedup_segments
         
     return segments_by_read_filtered
 
 
-def get_allsegments(segments_by_read_filtered):
+def get_allsegments(segments_by_read):
     allsegments = []
-    for read in segments_by_read_filtered:
+    for read in segments_by_read.values():
         for seg in read:
             if not seg.is_insertion:
                 allsegments.append(seg)

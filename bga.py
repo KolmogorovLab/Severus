@@ -46,7 +46,7 @@ def main():
     MIN_MAPQ = 10
     #MIN_DOUBLE_BP_READS = 5
     MIN_REF_FLANK = 10000
-    MAX_GENOMIC_LEN = 200000
+    MAX_GENOMIC_LEN = 50000
 
     #breakpoint
     BP_CLUSTER_SIZE = 50
@@ -103,7 +103,7 @@ def main():
                         help=f"maximum length of genomic segment to form connected components [{MAX_GENOMIC_LEN}]")
     parser.add_argument("--phasing-vcf", dest="phase_vcf", metavar="path", help="vcf file used for phasing [None]")
     parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
-    parser.add_argument("--add-clipped-ends", action="store_true", dest="add_clipped_ends", default=False) ## remove once confirmed
+    parser.add_argument("--no-clipped-ends", action="store_false", dest="add_clipped_ends", default=True) ## remove once confirmed
     args = parser.parse_args()
 
     if args.control_bam is None:
@@ -120,7 +120,7 @@ def main():
     logger.debug("Cmd: " + " ".join(sys.argv[1:]))
     
     args.sv_size = max(args.min_sv_size - MIN_SV_THR, MIN_SV_THR)
-    args.sv_final_size = args.sv_size + SV_SIZE_RPT
+    args.sv_final_size = args.min_sv_size
 
     if not shutil.which(SAMTOOLS_BIN):
         logger.error("samtools not found")
