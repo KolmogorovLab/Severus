@@ -68,7 +68,7 @@ class Breakpoint(object):
         self.read_ids=[]
         self.pos2 = []
         self.is_insertion = False
-        self.insertion_size = 0
+        self.insertion_size = None
 
     def fancy_name(self):
         if not self.is_insertion:
@@ -82,6 +82,10 @@ class Breakpoint(object):
             return f"{sign}{self.ref_id}:{self.position}"
         else:
             return f"INS:{self.ref_id}:{self.position}"
+
+    def coord_tuple(self):
+        sign = '-' if self.dir_1 == -1 else '+'
+        return (self.ref_id, self.position, sign)
 
 
 class DoubleBreak(object):
@@ -131,6 +135,18 @@ class GenomicSegment(object):
         self.pos2 = pos2
         self.coverage = coverage
         self.length_bp = length_bp
+
+    def left_coord_str(self):
+        return f"{self.dir1}{self.ref_id}:{self.pos1}"
+
+    def right_coord_str(self):
+        return f"{self.dir2}{self.ref_id}:{self.pos2}"
+
+    def left_coord_tuple(self):
+        return (self.ref_id, self.pos1, self.dir1)
+
+    def right_coord_tuple(self):
+        return (self.ref_id, self.pos2, self.dir2)
 
 
 def count_spanning_reads(read_segments, position, read_ids):
