@@ -10,6 +10,7 @@ from collections import defaultdict
 from build_graph import build_breakpoint_graph, output_clusters_graphvis, output_clusters_csv
 from bam_processing import get_all_reads_parallel, update_coverage_hist
 from breakpoint_finder import call_breakpoints, output_breaks, get_genomic_segments
+from resolve_vntr import update_segments_by_read
 import logging
 
 
@@ -94,7 +95,7 @@ def main():
                         help=f"minimum mapping quality for aligned segment [{MIN_MAPQ}]")
     parser.add_argument("--reference-adjacencies", action="store_true", dest="reference_adjacencies",
                         default=False, help="draw reference adjacencies [False]")
-    parser.add_argument("--write_alignments", action="store_true", dest="write_alignments",
+    parser.add_argument("--write-alignments", action="store_true", dest="write_alignments",
                         default=False, help="write read alignments to file [False]")
     parser.add_argument("--single-bp", action="store_true", dest="single_bp",
                         default=False, help="Add hagning breakpoints [False]")
@@ -103,7 +104,6 @@ def main():
                         help=f"maximum length of genomic segment to form connected components [{MAX_GENOMIC_LEN}]")
     parser.add_argument("--phasing-vcf", dest="phase_vcf", metavar="path", help="vcf file used for phasing [None]")
     parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
-    parser.add_argument("--no-clipped-ends", action="store_false", dest="add_clipped_ends", default=True) ## remove once confirmed
     args = parser.parse_args()
 
     if args.control_bam is None:
@@ -143,14 +143,16 @@ def main():
         genome_ids.append(genome_id)
         logger.info(f"Parsing reads from {genome_id}")
         segments_by_read_bam =  get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
-                                   args.min_mapping_quality, args.sv_size, args.add_clipped_ends)
+                                   args.min_mapping_quality, args.sv_size)
         segments_by_read.update(segments_by_read_bam)
         num_seg = len(segments_by_read_bam)
         logger.info(f"Parsed {num_seg} segments")
-     
+    
+    logger.info('Computing read quality') 
+    segments_by_read = update_segments_by_read(segments_by_read, ref_lengths, thread_pool, args)
     logger.info('Computing coverage histogram')
-    coverage_histograms = update_coverage_hist(genome_ids, ref_lengths, segments_by_read, args.min_mapping_quality, args.max_read_error)
-    double_breaks = call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histograms, args)
+    coverage_histograms = update_coverage_hist(genome_ids, ref_lengths, segments_by_read)
+    double_breaks = call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histograms, genome_ids, args)
     logger.info('Computing segment coverage')
     genomic_segments, hb_points = get_genomic_segments(double_breaks, coverage_histograms, thread_pool, args.phase_vcf)
 
