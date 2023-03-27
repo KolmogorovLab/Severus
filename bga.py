@@ -104,6 +104,8 @@ def main():
                         help=f"maximum length of genomic segment to form connected components [{MAX_GENOMIC_LEN}]")
     parser.add_argument("--phasing-vcf", dest="phase_vcf", metavar="path", help="vcf file used for phasing [None]")
     parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
+    
+    
     args = parser.parse_args()
 
     if args.control_bam is None:
@@ -120,7 +122,6 @@ def main():
     logger.debug("Cmd: " + " ".join(sys.argv[1:]))
     
     args.sv_size = max(args.min_sv_size - MIN_SV_THR, MIN_SV_THR)
-    args.sv_final_size = args.min_sv_size
 
     if not shutil.which(SAMTOOLS_BIN):
         logger.error("samtools not found")

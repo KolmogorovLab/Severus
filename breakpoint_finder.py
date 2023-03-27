@@ -151,7 +151,7 @@ def get_breakpoints(split_reads, thread_pool, ref_lengths, args):
     clust_len = args.bp_cluster_size
     min_reads = args.bp_min_support
     min_ref_flank = args.min_ref_flank 
-    sv_size = args.sv_final_size
+    sv_size = args.sv_size
     MAX_SEGMENT_DIST= 500
     
     seq_breakpoints_l = defaultdict(list)
@@ -392,7 +392,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
     clust_len = args.bp_cluster_size
     min_reads = args.bp_min_support
     min_ref_flank = args.min_ref_flank 
-    sv_size = args.sv_final_size
+    sv_size = args.sv_size
     MIN_FULL_READ_SUPP = 2
     NUM_HAPLOTYPES = 3
     ins_clusters = []
