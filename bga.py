@@ -9,7 +9,7 @@ from multiprocessing import Pool
 from collections import defaultdict
 from build_graph import build_breakpoint_graph, output_clusters_graphvis, output_clusters_csv
 from bam_processing import get_all_reads_parallel, update_coverage_hist
-from breakpoint_finder import call_breakpoints, output_breaks, get_genomic_segments
+from breakpoint_finder import call_breakpoints, output_breaks, get_genomic_segments, filter_fail_double_db
 from resolve_vntr import update_segments_by_read
 import logging
 
@@ -104,7 +104,7 @@ def main():
                         help=f"maximum length of genomic segment to form connected components [{MAX_GENOMIC_LEN}]")
     parser.add_argument("--phasing-vcf", dest="phase_vcf", metavar="path", help="vcf file used for phasing [None]")
     parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
-    
+    parser.add_argument("--output-all-svs", dest='output_all_svs', action = "store_true")
     
     args = parser.parse_args()
 
@@ -155,8 +155,8 @@ def main():
     coverage_histograms = update_coverage_hist(genome_ids, ref_lengths, segments_by_read)
     double_breaks = call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histograms, genome_ids, args)
     logger.info('Computing segment coverage')
+    double_breaks = filter_fail_double_db(double_breaks) # merge it with breakpoint graph 
     genomic_segments, hb_points = get_genomic_segments(double_breaks, coverage_histograms, thread_pool, args.phase_vcf)
-
     logger.info('Writing breakpoints')
     output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
     logger.info('Preparing graph')
