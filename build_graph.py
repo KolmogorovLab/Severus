@@ -5,6 +5,7 @@ import sys
 import os
 import networkx as nx
 from collections import defaultdict
+from itertools import combinations
 from copy import copy
 
 
@@ -73,11 +74,15 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
 
         if seg.length_bp < max_genomic_len:
             left_terminal = seg.pos1 in hb_points[seg.ref_id]
+            if left_terminal:
+                left_node = node_to_id(f"hb_left_{seg_num}")
             right_terminal = seg.pos2 in hb_points[seg.ref_id]
+            if right_terminal:
+                right_node = node_to_id(f"hb_right_{seg_num}")
             _update_genomic(left_node, left_coord, left_terminal, right_node, right_coord, right_terminal, seg.genome_id, seg.coverage)
 
         else:
-            split_1, split_2 = node_to_id(right_label + "_split"), node_to_id(left_label + "_split")
+            split_1, split_2 = node_to_id(f"split_1_{seg_num}"), node_to_id(f"split_2_{seg_num}")
             _update_genomic(left_node, left_coord, False, split_1, right_coord, True, seg.genome_id, seg.coverage)
             _update_genomic(split_2, left_coord, True, right_node, right_coord, False, seg.genome_id, seg.coverage)
 
@@ -90,6 +95,24 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
 
             if coord not in hb_points[seg.ref_id] and g.has_node(pos_node) and g.has_node(neg_node):
                 g.add_edge(pos_node, neg_node, key=SEQUENCE_KEY, _type="complementary", _genotype="het")
+
+    #Merge terminal nodes with the same coordinates in the came connected components
+    to_merge = []
+    for cc in nx.connected_components(g):
+        for u, v in combinations(cc, 2):
+            if g.nodes[u]["_coordinate"] == g.nodes[v]["_coordinate"] and \
+                    g.nodes[u]["_insertion"] is None and g.nodes[v]["_insertion"] is None:
+                to_merge.append((u, v))
+
+    for (u, v) in to_merge:
+        if g.has_node(u) and g.has_node(v):
+            for (_v, other_n, key, data) in g.edges(v, keys=True, data=True):
+                if not g.has_edge(u, other_n, key=key):
+                    g.add_edge(u, other_n, key=key)
+                    g[u][other_n][key].update(data)
+                    #print(g[u][other_n][key])
+            g.remove_node(v)
+    ###
 
     return g
 
