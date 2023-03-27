@@ -240,6 +240,7 @@ def label_reads(read, min_mapq, mismatch_histograms):
     MIN_ALIGNED_LENGTH = 5000
     MAX_SEGMENTED_READ = 10
     MAX_CHR_SPAN = 2
+    MIN_SEGMENT_LEN = 100
     MAX_MM_RATE_THR = 2
     MAX_ERROR_RATE = 0.01
     fail_type = ''
@@ -269,6 +270,8 @@ def label_reads(read, min_mapq, mismatch_histograms):
         return dedup_segments
     
     for seg in dedup_segments:
+        if not seg.is_insertion and not seg.is_clipped and seg.segment_length < MIN_SEGMENT_LEN:
+            seg.is_pass = 'SEG_LENGTH'
         if seg.mapq < min_mapq:
             seg.is_pass = 'LOW_MAPQ'
             continue
