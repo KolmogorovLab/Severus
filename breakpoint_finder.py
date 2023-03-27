@@ -314,6 +314,7 @@ def get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads):
 
 #TODO BAM/HAPLOTYPE SPECIFIC FILTER
 def double_breaks_filter(double_breaks, min_reads, genome_ids):
+
     PASS_2_FAIL_RAT = 0.8
     CONN_2_PASS = 0.7
     CHR_CONN = 2
@@ -370,17 +371,18 @@ def double_breaks_filter(double_breaks, min_reads, genome_ids):
         count_pass = Counter([db1.is_pass for db1 in cl])
         if not count_pass['PASS']:
             continue
-      
+        
         gen_ids = list(set(genome_ids) - set([db1.genome_id for db1 in cl]))
         if gen_ids:
             for (genome_id, haplotype), count in cl[0].bp_1.spanning_reads.items(): 
-                if genome_id in gen_ids and count < COV_THR:
+                if genome_id in gen_ids and haplotype == cl[0].haplotype_1 and count < COV_THR:
                     for db in cl:
                         db.is_pass = 'PASS_LOWCOVERAGE'
             for (genome_id, haplotype), count in cl[0].bp_2.spanning_reads.items(): 
-                if genome_id in gen_ids and count < COV_THR:
+                if genome_id in gen_ids and haplotype == cl[0].haplotype_2 and count < COV_THR:
                     for db in cl:
                         db.is_pass = 'PASS_LOWCOVERAGE'
+                        
         db_list += cl
         
     return db_list
@@ -505,7 +507,7 @@ def insertion_filter(ins_clusters, min_reads, genome_ids):
         gen_ids = list(set(genome_ids) - set([db1.genome_id for db1 in cl]))
         if gen_ids:
             for (genome_id, haplotype), count in cl[0].bp_1.spanning_reads.items():
-                if genome_id in gen_ids and count < COV_THR:
+                if genome_id in gen_ids and haplotype == cl[0].haplotype_1 and count < COV_THR:
                     for ins in cl:
                         ins.is_pass = 'PASS_LOWCOVERAGE'
                         
@@ -574,12 +576,17 @@ def add_clipped_end(position, clipped_clusters_pos, clipped_clusters_seq, by_gen
                 happ_support_1[key[0]].append(key[1])
 
     
-def compute_bp_coverage(double_breaks,coverage_histograms):
+def compute_bp_coverage(double_breaks, coverage_histograms, genome_ids):
+    haplotype_list = [0, 1, 2]
     for db in double_breaks:
         if not db.bp_1.is_insertion:
-            db.bp_1.spanning_reads[(db.genome_id, db.haplotype_1)] = bp_coverage(db.bp_1, db.genome_id, db.haplotype_1, coverage_histograms)
+            for genome_id in genome_ids:
+                for haplotype in haplotype_list:
+                    db.bp_1.spanning_reads[(genome_id, haplotype)] = bp_coverage(db.bp_1, genome_id, haplotype, coverage_histograms)
         if not db.bp_2.is_insertion:
-            db.bp_2.spanning_reads[(db.genome_id, db.haplotype_2)] = bp_coverage(db.bp_2, db.genome_id, db.haplotype_2, coverage_histograms)       
+            for genome_id in genome_ids:
+                for haplotype in haplotype_list:
+                    db.bp_2.spanning_reads[(genome_id, haplotype)] = bp_coverage(db.bp_2, genome_id, haplotype, coverage_histograms)       
 
 def bp_coverage(bp, genome_id, haplotype, coverage_histograms):
     hist_start = bp.position // COV_WINDOW
@@ -791,14 +798,14 @@ def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histog
     clipped_clusters = cluster_clipped_ends(clipped_reads, args.bp_cluster_size, args.min_ref_flank, ref_lengths)
     logger.info('Starting breakpoint detection')
     double_breaks = get_breakpoints(split_reads,thread_pool, ref_lengths, args)
-    compute_bp_coverage(double_breaks,coverage_histograms)
+    compute_bp_coverage(double_breaks, coverage_histograms, genome_ids)
     double_breaks = double_breaks_filter(double_breaks, args.bp_min_support, genome_ids)
     double_breaks.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position, b.direction_1))
     
     logger.info('Clustering unmapped insertions')
     
     ins_clusters = extract_insertions(ins_list_all, clipped_clusters, ref_lengths, args)
-    compute_bp_coverage(ins_clusters,coverage_histograms)
+    compute_bp_coverage(ins_clusters, coverage_histograms, genome_ids)
     ins_clusters = insertion_filter(ins_clusters, args.bp_min_support, genome_ids)
     ins_clusters.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position))
     

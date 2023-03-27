@@ -186,8 +186,8 @@ def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
             segments_by_read[aln.read_id].append(aln)
     segments_by_read = add_clipped_end(segments_by_read)
     return segments_by_read
-    
-            
+        
+           
 COV_WINDOW = 500
 def update_coverage_hist(genome_ids, ref_lengths, segments_by_read):
     NUM_HAPLOTYPES = 3
