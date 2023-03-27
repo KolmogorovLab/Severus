@@ -1,13 +1,12 @@
 import pysam
-from multiprocessing import Pool
 import numpy as np
 from collections import  defaultdict
-
+import time
 
 class ReadSegment(object):
-    __slots__ = ("read_start", "read_end", "ref_start", "ref_end", "read_id", "ref_id","strand", "read_length",
-                 'segment_length', "haplotype", "mapq", "genome_id",'mismatch_rate', 'is_pass', "is_insertion", 
-                 "is_clipped", 'is_end', 'bg_mm_rate')
+    __slots__ = ("read_start", "read_end", "ref_start", "ref_end", "read_id", "ref_id",
+                 "strand", "read_length",'segment_length', "haplotype", "mapq", "genome_id",
+                 'mismatch_rate', 'is_pass', "is_insertion", "is_clipped", 'is_end', 'bg_mm_rate')
     def __init__(self, read_start, read_end, ref_start, ref_end, read_id, ref_id,
                  strand, read_length,segment_length, haplotype, mapq, genome_id, mismatch_rate, is_insertion):
         self.read_start = read_start
@@ -33,8 +32,7 @@ class ReadSegment(object):
                          " ref_end=", str(self.ref_end), " read_id=", str(self.read_id), " ref_id=", str(self.ref_id), " strand=", str(self.strand),
                          " read_length=", str(self.read_length), " haplotype=", str(self.haplotype),
                          " mapq=", str(self.mapq), " genome_id=", str(self.genome_id)])
-
-
+    
 def get_segment(read, genome_id,sv_size):
     """
     Parses cigar and generate ReadSegment structure with alignment coordinates
@@ -55,13 +53,14 @@ def get_segment(read, genome_id,sv_size):
     read_segments =[]
     cigar = read.cigartuples
     
-    #num_of_mismatch = 0
-    nm = read.get_tag('NM')
-    indel = sum([b for a, b in cigar if a in [CIGAR_INS, CIGAR_DEL]])
-    num_of_mismatch = nm - indel 
-    total_segment_length = sum([b for a, b in cigar if a not in [CIGAR_CLIP, CIGAR_DEL]])
-    mm_rate = num_of_mismatch / total_segment_length
     
+    #num_of_mismatch = 0
+    #nm = read.get_tag('NM')
+    #indel = sum([b for a, b in cigar if a in [CIGAR_INS, CIGAR_DEL]])
+    #num_of_mismatch = nm - indel 
+    #total_segment_length = sum([b for a, b in cigar if a not in [CIGAR_CLIP, CIGAR_DEL]])
+    #mm_rate = num_of_mismatch / total_segment_length
+    mm_rate = read.get_tag('de')
     read_length = np.sum([k[1] for k in cigar if k[0] != CIGAR_DEL])
     strand = '-' if read.is_reverse else '+'
     
@@ -99,7 +98,7 @@ def get_segment(read, genome_id,sv_size):
                 ref_start = ref_end+op_len+1
                 read_aligned = 0
                 ref_aligned = 0
-                num_of_mismatch = 0
+                #num_of_mismatch = 0
         if op == CIGAR_INS:
             if op_len < sv_size:
                 read_aligned += op_len
@@ -108,7 +107,7 @@ def get_segment(read, genome_id,sv_size):
                 read_aligned += op_len
                 ins_pos= ref_start + ref_aligned
                 ins_end = read_start +read_aligned
-                mm_rate = 0
+                #mm_rate = 0
                 read_segments.append(ReadSegment(ins_start, ins_end, ins_pos, ins_pos, read.query_name,
                                         read.reference_name, strand, read_length,op_len, haplotype, read.mapping_quality, genome_id,mm_rate, True))
     if ref_aligned !=0:
@@ -124,6 +123,7 @@ def get_segment(read, genome_id,sv_size):
 
 def add_clipped_end(segments_by_read):
     MAX_CLIPPED_LENGTH = 200
+    
     for read in segments_by_read.values():
         read2 = [seg for seg  in read if not seg.is_insertion]
         read2.sort(key=lambda s: s.read_start)
@@ -164,7 +164,7 @@ def get_all_reads(bam_file, region, genome_id,sv_size):
 
 
 def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
-                           min_mapq, sv_size, add_clipped_ends):
+                           min_mapq, sv_size):
     CHUNK_SIZE = 10000000
     all_reference_ids = [r for r in pysam.AlignmentFile(bam_file, "rb").references]
     fetch_list = []
@@ -179,72 +179,147 @@ def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
             
     tasks = [(bam_file, region, genome_id,sv_size) for region in fetch_list]
     parsing_results = None
-    #thread_pool = Pool(num_threads)
     parsing_results = thread_pool.starmap(get_all_reads, tasks)
     segments_by_read = defaultdict(list)
     for alignments in parsing_results:
         for aln in alignments:
             segments_by_read[aln.read_id].append(aln)
-    if add_clipped_ends:
-        segments_by_read = add_clipped_end(segments_by_read)
-    return segments_by_read        
-       
-            
+    segments_by_read = add_clipped_end(segments_by_read)
+    return segments_by_read
+        
+           
 COV_WINDOW = 500
-def update_coverage_hist(genome_ids, ref_lengths, segments_by_read, min_mapq, max_read_error):
+def update_coverage_hist(genome_ids, ref_lengths, segments_by_read):
     NUM_HAPLOTYPES = 3
-    segments_by_read_filtered = filter_all_reads(segments_by_read, min_mapq, max_read_error)
-    allsegments = get_allsegments(segments_by_read)
     coverage_histograms = {}
+    
     for genome_id in genome_ids:
         for chr_id, chr_len in ref_lengths.items():
             for hp in range(0,NUM_HAPLOTYPES):
                 coverage_histograms[(genome_id, hp, chr_id)] = [0 for _ in range(chr_len // COV_WINDOW + 1)]
-    
-    for read in allsegments:
-        hist_start = read.ref_start // COV_WINDOW
-        hist_end = read.ref_end // COV_WINDOW
-        for i in range(hist_start + 1, hist_end): ## Check with (hist_start, hist_end + 1)
-            coverage_histograms[(read.genome_id, read.haplotype, read.ref_id)][i] += 1
+                
+    for read in segments_by_read.values():
+        for seg in read:
+            if seg.is_pass == 'PASS' and not seg.is_insertion and not seg.is_clipped:
+                hist_start = seg.ref_start // COV_WINDOW
+                hist_end = seg.ref_end // COV_WINDOW
+                for i in range(hist_start + 1, hist_end): ## Check with (hist_start, hist_end + 1)
+                    coverage_histograms[(seg.genome_id, seg.haplotype, seg.ref_id)][i] += 1
+                    
     return coverage_histograms
 
 
-def filter_all_reads(segments_by_read,min_mapq, max_read_error):
-    MIN_ALIGNED_LENGTH = 5000
-    MIN_ALIGNED_RATE = 0.5
-    MAX_SEGMENTS = 10
-    MIN_SEGMENT_LENGTH = 100
-    
-    segments_by_read_filtered = defaultdict(list)
-    for read_id, segments in segments_by_read.items():
-        dedup_segments = []
-        segments.sort(key=lambda s: s.read_start)
-        
-        for seg in segments:
-            if not dedup_segments or dedup_segments[-1].read_start != seg.read_start:            
-                if (seg.is_insertion or seg.is_clipped) and seg.mapq > min_mapq:
-                    dedup_segments.append(seg)
-                elif seg.mapq>min_mapq and seg.segment_length > MIN_SEGMENT_LENGTH and seg.mismatch_rate < max_read_error:
-                    dedup_segments.append(seg)
-                    
-        aligned_len = sum([seg.segment_length for seg in dedup_segments if not seg.is_insertion and not seg.is_clipped])
-        aligned_ratio = aligned_len/segments[0].read_length
-        if aligned_len < MIN_ALIGNED_LENGTH or aligned_ratio < MIN_ALIGNED_RATE or len(segments) > MAX_SEGMENTS:
-            continue
-        segments_by_read_filtered[read_id] = dedup_segments
-        
+def filter_reads(segments_by_read):
+    segments_by_read_filtered = []
+    for read in segments_by_read.values():
+        new_read = []
+        for seg in read:
+            if seg.is_pass == 'PASS':
+                new_read.append(seg)
+        segments_by_read_filtered.append(new_read)
     return segments_by_read_filtered
+        
+
+def add_read_qual(segments_by_read, ref_lengths, thread_pool, min_mapq, max_error_rate):
+    
+    mismatch_histograms = background_mm_hist(segments_by_read, ref_lengths)
+    
+    tasks = [(read, min_mapq, mismatch_histograms) for read in segments_by_read.values()]
+    parsing_results = None
+    parsing_results = thread_pool.starmap(label_reads, tasks)
+    segments_by_read_new = defaultdict(list)
+    for alignments in parsing_results:
+        for aln in alignments:
+            segments_by_read_new[aln.read_id].append(aln)
+    return segments_by_read_new
+    
+    
+def label_reads(read, min_mapq, mismatch_histograms):
+    
+    MIN_ALIGNED_RATE = 0.5
+    MIN_ALIGNED_LENGTH = 5000
+    MAX_SEGMENTED_READ = 10
+    MAX_CHR_SPAN = 2
+    MIN_SEGMENT_LEN = 100
+    MAX_MM_RATE_THR = 2
+    MAX_ERROR_RATE = 0.01
+    fail_type = ''
+    chr_list = []
+    dedup_segments = []
+    n_seg = 0
+    
+    for seg in read:
+        if not dedup_segments or dedup_segments[-1].read_start != seg.read_start:            
+            if seg.is_insertion or seg.is_clipped:
+                dedup_segments.append(seg)
+            else:
+                dedup_segments.append(seg)
+                chr_list.append(seg.ref_id)
+                n_seg += 1  
+            
+    aligned_len = sum([seg.segment_length for seg in dedup_segments if not seg.is_insertion and not seg.is_clipped])
+    aligned_ratio = aligned_len/read[0].read_length
+    
+    if n_seg > MAX_SEGMENTED_READ or len(set(chr_list)) > MAX_CHR_SPAN:
+        fail_type = 'SEGMENTED'
+    elif aligned_len < MIN_ALIGNED_LENGTH or aligned_ratio < MIN_ALIGNED_RATE:
+        fail_type = 'LOW_ALIGNED_LEN'
+    if fail_type:
+        for seg in dedup_segments:
+            seg.is_pass = fail_type
+        return dedup_segments
+    
+    for seg in dedup_segments:
+        if not seg.is_insertion and not seg.is_clipped and seg.segment_length < MIN_SEGMENT_LEN:
+            seg.is_pass = 'SEG_LENGTH'
+        if seg.mapq < min_mapq:
+            seg.is_pass = 'LOW_MAPQ'
+            continue
+        get_background_mm_rate(seg, mismatch_histograms)
+        if seg.mismatch_rate > max(seg.bg_mm_rate, MAX_ERROR_RATE) * MAX_MM_RATE_THR:
+            seg.is_pass = 'HIGH_MM_rate'
+            continue
+        
+    return dedup_segments
 
 
-def get_allsegments(segments_by_read):
-    allsegments = []
+def get_background_mm_rate(seg, mismatch_histograms):
+    hist_start = seg.ref_start // COV_WINDOW
+    hist_end = seg.ref_end // COV_WINDOW
+    mm_list = mismatch_histograms[seg.ref_id][hist_start : hist_end + 1]
+    if mm_list:
+        seg.bg_mm_rate = float(np.median(mm_list))
+    else:
+        seg.bg_mm_rate = 1
+    
+
+def background_mm_hist(segments_by_read, ref_lengths):
+    COV_WINDOW  = 500
+    mismatch_histograms = defaultdict(list)
+    mm_hist = {}
+    
+    for chr_id, chr_len in ref_lengths.items():
+        mismatch_histograms[chr_id] = [[] for _ in range(chr_len // COV_WINDOW + 1)]
+        mm_hist[chr_id] = [1 for _ in range(chr_len // COV_WINDOW + 1)]
+        
     for read in segments_by_read.values():
         for seg in read:
-            if not seg.is_insertion:
-                allsegments.append(seg)
-    return allsegments
-    
-
+            if seg.is_clipped or seg.is_insertion:
+                continue
+            hist_start = seg.ref_start // COV_WINDOW
+            hist_end = seg.ref_end // COV_WINDOW
+            for i in range(hist_start + 1, hist_end):
+                mismatch_histograms[seg.ref_id][i].append(seg.mismatch_rate)
+                
+    for chr_id, mm_rate in mismatch_histograms.items():
+        for i, mm_list in enumerate(mm_rate):
+            if not mm_list:
+                mm_hist[chr_id][i] = 1
+                continue
+            x = 5 if len(mm_list) > 5 else len(mm_list)
+            mm_hist[chr_id][i] = float(np.median(sorted(mm_list)[:x]))
+            
+    return mm_hist
 
 
 

@@ -2,7 +2,7 @@
 
 import bisect
 from collections import  defaultdict
-from bam_processing import ReadSegment
+from bam_processing import ReadSegment, add_read_qual
 
 def read_vntr_file(vntr_file): ## Add check for chromosome names 
     vntr_list = defaultdict(list)
@@ -45,7 +45,7 @@ def resolve_vntr_split(s1, s2, vntr_list):
     tr_reg = vntr_list[s1.ref_id]
     if tr_reg:
         bp_order, bp_length = order_bp(s1, s2)
-        strt = bisect.bisect_left(tr_reg[0],min([bp_order[0][0], bp_order[1][0]]))
+        strt = bisect.bisect_right(tr_reg[0],min([bp_order[0][0], bp_order[1][0]]))
         end = bisect.bisect_left(tr_reg[1],max([bp_order[0][0], bp_order[1][0]]))
         if strt - end == 1:
             return([(s1.ref_id, tr_reg[0][end], tr_reg[1][end]),(bp_order[0][2], bp_order[1][2], bp_length)])
@@ -55,7 +55,7 @@ def filter_vntr_only_segments(split_segs, vntr_list):
     for s1 in split_segs:
         tr_reg = vntr_list[s1.ref_id]
         if tr_reg:
-            strt = bisect.bisect_left(tr_reg[0],s1.ref_start)
+            strt = bisect.bisect_right(tr_reg[0],s1.ref_start)
             end = bisect.bisect_left(tr_reg[1],s1.ref_end)
             if strt - end == 1:
                 vntr_len = tr_reg[1][end] - tr_reg[0][end]
@@ -245,3 +245,9 @@ def resolve_vntr(segments_by_read, vntr_file, min_sv_size):
         if new_read:
             resolved_reads[read_id] = new_read
     return resolved_reads
+
+def update_segments_by_read(segments_by_read, ref_lengths, thread_pool, args):
+    if args.vntr_file:
+        segments_by_read = resolve_vntr(segments_by_read, args.vntr_file, args.sv_size)
+    segments_by_read = add_read_qual(segments_by_read, ref_lengths, thread_pool, args.min_mapping_quality, args.max_read_error)
+    return segments_by_read
