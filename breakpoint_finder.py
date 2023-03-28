@@ -167,7 +167,7 @@ def get_breakpoints(split_reads, thread_pool, ref_lengths, args):
     clust_len = args.bp_cluster_size
     min_reads = args.bp_min_support
     min_ref_flank = args.min_ref_flank 
-    sv_size = args.sv_final_size
+    sv_size = args.sv_size
     MAX_SEGMENT_DIST= 500
     
     seq_breakpoints_l = defaultdict(list)
@@ -408,7 +408,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
     clust_len = args.bp_cluster_size
     min_reads = args.bp_min_support
     min_ref_flank = args.min_ref_flank 
-    sv_size = args.sv_final_size
+    sv_size = args.sv_size
     MIN_FULL_READ_SUPP = 2
     NUM_HAPLOTYPES = 3
     ins_clusters = []
@@ -591,6 +591,14 @@ def add_clipped_end(position, clipped_clusters_pos, clipped_clusters_seq, by_gen
                 by_genome_id_pass[key] = len(unique_reads_pass[key])
                 happ_support_1[key[0]].append(key[1])
 
+
+def filter_fail_double_db(double_breaks):
+    db_list = []
+    for db in double_breaks:
+        if 'PASS' in db.is_pass:
+            db_list.append(db)
+    return(db_list)
+            
     
 def compute_bp_coverage(double_breaks, coverage_histograms, genome_ids):
     haplotype_list = [0, 1, 2]
