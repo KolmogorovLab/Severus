@@ -160,9 +160,9 @@ def main():
     logger.info('Writing breakpoints')
     output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
     logger.info('Preparing graph')
-    graph, adj_clusters, key_to_color = build_breakpoint_graph(double_breaks, genomic_segments, hb_points, args.max_genomic_len,
+    graph, adj_clusters = build_breakpoint_graph(double_breaks, genomic_segments, hb_points, args.max_genomic_len,
                                                                 args.reference_adjacencies, target_genomes, control_genomes)
-    output_clusters_graphvis(graph, adj_clusters, key_to_color, out_breakpoint_graph)
+    output_clusters_graphvis(graph, adj_clusters, out_breakpoint_graph)
     output_clusters_csv(graph, adj_clusters, out_clustered_breakpoints)
 
 

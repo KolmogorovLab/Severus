@@ -5,6 +5,7 @@ import sys
 import os
 import networkx as nx
 from collections import defaultdict
+from itertools import combinations
 from copy import copy
 
 
@@ -20,7 +21,6 @@ SEQUENCE_KEY = "__genomic"
 
 
 def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, reference_adjacencies):
-    #kmer_size = 1
     g = nx.MultiGraph()
 
     node_ids = {}
@@ -37,137 +37,158 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
         right_kmer = node_to_id(double_bp.bp_2.unique_name())
 
         if not g.has_node(left_kmer):
-            g.add_node(left_kmer,label=double_bp.bp_1.fancy_name())
+            g.add_node(left_kmer, _coordinate=double_bp.bp_1.coord_tuple(), _terminal=False, _insertion=double_bp.bp_1.insertion_size)
         if not g.has_node(right_kmer):
-            g.add_node(right_kmer, label=double_bp.bp_2.fancy_name())
+            g.add_node(right_kmer, _coordinate=double_bp.bp_2.coord_tuple(), _terminal=False, _insertion=double_bp.bp_2.insertion_size)
 
-        if g.has_edge(left_kmer, right_kmer, key=double_bp.genome_id):
-            g[left_kmer][right_kmer][double_bp.genome_id]["support"] += double_bp.supp
+        if not g.has_edge(left_kmer, right_kmer, key=double_bp.genome_id):
+            g.add_edge(left_kmer, right_kmer, key=double_bp.genome_id, _support=double_bp.supp,
+                       _type="adjacency", _genotype=double_bp.genotype)
         else:
-            edge_weight = 2 if double_bp.genotype == "hom" else 1
-            g.add_edge(left_kmer, right_kmer, key=double_bp.genome_id, support=double_bp.supp,
-                       style=double_bp.edgestyle, penwidth=edge_weight, adjacency=True,
-                       genotype=double_bp.genotype)
+            #we can have edges from the same genome, but different haplotypes
+            g[left_kmer][right_kmer][double_bp.genome_id]["_support"] += double_bp.supp
 
-        read_support = g[left_kmer][right_kmer][double_bp.genome_id]["support"]
-        g[left_kmer][right_kmer][double_bp.genome_id]["label"] = f"R:{read_support}"
+    #helper function to add a new or update an existing genomic edge
+    def _update_genomic(left_node, left_coords, left_terminal, right_node, right_coords, right_terminal, genome_id, coverage):
+        if not g.has_node(left_node):
+            g.add_node(left_node, _coordinate=left_coords, _terminal=left_terminal, _insertion=None)
+        if not g.has_node(right_node):
+            g.add_node(right_node, _coordinate=right_coords, _terminal=right_terminal, _insertion=None)
 
-    ### Break long genomic segments
-    new_segments = []
-    genomic_breaks = {}
-    for seq, points in hb_points.items():
-        genomic_breaks[seq] = set(points)
+        if not g.has_edge(left_node, right_node, key=genome_id):
+            g.add_edge(left_node, right_node, key=genome_id,
+                       _support=coverage, _genotype="het", _type="genomic")
+        else:
+            #different haplotype
+            g[left_node][right_node][genome_id]["_support"] += coverage
+            g[left_node][right_node][genome_id]["_genotype"] = "hom"
 
-    #new_segments = genomicsegments
-    for seg in genomicsegments:
+    ### Add genomic edges
+    for seg_num, seg in enumerate(genomicsegments):
+        if seg.haplotype == 0 and seg.coverage == 0:
+            continue
+
+        left_label, right_label = seg.left_coord_str(), seg.right_coord_str()
+        left_node, right_node = node_to_id(left_label), node_to_id(right_label)
+        left_coord, right_coord = seg.left_coord_tuple(), seg.right_coord_tuple()
+
         if seg.length_bp < max_genomic_len:
-            new_segments.append(seg)
+            left_terminal = seg.pos1 in hb_points[seg.ref_id]
+            if left_terminal:
+                left_node = node_to_id(f"hb_left_{seg_num}")
+            right_terminal = seg.pos2 in hb_points[seg.ref_id]
+            if right_terminal:
+                right_node = node_to_id(f"hb_right_{seg_num}")
+            _update_genomic(left_node, left_coord, left_terminal, right_node, right_coord, right_terminal, seg.genome_id, seg.coverage)
+
         else:
-            mid_point = seg.pos1 + seg.length_bp // 2
-            genomic_breaks[seg.ref_id].add(mid_point)
-
-            seg_1, seg_2 = copy(seg), copy(seg)
-            seg_1.pos2 = mid_point
-            seg_1.length_bp = seg.length_bp // 2
-            new_segments.append(seg_1)
-
-            seg_2.pos1 = mid_point
-            seg_2.length_bp = seg.length_bp // 2
-            new_segments.append(seg_2)
+            split_1, split_2 = node_to_id(f"split_1_{seg_num}"), node_to_id(f"split_2_{seg_num}")
+            _update_genomic(left_node, left_coord, False, split_1, right_coord, True, seg.genome_id, seg.coverage)
+            _update_genomic(split_2, left_coord, True, right_node, right_coord, False, seg.genome_id, seg.coverage)
 
     ### Linking complementary nodes + haplotype switches style
-    compl_link_style = "dashed" if reference_adjacencies else "invis"
-    for seg in new_segments:
+    #compl_link_style = "dashed" if reference_adjacencies else "invis"
+    for seg in genomicsegments:
         for coord in [seg.pos1, seg.pos2]:
             pos_bp, neg_bp = f"+{seg.ref_id}:{coord}", f"-{seg.ref_id}:{coord}"
             pos_node, neg_node = node_to_id(pos_bp), node_to_id(neg_bp)
 
-            if not g.has_node(pos_node):
-                g.add_node(pos_node, label=pos_bp)
-            if not g.has_node(neg_node):
-                g.add_node(neg_node, label=neg_bp)
-            if coord not in genomic_breaks[seg.ref_id]:
-                g.add_edge(pos_node, neg_node, key=SEQUENCE_KEY, style=compl_link_style, adjacency=False)
+            if coord not in hb_points[seg.ref_id] and g.has_node(pos_node) and g.has_node(neg_node):
+                g.add_edge(pos_node, neg_node, key=SEQUENCE_KEY, _type="complementary", _genotype="het")
 
-            if coord in genomic_breaks[seg.ref_id]:
-                hb_attr = {pos_node: {'style':"filled", 'fillcolor': "grey", 'label': ''},
-                           neg_node: {'style':"filled", 'fillcolor': "grey", 'label': ''}}
-                nx.set_node_attributes(g, hb_attr)
+    #Merge terminal nodes with the same coordinates in the came connected components
+    to_merge = []
+    for cc in nx.connected_components(g):
+        for u, v in combinations(cc, 2):
+            if g.nodes[u]["_coordinate"] == g.nodes[v]["_coordinate"] and \
+                    g.nodes[u]["_insertion"] is None and g.nodes[v]["_insertion"] is None:
+                to_merge.append((u, v))
 
-    ### Add genomic edges wth coverages
-    for seg in new_segments:
-        if seg.length_bp > max_genomic_len or (seg.haplotype == 0 and seg.coverage == 0):
-            continue
+    for (u, v) in to_merge:
+        if g.has_node(u) and g.has_node(v):
+            for (_v, other_n, key, data) in g.edges(v, keys=True, data=True):
+                if not g.has_edge(u, other_n, key=key):
+                    g.add_edge(u, other_n, key=key)
+                    g[u][other_n][key].update(data)
+                    #print(g[u][other_n][key])
+            g.remove_node(v)
+    ###
 
-        left_bp, right_bp = f"{seg.dir1}{seg.ref_id}:{seg.pos1}", f"{seg.dir2}{seg.ref_id}:{seg.pos2}"
-        left_node, right_node = node_to_id(left_bp), node_to_id(right_bp)
+    return g
 
-        if g.has_edge(left_node, right_node, key=seg.genome_id):
-            g[left_node][right_node][seg.genome_id]["support"] += seg.coverage
-            g[left_node][right_node][seg.genome_id]["penwidth"] = 2
+
+def _node_to_str(node_dict, commas):
+    ref, pos, sign = node_dict["_coordinate"]
+    insertion = node_dict["_insertion"]
+    if insertion is None:
+        if not commas:
+            return f"{sign}{ref}:{pos}"
         else:
-            g.add_edge(left_node, right_node, key=seg.genome_id,
-                       support=seg.coverage, style='solid', penwidth=1, adjacency=False)
+            return f"{sign}{ref}:{pos:,}"
+    else:
+        return f"INS:{insertion}"
 
-        support = g[left_node][right_node][seg.genome_id]["support"]
-        g[left_node][right_node][seg.genome_id]["label"] = f"L:{seg.length_bp} C:{support}"
 
-    """
-    def add_genomic_edge(seg, ref_style):
-        left_kmer = node_to_id(":".join([seg.dir1+seg.ref_id, str(seg.pos1)]))
-        right_kmer = node_to_id(":".join([seg.dir2+seg.ref_id, str(seg.pos2)]))
-        left_kmer_2 = node_to_id(":".join([seg.dir2+seg.ref_id, str(seg.pos1)]))
-        right_kmer_2 = node_to_id(":".join([seg.dir1+seg.ref_id, str(seg.pos2)]))
+def _coord_cmp(node_data_1, node_data_2):
+    if (node_data_1["_insertion"] is None) and (node_data_2["_insertion"] is None):
+        return node_data_1["_coordinate"] < node_data_2["_coordinate"]
+    elif node_data_1["_insertion"]:
+        return node_data_2["_coordinate"][2] == "-"
+    elif node_data_2["_insertion"]:
+        return node_data_1["_coordinate"][2] == "+"
 
-        edge_flag = True
-        if (g.has_edge(left_kmer, right_kmer, key = seg.genome_id) and g[left_kmer][right_kmer][seg.genome_id]["style"] == 'dashed'):
-            edge_flag = False
-        elif g.has_edge(left_kmer_2, right_kmer, key = seg.genome_id) and g[left_kmer_2][right_kmer][seg.genome_id]["style"] == 'dashed':
-            edge_flag = False
-        elif g.has_edge(left_kmer, right_kmer_2, key = seg.genome_id) and g[left_kmer][right_kmer_2][seg.genome_id]["style"] == 'dashed':
-            edge_flag = False
-        elif g.has_edge(left_kmer_2, right_kmer_2, key = seg.genome_id)and g[left_kmer_2][right_kmer_2][seg.genome_id]["style"] == 'dashed':
-            edge_flag = False
 
-        if edge_flag:
-            if g.has_edge(left_kmer, right_kmer, key = seg.genome_id):
-                g[left_kmer][right_kmer][seg.genome_id]["support"] += seg.coverage
-                g[left_kmer][right_kmer][seg.genome_id]["penwidth"] = 2
-            else:
-                g.add_edge(left_kmer, right_kmer, key=seg.genome_id,
-                           support=seg.coverage, style='solid', penwidth = 1, adjacency=False)
+def output_clusters_graphvis(graph, connected_components, out_file):
+    #node visual attributes
+    for n in graph.nodes:
+        graph.nodes[n]["label"] = _node_to_str(graph.nodes[n], commas=True)
+        if graph.nodes[n]["_terminal"]:
+            graph.nodes[n]["style"] = "rounded, filled"
+            graph.nodes[n]["fillcolor"] = "grey"
+        else:
+            graph.nodes[n]["style"] = "rounded"
 
-            label="L:{0} C:{1}".format(seg.length_bp, g[left_kmer][right_kmer][seg.genome_id]["support"])
-            g[left_kmer][right_kmer][seg.genome_id]["label"] = label
+    #edges visual attributes
+    for u, v, key in graph.edges:
+        if graph[u][v][key]["_type"] == "adjacency":
+            support = graph[u][v][key]["_support"]
+            graph[u][v][key]["label"] = f"R:{support}"
+            graph[u][v][key]["style"] = "dashed"
+            graph[u][v][key]["dir"] = "none"
 
-    ref_style = "dashed" if reference_adjacencies else "invis"
-    for seg in genomicsegments:
-        if seg.length_bp < max_genomic_len:
-            if not (seg.haplotype == 0 and seg.coverage == 0):
-                add_genomic_edge(seg, ref_style)
-    """
+        elif graph[u][v][key]["_type"] == "genomic":
+            coverage = graph[u][v][key]["_support"]
+            #length = abs(graph.nodes[u]["_coordinate"][1] - graph.nodes[v]["_coordinate"][1])
+            #graph[u][v][key]["label"] = f"L:{length}\\nC:{coverage}"
+            graph[u][v][key]["label"] = f"C:{coverage}"
+
+        elif graph[u][v][key]["_type"] == "complementary":
+            graph[u][v][key]["style"] = "invis"
+
+    #double edges for homozygous variants
+    if graph[u][v][key]["_genotype"] == "hom":
+        graph[u][v][key]["color"] = graph[u][v][key]["color"] + ":" + graph[u][v][key]["color"]
 
     #adding colors
     key_to_color = {}
     next_color = 0
-    for u, v, _key in g.edges:
+    for u, v, _key in graph.edges:
         if _key != SEQUENCE_KEY:
             if _key not in key_to_color:
                 key_to_color[_key] = COLORS[next_color]
                 next_color = (next_color + 1) % len(COLORS)
-            g[u][v][_key]["color"] = key_to_color[_key]
-    #print(key_to_color)
 
-    return g, key_to_color
+            if graph[u][v][_key]["_genotype"] == "het":
+                graph[u][v][_key]["color"] = key_to_color[_key]
+            else:
+                graph[u][v][_key]["color"] = key_to_color[_key] +":" + key_to_color[_key]
 
-
-def output_clusters_graphvis(graph, connected_components, key_to_color, out_file):
     def _add_legend(key_to_color, fout):
         fout.write("subgraph cluster_01 {\n\tlabel = \"Legend\";\n\tnode [shape=point]\n{\n\trank=same\n")
         for i, (key, color) in enumerate(key_to_color.items()):
-            node_1 = "legend_{0}_1".format(i)
-            node_2 = "legend_{0}_2".format(i)
-            fout.write("\t{0} -- {1} [color={2}, label=\"{3}\"];\n".format(node_1, node_2, color, key))
+            node_1 = f"legend_{i}_1"
+            node_2 = f"legend_{i}_2"
+            fout.write(f"\t{node_1} -> {node_2} [color={color}, label=\"{key}\", dir=none];\n")
         fout.write("}\n};\n")
 
     def _draw_components(components_list, out_stream):
@@ -176,21 +197,32 @@ def output_clusters_graphvis(graph, connected_components, key_to_color, out_file
                 continue
 
             out_stream.write("subgraph cluster{0} {{\n".format(subgr_num))
+            #Nodes properties
             for n in cc:
                 properties = []
-                for key in graph.nodes[n]:
-                    properties.append("{0}=\"{1}\"".format(key, graph.nodes[n][key]))
-                out_stream.write("{0} [{1}];\n".format(n, ",".join(properties)))
+                for key, val in graph.nodes[n].items():
+                    properties.append(f"{key}=\"{val}\"")
+                prop_str = ",".join(properties)
+                out_stream.write(f"{n} [{prop_str}];\n")
+
+            #Edges
             for u, v, key in graph.edges(cc, keys=True):
+                #switching nodes order to maintain genomic direction
+                if not _coord_cmp(graph.nodes[u], graph.nodes[v]):
+                    u, v = v, u
+
                 properties = []
-                for prop in graph[u][v][key]:
-                    properties.append("{0}=\"{1}\"".format(prop, graph[u][v][key][prop]))
-                out_stream.write("{0} -- {1} [{2}];\n".format(u, v, ",".join(properties)))
+                for prop, val in graph[u][v][key].items():
+                    properties.append(f"{prop}=\"{val}\"")
+                prop_str = ",".join(properties)
+                out_stream.write(f"{u} -> {v} [{prop_str}];\n")
+
             out_stream.write("}\n\n")
 
     with open(out_file, "w") as out_stream:
-        out_stream.write("graph {\n")
-        out_stream.write("edge [penwidth=2];\n")
+        out_stream.write("digraph {\n")
+        #out_stream.write("edge [penwidth=2];\n")
+        out_stream.write("node [shape=\"box\"];\n")
         _add_legend(key_to_color, out_stream)
         _draw_components(connected_components, out_stream)
         out_stream.write("}\n")
@@ -202,16 +234,20 @@ def output_clusters_csv(graph, connected_components, out_file):
         for subgr_num, (rank, cc, target_adj, control_adj, _num_somatic) in enumerate(connected_components):
             all_adj = defaultdict(list)
             for u, v, key in graph.edges(cc, keys=True):
-                if key != SEQUENCE_KEY and graph[u][v][key]["adjacency"] == True:
+                if key != SEQUENCE_KEY and graph[u][v][key]["_type"] == "adjacency":
                     all_adj[(u, v)].append(key)
 
             for (u, v), keys in all_adj.items():
+                if not _coord_cmp(graph.nodes[u], graph.nodes[v]):
+                    u, v = v, u
+
                 keys.sort()
-                label_1 = graph.nodes[u]["label"]
-                label_2 = graph.nodes[v]["label"]
+                label_1 = _node_to_str(graph.nodes[u], commas=False)
+                label_2 = _node_to_str(graph.nodes[v], commas=False)
+
                 keys_text = ",".join(keys)
-                read_support = ",".join([str(graph[u][v][k]["support"]) for k in keys])
-                genotypes = ",".join([graph[u][v][k]["genotype"] for k in keys])
+                read_support = ",".join([str(graph[u][v][k]["_support"]) for k in keys])
+                genotypes = ",".join([graph[u][v][k]["_genotype"] for k in keys])
                 fout.write(f"bga_{subgr_num}\t{label_1}\t{label_2}\t{keys_text}\t{read_support}\t{genotypes}\n")
 
 
@@ -222,9 +258,9 @@ def cluster_adjacencies(graph, target_genomes, control_genomes):
         control_adj = set()
         num_somatic_adj = 0
         for u, v, key, data in graph.edges(cc, keys=True, data=True):
-            if key in target_genomes and data["adjacency"]:
+            if key in target_genomes and data["_type"] == "adjacency":
                 target_adj.add((u, v))
-            if key in control_genomes and data["adjacency"]:
+            if key in control_genomes and data["_type"] == "adjacency":
                 control_adj.add((u, v))
 
         for adj in target_adj:
@@ -251,6 +287,6 @@ def cluster_adjacencies(graph, target_genomes, control_genomes):
 
 def build_breakpoint_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, reference_adjacencies,
                            target_genomes, control_genomes):
-    graph, key_to_color = build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, reference_adjacencies)
+    graph = build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, reference_adjacencies)
     adj_clusters = cluster_adjacencies(graph, target_genomes, control_genomes)
-    return graph, adj_clusters, key_to_color
+    return graph, adj_clusters
