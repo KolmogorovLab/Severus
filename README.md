@@ -1,4 +1,4 @@
-# Breakpoint graph assembler
+# Severus
 
 A tool to build breakpoint graphs for one or multiple long-read cancer samples. This is work in progress and subject to frequent updates. 
 
