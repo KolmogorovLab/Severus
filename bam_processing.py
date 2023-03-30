@@ -221,17 +221,9 @@ def filter_reads(segments_by_read):
         
 
 def add_read_qual(segments_by_read, ref_lengths, thread_pool, min_mapq, max_error_rate):
-    
     mismatch_histograms = background_mm_hist(segments_by_read, ref_lengths)
-    
-    tasks = [(read, min_mapq, mismatch_histograms) for read in segments_by_read.values()]
-    parsing_results = None
-    parsing_results = thread_pool.starmap(label_reads, tasks)
-    segments_by_read_new = defaultdict(list)
-    for alignments in parsing_results:
-        for aln in alignments:
-            segments_by_read_new[aln.read_id].append(aln)
-    return segments_by_read_new
+    for read, alignments in segments_by_read.items():
+        segments_by_read[read] = label_reads(alignments, min_mapq, mismatch_histograms)
     
     
 def label_reads(read, min_mapq, mismatch_histograms):

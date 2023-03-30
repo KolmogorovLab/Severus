@@ -150,7 +150,7 @@ def main():
         logger.info(f"Parsed {num_seg} segments")
     
     logger.info('Computing read quality') 
-    segments_by_read = update_segments_by_read(segments_by_read, ref_lengths, thread_pool, args)
+    update_segments_by_read(segments_by_read, ref_lengths, thread_pool, args)
     logger.info('Computing coverage histogram')
     coverage_histograms = update_coverage_hist(genome_ids, ref_lengths, segments_by_read)
     double_breaks = call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histograms, genome_ids, args)

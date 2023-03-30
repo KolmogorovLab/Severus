@@ -3,6 +3,10 @@
 import bisect
 from collections import  defaultdict
 from bam_processing import ReadSegment, add_read_qual
+import logging
+
+logger = logging.getLogger()
+
 
 def read_vntr_file(vntr_file): ## Add check for chromosome names 
     vntr_list = defaultdict(list)
@@ -237,17 +241,23 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
     
     return new_read
 
+
 def resolve_vntr(segments_by_read, vntr_file, min_sv_size):
     vntr_list = read_vntr_file(vntr_file)
-    resolved_reads = defaultdict(list)
+    empty_keys = []
     for read_id, read in segments_by_read.items():
         new_read = resolve_read_vntr(read, vntr_list, min_sv_size)
         if new_read:
-            resolved_reads[read_id] = new_read
-    return resolved_reads
+            segments_by_read[read_id] = new_read
+        else:
+            empty_keys.append(read_id)
+
+    for key in empty_keys:
+        del segments_by_read[key]
+
 
 def update_segments_by_read(segments_by_read, ref_lengths, thread_pool, args):
     if args.vntr_file:
-        segments_by_read = resolve_vntr(segments_by_read, args.vntr_file, args.sv_size)
-    segments_by_read = add_read_qual(segments_by_read, ref_lengths, thread_pool, args.min_mapping_quality, args.max_read_error)
-    return segments_by_read
+        resolve_vntr(segments_by_read, args.vntr_file, args.sv_size)
+    logger.info("Annotating reads")
+    add_read_qual(segments_by_read, ref_lengths, thread_pool, args.min_mapping_quality, args.max_read_error)
