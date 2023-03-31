@@ -596,9 +596,9 @@ def add_clipped_end(position, clipped_clusters_pos, clipped_clusters_seq, by_gen
 def filter_fail_double_db(double_breaks):
     db_list = []
     for db in double_breaks:
-        if 'PASS' in db.is_pass:
+        if db.is_pass == 'PASS':
             db_list.append(db)
-    return(db_list)
+    return db_list
             
     
 def compute_bp_coverage(double_breaks, coverage_histograms, genome_ids):

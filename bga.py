@@ -154,11 +154,11 @@ def main():
     logger.info('Computing coverage histogram')
     coverage_histograms = update_coverage_hist(genome_ids, ref_lengths, segments_by_read)
     double_breaks = call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histograms, genome_ids, args)
+    logger.info('Writing breakpoints')
+    output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
     logger.info('Computing segment coverage')
     double_breaks = filter_fail_double_db(double_breaks) # merge it with breakpoint graph 
     genomic_segments, hb_points = get_genomic_segments(double_breaks, coverage_histograms, thread_pool, args.phase_vcf)
-    logger.info('Writing breakpoints')
-    output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
     logger.info('Preparing graph')
     graph, adj_clusters = build_breakpoint_graph(double_breaks, genomic_segments, hb_points, args.max_genomic_len,
                                                                 args.reference_adjacencies, target_genomes, control_genomes)
