@@ -65,21 +65,25 @@ def filter_vntr_only_segments(split_segs, vntr_list):
                 vntr_len = tr_reg[1][end] - tr_reg[0][end]
                 if s1.segment_length > vntr_len * OVERLAP_THR:
                     return True
-        
+
+##TODO: Improve seg_len calculation        
 def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, split_seg_vntr, min_sv_size):
     seg_span=[]
     is_end = False
-    seg_len = 0
+    seg_len = abs(segments[0].read_start - segments[-1].read_end)
     for seg in segments:
         if seg.ref_start >= vntr_strt and seg.ref_end <= vntr_end:
-            seg_len += seg.segment_length
             if seg.is_end:
                 is_end = True
-        else:
+        elif seg.ref_start <= vntr_strt:
+            seg_len -= (vntr_strt - seg.ref_start)
+            seg_span.append(seg)
+        elif seg.ref_end >= vntr_end:
+            seg_len -= (seg.ref_end - vntr_end)
             seg_span.append(seg)
     mm_rate = 0
-    vntr_len = vntr_end - vntr_strt
-    if len(seg_span) == 0:
+    #vntr_len = vntr_end - vntr_strt
+    if len(seg_span) == 0 or len(seg_span) > 2:
         return clipped_segs
     if len(seg_span) == 1:
         s1 = seg_span[0]
@@ -110,10 +114,10 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, split
                 clipped_segs += [s1, new_seg]
                 return clipped_segs
             else:
-                if s1.ref_start > vntr_strt:
-                    s1.ref_start -= seg_len
+                if s1.ref_start >= vntr_strt:
+                    s1.ref_start = vntr_strt
                 else:
-                    s1.ref_end += seg_len
+                    s1.ref_end = vntr_end
                     s1.segment_length += seg_len
                 return [s1] + clipped_segs 
     else:
@@ -155,7 +159,7 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, split
                 s1.read_end = s2.read_end
             else:
                 s1.read_start = s2.read_start
-            return [s1] + clipped_segs 
+            return [s1] + clipped_segs
 
 def check_spanning(new_read, vntr_loc):
     vntr_strt = vntr_loc[1]

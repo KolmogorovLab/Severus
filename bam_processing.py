@@ -54,13 +54,13 @@ def get_segment(read, genome_id,sv_size):
     cigar = read.cigartuples
     
     
-    #num_of_mismatch = 0
-    #nm = read.get_tag('NM')
-    #indel = sum([b for a, b in cigar if a in [CIGAR_INS, CIGAR_DEL]])
-    #num_of_mismatch = nm - indel 
-    #total_segment_length = sum([b for a, b in cigar if a not in [CIGAR_CLIP, CIGAR_DEL]])
-    #mm_rate = num_of_mismatch / total_segment_length
-    mm_rate = read.get_tag('de')
+    num_of_mismatch = 0
+    nm = read.get_tag('NM')
+    indel = sum([b for a, b in cigar if a in [CIGAR_INS, CIGAR_DEL]])
+    num_of_mismatch = nm - indel 
+    total_segment_length = sum([b for a, b in cigar if a not in [CIGAR_CLIP, CIGAR_DEL]])
+    mm_rate = num_of_mismatch / total_segment_length
+    #mm_rate = read.get_tag('de')
     read_length = np.sum([k[1] for k in cigar if k[0] != CIGAR_DEL])
     strand = '-' if read.is_reverse else '+'
     
@@ -238,17 +238,18 @@ def label_reads(read, min_mapq, mismatch_histograms):
     fail_type = ''
     chr_list = []
     dedup_segments = []
+    dedup_segments_ins = []
     n_seg = 0
     
     for seg in read:
         if not dedup_segments or dedup_segments[-1].read_start != seg.read_start:            
             if seg.is_insertion or seg.is_clipped:
-                dedup_segments.append(seg)
+                dedup_segments_ins.append(seg)
             else:
                 dedup_segments.append(seg)
                 chr_list.append(seg.ref_id)
                 n_seg += 1  
-            
+    dedup_segments +=dedup_segments_ins        
     aligned_len = sum([seg.segment_length for seg in dedup_segments if not seg.is_insertion and not seg.is_clipped])
     aligned_ratio = aligned_len/read[0].read_length
     
@@ -264,6 +265,7 @@ def label_reads(read, min_mapq, mismatch_histograms):
     for seg in dedup_segments:
         if not seg.is_insertion and not seg.is_clipped and seg.segment_length < MIN_SEGMENT_LEN:
             seg.is_pass = 'SEG_LENGTH'
+            continue
         if seg.mapq < min_mapq:
             seg.is_pass = 'LOW_MAPQ'
             continue
