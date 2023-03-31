@@ -530,7 +530,8 @@ def insertion_filter(ins_clusters, min_reads, genome_ids):
                         
         for ins in cl:
             ins_list.append(ins)
-            ins_2 = DoubleBreak(ins.bp_2, 1, ins.bp_1, 1, ins.genome_id, ins.haplotype_1, ins.haplotype_2, ins.supp, ins.supp_read_ids, ins.length, ins.genotype, 'dashed')
+            bp_2 = Breakpoint(ins.bp_1.ref_id, ins.bp_1.position,1)
+            ins_2 = DoubleBreak(ins.bp_2, 1, bp_2, 1, ins.genome_id, ins.haplotype_1, ins.haplotype_2, ins.supp, ins.supp_read_ids, ins.length, ins.genotype, 'dashed')
             ins_2.is_pass = ins.is_pass
             ins_list.append(ins_2)
             
