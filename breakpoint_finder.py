@@ -167,7 +167,7 @@ def get_breakpoints(split_reads, thread_pool, ref_lengths, args):
     clust_len = args.bp_cluster_size
     min_reads = args.bp_min_support
     min_ref_flank = args.min_ref_flank 
-    sv_size = args.sv_size
+    sv_size = args.min_sv_size
     MAX_SEGMENT_DIST= 500
     
     seq_breakpoints_l = defaultdict(list)
@@ -405,10 +405,11 @@ def double_breaks_filter(double_breaks, min_reads, genome_ids):
 
               
 def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
-    clust_len = args.bp_cluster_size
+    CLUST_LEN = 1000
+    sv_len_diff = args.bp_cluster_size
     min_reads = args.bp_min_support
     min_ref_flank = args.min_ref_flank 
-    sv_size = args.sv_size
+    sv_size = args.min_sv_size
     MIN_FULL_READ_SUPP = 2
     NUM_HAPLOTYPES = 3
     ins_clusters = []
@@ -421,11 +422,11 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
             clipped_clusters_seq.sort(key=lambda x:x.position)
             clipped_clusters_pos = [bp.position for bp in clipped_clusters_seq]
         for rc in ins_pos:
-            if cur_cluster and rc.ref_end - cur_cluster[-1].ref_end > clust_len:
+            if cur_cluster and rc.ref_end - cur_cluster[-1].ref_end > CLUST_LEN:
                 cur_cluster.sort(key=lambda x:x.segment_length)
                 cl_ins = []
                 for cl1 in cur_cluster:
-                    if cl_ins and abs(cl1.segment_length - cl_ins[-1].segment_length) > clust_len:
+                    if cl_ins and abs(cl1.segment_length - cl_ins[-1].segment_length) > sv_len_diff:
                         clusters.append(cl_ins)
                         cl_ins = [cl1]
                     else:
