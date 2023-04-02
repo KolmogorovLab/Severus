@@ -747,7 +747,7 @@ def resolve_overlaps(split_reads, min_ovlp_len):
 
 def write_alignments(allsegments, outpath):
     aln_dump_stream = open(outpath, "w")
-    for read in allsegments:
+    for read in allsegments.values():
         for seg in read:
             if seg.is_insertion or seg.is_clipped:
                 continue
@@ -809,7 +809,7 @@ def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histog
     
     if args.write_alignments:
         outpath_alignments = os.path.join(args.out_dir, "read_alignments")
-        write_alignments(segments_by_read_filtered, outpath_alignments)
+        write_alignments(segments_by_read, outpath_alignments)
         
     logger.info('Extracting split alignments')
     split_reads = get_splitreads(segments_by_read)
