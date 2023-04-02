@@ -2,6 +2,7 @@ import pysam
 import numpy as np
 from collections import  defaultdict
 import time
+import bisect
 
 class ReadSegment(object):
     __slots__ = ("read_start", "read_end", "ref_start", "ref_end", "read_id", "ref_id",
@@ -31,7 +32,7 @@ class ReadSegment(object):
         return "".join(["read_start=", str(self.read_start), " read_end=", str(self.read_end), " ref_start=", str(self.ref_start),
                          " ref_end=", str(self.ref_end), " read_id=", str(self.read_id), " ref_id=", str(self.ref_id), " strand=", str(self.strand),
                          " read_length=", str(self.read_length), " haplotype=", str(self.haplotype),
-                         " mapq=", str(self.mapq), " genome_id=", str(self.genome_id)])
+                         " mapq=", str(self.mapq), "mismatch_rate=", str(self.mismatch_rate), " read_qual=", str(self.is_pass), "genome_id=", str(self.genome_id)])
     
 def get_segment(read, genome_id,sv_size):
     """
@@ -144,7 +145,6 @@ def add_clipped_end(segments_by_read):
             read[-1].is_clipped = True
         read.sort(key=lambda s: s.read_start)
     return segments_by_read
-    
             
 
 def get_all_reads(bam_file, region, genome_id,sv_size):
@@ -221,25 +221,26 @@ def filter_reads(segments_by_read):
         
 
 def add_read_qual(segments_by_read, ref_lengths, thread_pool, min_mapq, max_error_rate):
-    mismatch_histograms = background_mm_hist(segments_by_read, ref_lengths)
+    mm_hist_low, mm_hist_high = background_mm_hist(segments_by_read, ref_lengths)
+    high_mm_region = extract_segdups(mm_hist_low, mm_hist_high)
     for read, alignments in segments_by_read.items():
-        segments_by_read[read] = label_reads(alignments, min_mapq, mismatch_histograms)
+        segments_by_read[read] = label_reads(alignments, min_mapq, mm_hist_low, high_mm_region, max_error_rate)
     
     
-def label_reads(read, min_mapq, mismatch_histograms):
+def label_reads(read, min_mapq, mm_hist_low, high_mm_region, max_error_rate):
     
     MIN_ALIGNED_RATE = 0.5
     MIN_ALIGNED_LENGTH = 5000
     MAX_SEGMENTED_READ = 10
     MAX_CHR_SPAN = 2
     MIN_SEGMENT_LEN = 100
-    MAX_MM_RATE_THR = 2
-    MAX_ERROR_RATE = 0.01
+    #MAX_MM_RATE_THR = 0.005
+    #MAX_ERROR_RATE = 0.01
     fail_type = ''
     chr_list = []
     dedup_segments = []
     dedup_segments_ins = []
-    n_seg = 0
+    n_seg = 0#
     
     for seg in read:
         if not dedup_segments or dedup_segments[-1].read_start != seg.read_start:            
@@ -254,13 +255,15 @@ def label_reads(read, min_mapq, mismatch_histograms):
     aligned_ratio = aligned_len/read[0].read_length
     
     if n_seg > MAX_SEGMENTED_READ or len(set(chr_list)) > MAX_CHR_SPAN:
+    #if n_seg > MAX_SEGMENTED_READ:
         fail_type = 'SEGMENTED'
     elif aligned_len < MIN_ALIGNED_LENGTH or aligned_ratio < MIN_ALIGNED_RATE:
-        fail_type = 'LOW_ALIGNED_LEN'
+        fail_type = 'LOW_ALIGNED_LEN'#
+        
     if fail_type:
         for seg in dedup_segments:
             seg.is_pass = fail_type
-        return dedup_segments
+        return dedup_segments#
     
     for seg in dedup_segments:
         if not seg.is_insertion and not seg.is_clipped and seg.segment_length < MIN_SEGMENT_LEN:
@@ -269,11 +272,11 @@ def label_reads(read, min_mapq, mismatch_histograms):
         if seg.mapq < min_mapq:
             seg.is_pass = 'LOW_MAPQ'
             continue
-        get_background_mm_rate(seg, mismatch_histograms)
-        if seg.mismatch_rate > max(seg.bg_mm_rate, MAX_ERROR_RATE) * MAX_MM_RATE_THR:
+        high_mm_check(high_mm_region, mm_hist_low, seg)
+        if seg.mismatch_rate > seg.bg_mm_rate + max_error_rate:
             seg.is_pass = 'HIGH_MM_rate'
-            continue
-        
+            continue#
+            
     return dedup_segments
 
 
@@ -285,16 +288,19 @@ def get_background_mm_rate(seg, mismatch_histograms):
         seg.bg_mm_rate = float(np.median(mm_list))
     else:
         seg.bg_mm_rate = 1
-    
+        
 
 def background_mm_hist(segments_by_read, ref_lengths):
     COV_WINDOW  = 500
+    MED_THR = 3
     mismatch_histograms = defaultdict(list)
-    mm_hist = {}
+    mm_hist_low = {}
+    mm_hist_high = {}
     
     for chr_id, chr_len in ref_lengths.items():
-        mismatch_histograms[chr_id] = [[] for _ in range(chr_len // COV_WINDOW + 1)]
-        mm_hist[chr_id] = [1 for _ in range(chr_len // COV_WINDOW + 1)]
+        mismatch_histograms[chr_id] = [[] for _ in range(chr_len // COV_WINDOW + 2)]
+        mm_hist_low[chr_id] = [1 for _ in range(chr_len // COV_WINDOW + 2)]
+        mm_hist_high[chr_id] = [1 for _ in range(chr_len // COV_WINDOW + 2)]
         
     for read in segments_by_read.values():
         for seg in read:
@@ -302,20 +308,48 @@ def background_mm_hist(segments_by_read, ref_lengths):
                 continue
             hist_start = seg.ref_start // COV_WINDOW
             hist_end = seg.ref_end // COV_WINDOW
-            for i in range(hist_start + 1, hist_end):
+            for i in range(hist_start, hist_end + 1):
                 mismatch_histograms[seg.ref_id][i].append(seg.mismatch_rate)
                 
     for chr_id, mm_rate in mismatch_histograms.items():
         for i, mm_list in enumerate(mm_rate):
-            if not mm_list:
-                mm_hist[chr_id][i] = 1
+            if not mm_list or len(mm_list)<5:
+                mm_hist_low[chr_id][i] = 1
+                mm_hist_high[chr_id][i] = 1
                 continue
-            x = 5 if len(mm_list) > 5 else len(mm_list)
-            mm_hist[chr_id][i] = float(np.median(sorted(mm_list)[:x]))
-            
-    return mm_hist
+            mm_list.sort()
+            mm_hist_low[chr_id][i] = mm_list[MED_THR]
+            mm_hist_high[chr_id][i] = mm_list[-MED_THR]
+    return mm_hist_low, mm_hist_high
 
 
+def extract_segdups(mm_hist_low, mm_hist_high):
+    THR = 0.005
+    COV_WINDOW = 500
+    high_mm_region = defaultdict(list)
+    for key, mm_low_chrom in mm_hist_low.items():
+        mm_high_chrom = mm_hist_high[key]
+        for ind, (a, b)  in enumerate(zip(mm_low_chrom, mm_high_chrom)):
+            if b - a >= THR:
+                if not high_mm_region[key]:
+                    high_mm_region[key].append([ind * COV_WINDOW])
+                    high_mm_region[key].append([(ind + 1) * COV_WINDOW])
+                elif ind * COV_WINDOW == high_mm_region[key][-1]:
+                    high_mm_region[key][1][-1]=(ind + 1) * COV_WINDOW
+                else:
+                    high_mm_region[key][0].append(ind * COV_WINDOW)
+                    high_mm_region[key][1].append((ind + 1) * COV_WINDOW)
+    return high_mm_region
+                    
 
-
-    
+def high_mm_check(high_mm_region, mm_hist_low, seg):
+    high_mm_reg = high_mm_region[seg.ref_id]
+    if high_mm_reg:
+        strt = bisect.bisect_right(high_mm_reg[0], seg.ref_start)
+        strt_2  = bisect.bisect_right(high_mm_reg[1], seg.ref_start)
+        end = bisect.bisect_left(high_mm_reg[0],seg.ref_end)
+        end_1 = bisect.bisect_left(high_mm_reg[1],seg.ref_end)
+        if not strt == strt_2 or not end == end_1:
+            get_background_mm_rate(seg, mm_hist_low)
+        
+  
