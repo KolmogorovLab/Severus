@@ -16,7 +16,7 @@ from copy import copy
 #        return "+" + segment[1:]
 
 #COLORS = ["yellowgreen", "thistle", "peachpuff", "yellow", "khaki", "steelblue", "hotpink", "preu"]
-COLORS = ["red", "green", "blue", "orange", "purple", "cyan", "hotpink", "preu"]
+COLORS = ["#189BA0", "#830042", "#B2C971", "#8470FF", "#1B80B3", "#FF7A33", "#B35900", "#006400"]
 SEQUENCE_KEY = "__genomic"
 
 
@@ -188,7 +188,7 @@ def output_clusters_graphvis(graph, connected_components, out_file):
         for i, (key, color) in enumerate(key_to_color.items()):
             node_1 = f"legend_{i}_1"
             node_2 = f"legend_{i}_2"
-            fout.write(f"\t{node_1} -> {node_2} [color={color}, label=\"{key}\", dir=none];\n")
+            fout.write(f"\t{node_1} -> {node_2} [color=\"{color}\", label=\"{key}\", dir=none];\n")
         fout.write("}\n};\n")
 
     def _draw_components(components_list, out_stream):
