@@ -32,7 +32,7 @@ class ReadSegment(object):
         return "".join(["read_start=", str(self.read_start), " read_end=", str(self.read_end), " ref_start=", str(self.ref_start),
                          " ref_end=", str(self.ref_end), " read_id=", str(self.read_id), " ref_id=", str(self.ref_id), " strand=", str(self.strand),
                          " read_length=", str(self.read_length), " haplotype=", str(self.haplotype),
-                         " mapq=", str(self.mapq), "mismatch_rate=", str(self.mismatch_rate), " read_qual=", str(self.is_pass), "genome_id=", str(self.genome_id)])
+                         " mapq=", str(self.mapq), "mismatch_rate=", str(self.mismatch_rate), " read_qual=", str(self.is_pass), " genome_id=", str(self.genome_id)])
     
 def get_segment(read, genome_id,sv_size):
     """
@@ -254,8 +254,8 @@ def label_reads(read, min_mapq, mm_hist_low, high_mm_region, max_error_rate):
     aligned_len = sum([seg.segment_length for seg in dedup_segments if not seg.is_insertion and not seg.is_clipped])
     aligned_ratio = aligned_len/read[0].read_length
     
-    if n_seg > MAX_SEGMENTED_READ or len(set(chr_list)) > MAX_CHR_SPAN:
-    #if n_seg > MAX_SEGMENTED_READ:
+    #if n_seg > MAX_SEGMENTED_READ or len(set(chr_list)) > MAX_CHR_SPAN:
+    if n_seg > MAX_SEGMENTED_READ:
         fail_type = 'SEGMENTED'
     elif aligned_len < MIN_ALIGNED_LENGTH or aligned_ratio < MIN_ALIGNED_RATE:
         fail_type = 'LOW_ALIGNED_LEN'#
