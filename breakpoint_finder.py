@@ -37,9 +37,9 @@ COV_WINDOW = 500
 
 class ReadConnection(object):
     __slots__ = ("ref_id_1", "pos_1", "sign_1", "ref_id_2", "pos_2", "sign_2","haplotype_1", 
-                 "haplotype_2", "read_id", "genome_id", 'bp_list', 'is_pass1', 'is_pass2')
+                 "haplotype_2", "read_id", "genome_id", 'bp_list', 'is_pass1', 'is_pass2', 'mapq_1', 'mapq_2')
     def __init__(self, ref_id_1, pos_1, sign_1, ref_id_2, pos_2, sign_2, haplotype_1, 
-                 haplotype_2, read_id, genome_id, is_pass1, is_pass2):
+                 haplotype_2, read_id, genome_id, is_pass1, is_pass2, mapq_1, mapq_2):
         self.ref_id_1 = ref_id_1
         self.ref_id_2 = ref_id_2
         self.pos_1 = pos_1
@@ -53,21 +53,27 @@ class ReadConnection(object):
         self.bp_list = []
         self.is_pass1 = is_pass1
         self.is_pass2 = is_pass2
+        self.mapq_1 = mapq_1
+        self.mapq_2 = mapq_2
     def signed_coord_1(self):
         return self.sign_1 * self.pos_1
     def signed_coord_2(self):
         return self.sign_2 * self.pos_2
     def get_pos(self, bp_dir):
         return self.pos_1 if bp_dir == 'right' else self.pos_2
+    def get_qual(self, bp_dir):
+        return self.mapq_1 if bp_dir == 'right' else self.mapq_2
     def is_pass(self, bp_dir):
         return self.is_pass1 if bp_dir == 'right' else self.is_pass2
+    def dir_1(self, bp_dir):
+        return self.sign_1 if bp_dir == 'right' else self.sign_2
     
 
 
 class Breakpoint(object):
     __slots__ = ("ref_id", "position","dir_1", "spanning_reads", "connections", 
-                 "read_ids", "pos2", 'id', "is_insertion", "insertion_size")
-    def __init__(self, ref_id, ref_position, dir_1):
+                 "read_ids", "pos2", 'id', "is_insertion", "insertion_size", "qual")
+    def __init__(self, ref_id, ref_position, dir_1, qual):
         self.ref_id = ref_id
         self.position = ref_position
         self.dir_1 = dir_1
@@ -78,6 +84,7 @@ class Breakpoint(object):
         self.id = 0
         self.is_insertion = False
         self.insertion_size = None
+        self.qual = qual
 
     def fancy_name(self):
         if not self.is_insertion:
@@ -188,12 +195,12 @@ def get_breakpoints(split_reads, thread_pool, ref_lengths, args):
         ref_bp_2, sign_2 = _signed_breakpoint(s2, "left")
         if ref_bp_1 > ref_bp_2:
             rc = ReadConnection(s2.ref_id, ref_bp_2, sign_2, s1.ref_id, ref_bp_1, sign_1,
-                                s2.haplotype, s1.haplotype, s1.read_id, s1.genome_id, s2.is_pass, s1.is_pass)
+                                s2.haplotype, s1.haplotype, s1.read_id, s1.genome_id, s2.is_pass, s1.is_pass, seg_2.mapq, seg_1.mapq)
             seq_breakpoints_r[s2.ref_id].append(rc)
             seq_breakpoints_l[s1.ref_id].append(rc)
         else:
             rc = ReadConnection(s1.ref_id, ref_bp_1, sign_1, s2.ref_id, ref_bp_2, sign_2,
-                                s1.haplotype, s2.haplotype, s1.read_id, s1.genome_id, s1.is_pass, s2.is_pass)
+                                s1.haplotype, s2.haplotype, s1.read_id, s1.genome_id, s1.is_pass, s2.is_pass, seg_1.mapq, seg_1.mapq)
             seq_breakpoints_r[s1.ref_id].append(rc)
             seq_breakpoints_l[s2.ref_id].append(rc)
             
@@ -234,9 +241,9 @@ def cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads, bp
     cur_cluster = []
     bp_list = []
     
-    bp_pos.sort(key=lambda bp: bp.get_pos(bp_dir))
+    bp_pos.sort(key=lambda bp: (bp.dir_1(bp_dir), bp.get_pos(bp_dir)))
     for rc in bp_pos:
-        if cur_cluster and rc.get_pos(bp_dir) - cur_cluster[-1].get_pos(bp_dir)> clust_len: ### Add direction here
+        if cur_cluster and rc.get_pos(bp_dir) - cur_cluster[-1].get_pos(bp_dir)> clust_len: 
             clusters.append(cur_cluster)
             cur_cluster = [rc]
         else:
@@ -260,12 +267,14 @@ def cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads, bp
             
         if max(by_genome_id.values()) >= min_reads:
             position_arr = [x.get_pos(bp_dir) for x in cl if x.is_pass(bp_dir) == 'PASS']
+            qual_arr = [x.get_qual(bp_dir) for x in cl if x.is_pass(bp_dir) == 'PASS']
             if not position_arr:
                 continue
             position = int(np.median(position_arr))
+            qual = int(np.median(qual_arr))
             sign  = x.sign_1 if bp_dir == 'right' else x.sign_2
             if position >= min_ref_flank and position <= ref_lengths[seq] - min_ref_flank:
-                bp = Breakpoint(seq, position, sign)
+                bp = Breakpoint(seq, position, sign, qual)
                 bp.connections = connections
                 bp.read_ids = read_ids
                 bp_list.append(bp)
@@ -454,7 +463,8 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
                     by_genome_id_pass[key] = len(unique_reads_pass[key])
                     happ_support_1[key[0]].append(key[1])
             if by_genome_id_pass.values() and max(by_genome_id_pass.values()) >= MIN_FULL_READ_SUPP:
-                position = int(np.median([x.ref_end for x in cl]))
+                position = int(np.median([x.ref_end for x in cl if x.is_pass == 'PASS']))
+                mapq = int(np.median([x.mapq for x in cl if x.is_pass == 'PASS']))
                 ins_length = int(np.median([x.segment_length for x in cl]))
                 if ins_length < sv_size:
                     continue
@@ -465,10 +475,10 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
                     if not by_genome_id_pass.values() or not max(by_genome_id_pass.values()) >= min_reads:
                         continue
                     for key in unique_reads.keys():
-                        bp_1 = Breakpoint(seq, position, -1)
+                        bp_1 = Breakpoint(seq, position, -1, mapq)
                         bp_1.read_ids = [x.read_id for x in unique_reads_pass[key]]
                         bp_1.connections = unique_reads_pass[key]
-                        bp_3 = Breakpoint(seq, position, 1)
+                        bp_3 = Breakpoint(seq, position, 1, mapq)
                         bp_3.is_insertion = True
                         bp_3.insertion_size = ins_length
                         supp = len(unique_reads_pass[key])
@@ -530,7 +540,7 @@ def insertion_filter(ins_clusters, min_reads, genome_ids):
                         
         for ins in cl:
             ins_list.append(ins)
-            bp_2 = Breakpoint(ins.bp_1.ref_id, ins.bp_1.position,1)
+            bp_2 = Breakpoint(ins.bp_1.ref_id, ins.bp_1.position,1, ins.bp_1.qual)
             ins_2 = DoubleBreak(ins.bp_2, 1, bp_2, 1, ins.genome_id, ins.haplotype_1, ins.haplotype_2, ins.supp, ins.supp_read_ids, ins.length, ins.genotype, 'dashed')
             ins_2.is_pass = ins.is_pass
             ins_list.append(ins_2)
@@ -547,7 +557,7 @@ def get_clipped_reads(segments_by_read_filtered):
     
 def cluster_clipped_ends(clipped_reads, clust_len, min_ref_flank, ref_lengths):
     bp_list = defaultdict(list)
-    
+    QUAL = 60
     for seq, read in clipped_reads.items():
         clusters = []
         cur_cluster = []
@@ -564,7 +574,7 @@ def cluster_clipped_ends(clipped_reads, clust_len, min_ref_flank, ref_lengths):
         for cl in clusters:
             position = int(np.median([x.ref_end for x in cl]))
             if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank:
-                bp = Breakpoint(seq, position, cl[0].strand)
+                bp = Breakpoint(seq, position, cl[0].strand, QUAL)
                 bp.connections = cl
                 bp_list[seq].append(bp)
                 
@@ -574,10 +584,10 @@ def add_clipped_end(position, clipped_clusters_pos, clipped_clusters_seq, by_gen
     
     ind = bisect.bisect_left(clipped_clusters_pos, position)
     cl = []
-    
-    if ind < len(clipped_clusters_pos)-1 and abs(clipped_clusters_pos[ind] - position) < 50:
+    MIN_SV_DIFF = 50
+    if ind < len(clipped_clusters_pos)-1 and abs(clipped_clusters_pos[ind] - position) < MIN_SV_DIFF:
         cl = clipped_clusters_seq[ind]
-    elif ind > 0 and abs(clipped_clusters_pos[ind - 1] - position) < 50:
+    elif ind > 0 and abs(clipped_clusters_pos[ind - 1] - position) < MIN_SV_DIFF:
         cl = clipped_clusters_seq[ind - 1]
         
     if cl:
