@@ -122,9 +122,7 @@ def main():
     logger.debug("Cmd: " + " ".join(sys.argv[1:]))
     
     args.sv_size = max(args.min_sv_size - MIN_SV_THR, MIN_SV_THR)
-    print(args.output_all_svs)
-    print(args.keep_low_coverage)
-
+    
     if not shutil.which(SAMTOOLS_BIN):
         logger.error("samtools not found")
         return 1
