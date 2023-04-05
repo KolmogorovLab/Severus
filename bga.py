@@ -42,7 +42,7 @@ def _enable_logging(log_file, debug, overwrite):
 
 def main():
     # default tunable parameters
-    MAX_READ_ERROR = 0.1
+    MAX_READ_ERROR = 0.005
     MIN_BREAKPOINT_READS = 3
     MIN_MAPQ = 10
     #MIN_DOUBLE_BP_READS = 5
@@ -54,7 +54,6 @@ def main():
     MAX_UNALIGNED_LEN = 500
     MIN_SV_SIZE = 50
     MIN_SV_THR = 15
-    SV_SIZE_RPT = 5
     #MIN_GRAPH_SUPPORT = 3
 
     SAMTOOLS_BIN = "samtools"
@@ -105,6 +104,7 @@ def main():
     parser.add_argument("--phasing-vcf", dest="phase_vcf", metavar="path", help="vcf file used for phasing [None]")
     parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
     parser.add_argument("--output-all-svs", dest='output_all_svs', action = "store_true")
+    parser.add_argument("--keep-low-coverage", dest='keep_low_coverage', action = "store_true")
     
     args = parser.parse_args()
 
@@ -122,6 +122,8 @@ def main():
     logger.debug("Cmd: " + " ".join(sys.argv[1:]))
     
     args.sv_size = max(args.min_sv_size - MIN_SV_THR, MIN_SV_THR)
+    print(args.output_all_svs)
+    print(args.keep_low_coverage)
 
     if not shutil.which(SAMTOOLS_BIN):
         logger.error("samtools not found")
@@ -156,9 +158,11 @@ def main():
     double_breaks = call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histograms, genome_ids, args)
     logger.info('Writing breakpoints')
     output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
+    
     logger.info('Computing segment coverage')
-    double_breaks = filter_fail_double_db(double_breaks) # merge it with breakpoint graph 
+    double_breaks = filter_fail_double_db(double_breaks, args.output_all_svs, args.keep_low_coverage) # merge it with breakpoint graph double_breaks = filter_fail_double_db(double_breaks)
     genomic_segments, hb_points = get_genomic_segments(double_breaks, coverage_histograms, thread_pool, args.phase_vcf)
+    
     logger.info('Preparing graph')
     graph, adj_clusters = build_breakpoint_graph(double_breaks, genomic_segments, hb_points, args.max_genomic_len,
                                                                 args.reference_adjacencies, target_genomes, control_genomes)

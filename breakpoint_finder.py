@@ -343,7 +343,7 @@ def double_breaks_filter(double_breaks, min_reads, genome_ids):
     PASS_2_FAIL_RAT = 0.8
     CONN_2_PASS = 0.7
     CHR_CONN = 2
-    COV_THR = 2
+    COV_THR = 3
     
     for db in double_breaks:
         conn_1 = [cn for cn in db.bp_1.connections if cn.genome_id == db.genome_id and cn.haplotype_1 == db.haplotype_1]
@@ -495,7 +495,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
 
 def insertion_filter(ins_clusters, min_reads, genome_ids):
     PASS_2_FAIL_RAT = 0.9
-    COV_THR = 2
+    COV_THR = 3
     
     for ins in ins_clusters:
         conn_1 = [cn for cn in ins.bp_1.connections if cn.genome_id == ins.genome_id and cn.haplotype == ins.haplotype_1]
@@ -604,12 +604,20 @@ def add_clipped_end(position, clipped_clusters_pos, clipped_clusters_seq, by_gen
                 happ_support_1[key[0]].append(key[1])
 
 
-def filter_fail_double_db(double_breaks):
+def filter_fail_double_db(double_breaks, output_all_sv, keep_low_coverage):
     db_list = []
-    for db in double_breaks:
-        if db.is_pass == 'PASS':
-            db_list.append(db)
-    return db_list
+    if not output_all_sv:
+        for db in double_breaks:
+            if db.is_pass == 'PASS':
+                db_list.append(db)
+        return db_list
+    elif not keep_low_coverage:
+        for db in double_breaks:
+            if not db.is_pass == 'PASS_LOWCOVERAGE':
+                db_list.append(db)
+        return db_list
+    else:
+        return double_breaks
             
     
 def compute_bp_coverage(double_breaks, coverage_histograms, genome_ids):
