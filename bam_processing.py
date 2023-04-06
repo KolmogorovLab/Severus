@@ -222,7 +222,7 @@ def filter_reads(segments_by_read):
 
 def add_read_qual(segments_by_read, ref_lengths, thread_pool, min_mapq, max_error_rate):
     mm_hist_low, mm_hist_high = background_mm_hist(segments_by_read, ref_lengths)
-    high_mm_region = extract_segdups(mm_hist_low, mm_hist_high)
+    high_mm_region = extract_segdups(mm_hist_low, mm_hist_high, max_error_rate)
     for read, alignments in segments_by_read.items():
         segments_by_read[read] = label_reads(alignments, min_mapq, mm_hist_low, high_mm_region, max_error_rate)
     
@@ -230,28 +230,18 @@ def add_read_qual(segments_by_read, ref_lengths, thread_pool, min_mapq, max_erro
 def label_reads(read, min_mapq, mm_hist_low, high_mm_region, max_error_rate):
     
     MIN_ALIGNED_RATE = 0.5
-    MIN_ALIGNED_LENGTH = 5000
+    MIN_ALIGNED_LENGTH = 10000
     MAX_SEGMENTED_READ = 10
-    MAX_CHR_SPAN = 2
+    #MAX_CHR_SPAN = 2
     MIN_SEGMENT_LEN = 100
-    #MAX_MM_RATE_THR = 0.005
-    #MAX_ERROR_RATE = 0.01
     fail_type = ''
-    chr_list = []
-    dedup_segments = []
-    dedup_segments_ins = []
-    n_seg = 0#
+    #chr_list = []
     
-    for seg in read:
-        if not dedup_segments or dedup_segments[-1].read_start != seg.read_start:            
-            if seg.is_insertion or seg.is_clipped:
-                dedup_segments_ins.append(seg)
-            else:
-                dedup_segments.append(seg)
-                chr_list.append(seg.ref_id)
-                n_seg += 1  
-    dedup_segments +=dedup_segments_ins        
-    aligned_len = sum([seg.segment_length for seg in dedup_segments if not seg.is_insertion and not seg.is_clipped])
+    n_seg = sum([1 for seg in read if not seg.is_insertion and not seg.is_clipped])
+    
+    #chr_list = [seg.ref_id for seg in read if not seg.is_insertion and not seg.is_clipped]
+    
+    aligned_len = sum([seg.segment_length for seg in read if not seg.is_insertion and not seg.is_clipped])
     aligned_ratio = aligned_len/read[0].read_length
     
     #if n_seg > MAX_SEGMENTED_READ or len(set(chr_list)) > MAX_CHR_SPAN:
@@ -261,11 +251,11 @@ def label_reads(read, min_mapq, mm_hist_low, high_mm_region, max_error_rate):
         fail_type = 'LOW_ALIGNED_LEN'#
         
     if fail_type:
-        for seg in dedup_segments:
+        for seg in read:
             seg.is_pass = fail_type
-        return dedup_segments#
+        return read#
     
-    for seg in dedup_segments:
+    for seg in read:
         if not seg.is_insertion and not seg.is_clipped and seg.segment_length < MIN_SEGMENT_LEN:
             seg.is_pass = 'SEG_LENGTH'
             continue
@@ -277,7 +267,7 @@ def label_reads(read, min_mapq, mm_hist_low, high_mm_region, max_error_rate):
             seg.is_pass = 'HIGH_MM_rate'
             continue#
             
-    return dedup_segments
+    return read
 
 
 def get_background_mm_rate(seg, mismatch_histograms):
@@ -323,14 +313,13 @@ def background_mm_hist(segments_by_read, ref_lengths):
     return mm_hist_low, mm_hist_high
 
 
-def extract_segdups(mm_hist_low, mm_hist_high):
-    THR = 0.005
+def extract_segdups(mm_hist_low, mm_hist_high, max_read_error):
     COV_WINDOW = 500
     high_mm_region = defaultdict(list)
     for key, mm_low_chrom in mm_hist_low.items():
         mm_high_chrom = mm_hist_high[key]
         for ind, (a, b)  in enumerate(zip(mm_low_chrom, mm_high_chrom)):
-            if b - a >= THR:
+            if b - a >= max_read_error:
                 if not high_mm_region[key]:
                     high_mm_region[key].append([ind * COV_WINDOW])
                     high_mm_region[key].append([(ind + 1) * COV_WINDOW])

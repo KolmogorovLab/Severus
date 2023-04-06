@@ -245,7 +245,19 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
     
     return new_read
 
-
+def remove_dedup_segments(segments_by_read):
+    
+    for read_id, read in segments_by_read.items():
+        dedup_segments_ins = []
+        dedup_segments = []
+        read.sort(key = lambda s:s.read_start)
+        for seg in read:
+            if seg.is_insertion or seg.is_clipped:
+                dedup_segments_ins.append(seg)
+            elif not dedup_segments or dedup_segments[-1].read_start != seg.read_start:
+                dedup_segments.append(seg)
+        segments_by_read[read_id] = dedup_segments + dedup_segments_ins
+            
 def resolve_vntr(segments_by_read, vntr_file, min_sv_size):
     vntr_list = read_vntr_file(vntr_file)
     empty_keys = []
@@ -261,6 +273,7 @@ def resolve_vntr(segments_by_read, vntr_file, min_sv_size):
 
 
 def update_segments_by_read(segments_by_read, ref_lengths, thread_pool, args):
+    remove_dedup_segments(segments_by_read)
     if args.vntr_file:
         resolve_vntr(segments_by_read, args.vntr_file, args.sv_size)
     logger.info("Annotating reads")
