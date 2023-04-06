@@ -103,7 +103,7 @@ def main():
                         help=f"maximum length of genomic segment to form connected components [{MAX_GENOMIC_LEN}]")
     parser.add_argument("--phasing-vcf", dest="phase_vcf", metavar="path", help="vcf file used for phasing [None]")
     parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
-    parser.add_argument("--output-all-svs", dest='output_all_svs', action = "store_true")
+    parser.add_argument("--output-only-pass", dest='output_only_pass', action = "store_true")
     parser.add_argument("--keep-low-coverage", dest='keep_low_coverage', action = "store_true")
     
     args = parser.parse_args()
@@ -158,7 +158,7 @@ def main():
     output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
     
     logger.info('Computing segment coverage')
-    double_breaks = filter_fail_double_db(double_breaks, args.output_all_svs, args.keep_low_coverage) # merge it with breakpoint graph double_breaks = filter_fail_double_db(double_breaks)
+    double_breaks = filter_fail_double_db(double_breaks, args.output_only_pass, args.keep_low_coverage) # merge it with breakpoint graph double_breaks = filter_fail_double_db(double_breaks)
     genomic_segments, hb_points = get_genomic_segments(double_breaks, coverage_histograms, thread_pool, args.phase_vcf)
     
     logger.info('Preparing graph')

@@ -604,9 +604,9 @@ def add_clipped_end(position, clipped_clusters_pos, clipped_clusters_seq, by_gen
                 happ_support_1[key[0]].append(key[1])
 
 
-def filter_fail_double_db(double_breaks, output_all_sv, keep_low_coverage):
+def filter_fail_double_db(double_breaks, output_only_pass, keep_low_coverage):
     db_list = []
-    if not output_all_sv:
+    if output_only_pass:
         for db in double_breaks:
             if db.is_pass == 'PASS':
                 db_list.append(db)
