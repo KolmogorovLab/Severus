@@ -230,30 +230,20 @@ def add_read_qual(segments_by_read, ref_lengths, thread_pool, min_mapq, max_erro
 def label_reads(read, min_mapq, mm_hist_low, high_mm_region, max_error_rate):
     
     MIN_ALIGNED_RATE = 0.5
-    MIN_ALIGNED_LENGTH = 10000
+    MIN_ALIGNED_LENGTH = 7000 ##make it dynamic
     MAX_SEGMENTED_READ = 10
     #MAX_CHR_SPAN = 2
     MIN_SEGMENT_LEN = 100
-    fail_type = ''
     #chr_list = []
     
     n_seg = sum([1 for seg in read if not seg.is_insertion and not seg.is_clipped])
     
     #chr_list = [seg.ref_id for seg in read if not seg.is_insertion and not seg.is_clipped]
     
-    aligned_len = sum([seg.segment_length for seg in read if not seg.is_insertion and not seg.is_clipped])
-    aligned_ratio = aligned_len/read[0].read_length
-    
     #if n_seg > MAX_SEGMENTED_READ or len(set(chr_list)) > MAX_CHR_SPAN:
     if n_seg > MAX_SEGMENTED_READ:
-        fail_type = 'SEGMENTED'
-    elif aligned_len < MIN_ALIGNED_LENGTH or aligned_ratio < MIN_ALIGNED_RATE:
-        fail_type = 'LOW_ALIGNED_LEN'#
-        
-    if fail_type:
         for seg in read:
-            seg.is_pass = fail_type
-        return read#
+            seg.is_pass = 'SEGMENTED'
     
     for seg in read:
         if not seg.is_insertion and not seg.is_clipped and seg.segment_length < MIN_SEGMENT_LEN:
@@ -266,6 +256,13 @@ def label_reads(read, min_mapq, mm_hist_low, high_mm_region, max_error_rate):
         if seg.mismatch_rate > seg.bg_mm_rate + max_error_rate:
             seg.is_pass = 'HIGH_MM_rate'
             continue#
+            
+    aligned_len = sum([seg.segment_length for seg in read if not seg.is_insertion and not seg.is_clipped and seg.is_pass == 'PASS'])
+    aligned_ratio = aligned_len/read[0].read_length 
+    
+    if aligned_len < MIN_ALIGNED_LENGTH or aligned_ratio < MIN_ALIGNED_RATE:
+        for seg in read:
+            seg.is_pass = 'LOW_ALIGNED_LEN'#
             
     return read
 
