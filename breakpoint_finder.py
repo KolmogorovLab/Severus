@@ -23,7 +23,6 @@ import logging
 
 from bam_processing import filter_reads
 
-
 logger = logging.getLogger()
 
 
@@ -603,6 +602,163 @@ def add_clipped_end(position, clipped_clusters_pos, clipped_clusters_seq, by_gen
                 by_genome_id_pass[key] = len(unique_reads_pass[key])
                 happ_support_1[key[0]].append(key[1])
 
+def tra_to_ins(ins_list_pos, ins_list, bp, dir_bp, dbs, ins_clusters, double_breaks):
+    
+    INS_WIN = 2000 
+    NUM_HAPLOTYPE = 3
+    
+    ins_1 = ins_list_pos[bp.ref_id]
+    strt = bisect.bisect_left(ins_1, bp.position - INS_WIN)
+    end = bisect.bisect_left(ins_1, bp.position + INS_WIN)
+    flag = False
+    db_to_remove = []
+    
+    if strt == end:
+        return False
+    
+    ins_db = ins_list[bp.ref_id]
+    cur_cluster = []
+    clusters = []
+    for i in range(strt,end):
+        ins = ins_db[i]
+        if cur_cluster and ins.bp_1.position == cur_cluster[-1].bp_1.position:
+            cur_cluster.append(ins)
+        else:
+            clusters.append(cur_cluster)
+            cur_cluster = [ins]
+    if cur_cluster:
+        clusters.append(cur_cluster)
+    clusters = clusters[1:]
+    
+    for ins_cl in clusters:
+        gen_id_1 = defaultdict(list)
+        hp_list = defaultdict(list)
+        ins = ins_cl[0]
+        if ins.length < abs(ins.bp_1.position - bp.position):
+            continue
+        flag = True
+        
+        for ins in ins_cl:
+            gen_id_1[(ins.genome_id, ins.haplotype_1)].append(ins)
+            hp_list[ins.genome_id].append(ins.haplotype_1)
+            
+        for (genome_id,haplotype) in dbs.keys():
+            hp_list[genome_id].append(haplotype)
+                
+        for (genome_id,haplotype), db_1 in dbs.items():
+            db = db_1[0]
+            genotype = 'hom' if sum(hp_list[db.genome_id]) == NUM_HAPLOTYPE else 'het'
+            db_to_remove.append(db)
+            
+            if gen_id_1[(genome_id, haplotype)]:
+                ins = gen_id_1[(genome_id, haplotype)][0]
+                n_sup = len(set(db.supp_read_ids) - set([red.read_id for red in ins.supp_read_ids]))
+                ins.supp += n_sup
+                ins.genotype = genotype
+            else:
+                ins_clusters.append(DoubleBreak(ins.bp_1, ins.direction_1, ins.bp_2, ins.direction_2, genome_id, haplotype,  haplotype, db.supp, db.supp_read_ids, ins.length, genotype , 'dashed'))
+            
+    if db_to_remove:
+        for db in list(set(db_to_remove)):
+            double_breaks.remove(db) 
+            
+    return flag
+                    
+        
+def dup_to_ins(ins_list_pos, ins_list, dbs, min_sv_size, ins_clusters, double_breaks):
+    NUM_HAPLOTYPE = 3
+    #new_ins = []
+    db = dbs[0]
+    db_to_remove = []
+    
+    ins_1 = ins_list_pos[db.bp_1.ref_id]
+    strt = bisect.bisect_left(ins_1, db.bp_1.position)
+    end = bisect.bisect_left(ins_1, db.bp_2.position)
+    
+    if end - strt < 1:
+        return False
+    
+    ins_db = ins_list[db.bp_1.ref_id]
+    cur_cluster = []
+    clusters = []
+    for i in range(strt,end):
+        ins = ins_db[i]
+        if cur_cluster and ins.bp_1.position == cur_cluster[-1].bp_1.position:
+            cur_cluster.append(ins)
+        else:
+            clusters.append(cur_cluster)
+            cur_cluster = [ins]
+    if cur_cluster:
+        clusters.append(cur_cluster)
+    clusters = clusters[1:]
+        
+    for ins_cl in clusters:
+        gen_id_1 = defaultdict(list)
+        hp_list = defaultdict(list)
+        ins = ins_cl[0]
+        if db.length > ins.length + min_sv_size:
+            return False
+        
+        for ins in ins_cl:
+            gen_id_1[(ins.genome_id, ins.haplotype_1)].append(ins)
+            hp_list[ins.genome_id].append(ins.haplotype_1)
+        
+        for db in dbs:
+            hp_list[db.genome_id].append(db.haplotype_1)
+            
+        for db in dbs:
+            genotype = 'hom' if sum(hp_list[db.genome_id]) == NUM_HAPLOTYPE else 'het'
+            if gen_id_1[(db.genome_id, db.haplotype_1)]:
+                ins = gen_id_1[(db.genome_id, db.haplotype_1)][0]
+                n_sup = len(set(db.supp_read_ids) - set([red.read_id for red in ins.supp_read_ids]))
+                ins.supp += n_sup
+                ins.genotype = genotype
+            else:
+                ins_clusters.append(DoubleBreak(ins.bp_1, ins.direction_1, ins.bp_2, ins.direction_2 ,db.genome_id, db.haplotype_1, db.haplotype_1, db.supp, db.supp_read_ids, ins.length, genotype , 'dashed'))
+            db_to_remove.append(db)
+            
+    if db_to_remove:
+        for db in list(set(db_to_remove)):
+            double_breaks.remove(db)    
+
+          
+def match_long_ins(ins_clusters, double_breaks, min_sv_size):
+    DEL_THR = 10000
+    ins_list = defaultdict(list)
+    ins_list_pos = defaultdict(list)
+    for ins in ins_clusters:
+        ins_list_pos[ins.bp_1.ref_id].append(ins.bp_1.position)
+        ins_list[ins.bp_1.ref_id].append(ins)
+        
+    cur_cluster = []
+    clusters = []
+    for db in double_breaks:
+        if cur_cluster and db.bp_1.position == cur_cluster[-1].bp_1.position and db.bp_2.position == cur_cluster[-1].bp_2.position:
+            cur_cluster.append(db)
+        else:
+            clusters.append(cur_cluster)
+            cur_cluster = [db]
+    if cur_cluster:
+        clusters.append(cur_cluster)
+    clusters = clusters[1:]
+    
+    for dbs in clusters:
+        db = dbs[0]
+        if db.bp_1.ref_id == db.bp_2.ref_id and db.direction_1 > 0 and db.direction_2 < 0 and db.bp_2.position - db.bp_1.position < DEL_THR: 
+            continue
+        if db.bp_1.ref_id == db.bp_2.ref_id and db.bp_2.position - db.bp_1.position < DEL_THR:
+            dup_to_ins(ins_list_pos, ins_list, dbs, min_sv_size, ins_clusters, double_breaks)
+        else:
+            gen_id_1 = defaultdict(list)
+            gen_id_2 = defaultdict(list)
+            
+            for db in dbs:
+                gen_id_1[(db.genome_id, db.haplotype_1)].append(db)
+                gen_id_2[(db.genome_id, db.haplotype_2)].append(db)
+                
+            if not tra_to_ins(ins_list_pos, ins_list, db.bp_1, db.direction_1, gen_id_1, ins_clusters, double_breaks):
+                tra_to_ins(ins_list_pos, ins_list, db.bp_2, db.direction_2, gen_id_2, ins_clusters, double_breaks)
+
 
 def filter_fail_double_db(double_breaks, output_only_pass, keep_low_coverage):
     db_list = []
@@ -840,18 +996,25 @@ def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histog
     clipped_clusters = []
     clipped_reads = get_clipped_reads(segments_by_read_filtered)
     clipped_clusters = cluster_clipped_ends(clipped_reads, args.bp_cluster_size, args.min_ref_flank, ref_lengths)
+    
     logger.info('Starting breakpoint detection')
     double_breaks = get_breakpoints(split_reads,thread_pool, ref_lengths, args)
+    double_breaks.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position, b.direction_1))
+    
+    logger.info('Clustering unmapped insertions')
+    ins_clusters = extract_insertions(ins_list_all, clipped_clusters, ref_lengths, args)
+    ins_clusters.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position))
+    
+    match_long_ins(ins_clusters, double_breaks, args.min_sv_size)
+    
     compute_bp_coverage(double_breaks, coverage_histograms, genome_ids)
     double_breaks = double_breaks_filter(double_breaks, args.bp_min_support, genome_ids)
     double_breaks.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position, b.direction_1))
     
-    logger.info('Clustering unmapped insertions')
-    
-    ins_clusters = extract_insertions(ins_list_all, clipped_clusters, ref_lengths, args)
     compute_bp_coverage(ins_clusters, coverage_histograms, genome_ids)
     ins_clusters = insertion_filter(ins_clusters, args.bp_min_support, genome_ids)
     ins_clusters.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position))
+    
     
     double_breaks +=  ins_clusters 
             
