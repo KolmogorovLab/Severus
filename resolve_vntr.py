@@ -9,6 +9,7 @@ logger = logging.getLogger()
 
 
 def read_vntr_file(vntr_file): ## Add check for chromosome names 
+    BP_TOL = 25
     vntr_list = defaultdict(list)
     vntrs = []
     with open(vntr_file)as f:
@@ -18,9 +19,13 @@ def read_vntr_file(vntr_file): ## Add check for chromosome names
             if not vntr_list[tr[0]]:
                 vntr_list[tr[0]].append([int(tr[1])])
                 vntr_list[tr[0]].append([int(tr[2])])
+                vntr_list[tr[0]].append([int(tr[1]) - BP_TOL])
+                vntr_list[tr[0]].append([int(tr[2]) + BP_TOL])
             else:
                 vntr_list[tr[0]][0].append(int(tr[1]))
                 vntr_list[tr[0]][1].append(int(tr[2]))
+                vntr_list[tr[0]][2].append(int(tr[1]) - BP_TOL)
+                vntr_list[tr[0]][3].append(int(tr[2]) + BP_TOL)
     return vntr_list
 
 
@@ -49,18 +54,18 @@ def resolve_vntr_split(s1, s2, vntr_list):
     tr_reg = vntr_list[s1.ref_id]
     if tr_reg:
         bp_order, bp_length = order_bp(s1, s2)
-        strt = bisect.bisect_right(tr_reg[0],min([bp_order[0][0], bp_order[1][0]]))
-        end = bisect.bisect_left(tr_reg[1],max([bp_order[0][0], bp_order[1][0]]))
+        strt = bisect.bisect_right(tr_reg[2], min([bp_order[0][0], bp_order[1][0]]))
+        end = bisect.bisect_left(tr_reg[3], max([bp_order[0][0], bp_order[1][0]]))
         if strt - end == 1:
-            return([(s1.ref_id, tr_reg[0][end], tr_reg[1][end]),(bp_order[0][2], bp_order[1][2], bp_length)])
+            return([(s1.ref_id, tr_reg[0][end], tr_reg[1][end]), (bp_order[0][2], bp_order[1][2], bp_length)])
         
 def filter_vntr_only_segments(split_segs, vntr_list):
     OVERLAP_THR = 0.95
     for s1 in split_segs:
         tr_reg = vntr_list[s1.ref_id]
         if tr_reg:
-            strt = bisect.bisect_right(tr_reg[0],s1.ref_start)
-            end = bisect.bisect_left(tr_reg[1],s1.ref_end)
+            strt = bisect.bisect_right(tr_reg[2],s1.ref_start)
+            end = bisect.bisect_left(tr_reg[3],s1.ref_end)
             if strt - end == 1:
                 vntr_len = tr_reg[1][end] - tr_reg[0][end]
                 if s1.segment_length > vntr_len * OVERLAP_THR:
@@ -256,7 +261,54 @@ def remove_dedup_segments(segments_by_read):
                 dedup_segments_ins.append(seg)
             elif not dedup_segments or dedup_segments[-1].read_start != seg.read_start:
                 dedup_segments.append(seg)
+        intrachr_to_ins(dedup_segments)
         segments_by_read[read_id] = dedup_segments + dedup_segments_ins
+        
+        
+def intrachr_to_ins(dedup_segments):
+    MIN_CHR_LEN = 3000
+    MAX_DUP_LEN = 5000
+    chr_list = [seg.read_id for seg in dedup_segments]
+    new_read = []
+    seg_to_remove = []
+    if len(set(chr_list)) == 1:
+        return dedup_segments
+    if len (chr_list) < 3:
+        return dedup_segments
+    for i in range(0, len(dedup_segments)-2):
+        if not chr_list[i] == chr_list[i + 1] and not chr_list[i + 1] == chr_list[i + 2] and chr_list[i] == chr_list[i + 2]:
+            if dedup_segments[i+1].segment_length > MIN_CHR_LEN:
+                continue
+            if not dedup_segments[i].strand == dedup_segments[i+1].strand:
+                continue
+            bp_order, bp_length = order_bp(dedup_segments[i], dedup_segments[i+2])
+            if bp_length < 0 or bp_length > MAX_DUP_LEN:
+                continue
+            bp_len = bp_length + dedup_segments[i+1].segment_length
+            bp_order.sort(key = lambda s:s[1])
+            s1 = bp_order[0][2]
+            s1.segment_length += bp_order[1][2].ref_end.segment_length 
+            if s1.strand == '-':
+                ins_end = s1.read_start
+                ins_st = bp_order[1][2].read_end
+                s1.read_start = bp_order[1][2].read_start
+                ins_pos = bp_order[1][2].ref_start
+            else:
+                ins_st = s1.read_end
+                ins_end = bp_order[1][2].read_start
+                s1.read_end = bp_order[1][2].read_end
+                ins_pos = s1.ref_end
+            s1.ref_end = bp_order[1][2].ref_end
+            bp_len = abs(ins_st - ins_end)
+            new_read.append(ReadSegment(ins_st, ins_end, ins_pos, ins_pos, s1.read_id,
+                                        s1.ref_id, s1.strand, s1.read_length, bp_len, s1.haplotype, s1.mapq, s1.genome_id,0, True))
+            seg_to_remove.append(i+1)
+            
+    if seg_to_remove:
+        for ind in seg_to_remove:
+            del dedup_segments[ind]
+    dedup_segments += new_read
+                
             
 def resolve_vntr(segments_by_read, vntr_file, min_sv_size):
     vntr_list = read_vntr_file(vntr_file)
