@@ -11,6 +11,7 @@ from build_graph import build_breakpoint_graph, output_clusters_graphvis, output
 from bam_processing import get_all_reads_parallel, update_coverage_hist
 from breakpoint_finder import call_breakpoints, output_breaks, get_genomic_segments, filter_fail_double_db
 from resolve_vntr import update_segments_by_read
+from vcf_output import write_to_vcf
 import logging
 
 
@@ -155,10 +156,11 @@ def main():
     coverage_histograms = update_coverage_hist(genome_ids, ref_lengths, segments_by_read)
     double_breaks = call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histograms, genome_ids, args)
     logger.info('Writing breakpoints')
+    write_to_vcf(double_breaks, target_genomes, control_genomes, args.out_dir, ref_lengths)
     output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
-    
     logger.info('Computing segment coverage')
     double_breaks = filter_fail_double_db(double_breaks, args.output_only_pass, args.keep_low_coverage) # merge it with breakpoint graph double_breaks = filter_fail_double_db(double_breaks)
+    
     genomic_segments, hb_points = get_genomic_segments(double_breaks, coverage_histograms, thread_pool, args.phase_vcf)
     
     logger.info('Preparing graph')
