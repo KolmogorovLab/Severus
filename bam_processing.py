@@ -220,9 +220,9 @@ def filter_reads(segments_by_read):
     return segments_by_read_filtered
         
 
-def add_read_qual(segments_by_read, ref_lengths, thread_pool, min_mapq, max_error_rate):
+def add_read_qual(segments_by_read, ref_lengths, thread_pool, min_mapq, max_error_rate, write_segdups_out):
     mm_hist_low, mm_hist_high = background_mm_hist(segments_by_read, ref_lengths)
-    high_mm_region = extract_segdups(mm_hist_low, mm_hist_high, max_error_rate)
+    high_mm_region = extract_segdups(mm_hist_low, mm_hist_high, max_error_rate, write_segdups_out)
     for read, alignments in segments_by_read.items():
         segments_by_read[read] = label_reads(alignments, min_mapq, mm_hist_low, high_mm_region, max_error_rate)
     
@@ -280,6 +280,7 @@ def get_background_mm_rate(seg, mismatch_histograms):
 def background_mm_hist(segments_by_read, ref_lengths):
     COV_WINDOW  = 500
     MED_THR = 3
+    MIN_READ = 5
     mismatch_histograms = defaultdict(list)
     mm_hist_low = {}
     mm_hist_high = {}
@@ -300,7 +301,7 @@ def background_mm_hist(segments_by_read, ref_lengths):
                 
     for chr_id, mm_rate in mismatch_histograms.items():
         for i, mm_list in enumerate(mm_rate):
-            if not mm_list or len(mm_list)<5:
+            if not mm_list or len(mm_list) < MIN_READ:
                 mm_hist_low[chr_id][i] = 1
                 mm_hist_high[chr_id][i] = 1
                 continue
@@ -310,7 +311,7 @@ def background_mm_hist(segments_by_read, ref_lengths):
     return mm_hist_low, mm_hist_high
 
 
-def extract_segdups(mm_hist_low, mm_hist_high, max_read_error):
+def extract_segdups(mm_hist_low, mm_hist_high, max_read_error, write_segdups_out):
     COV_WINDOW = 500
     high_mm_region = defaultdict(list)
     for key, mm_low_chrom in mm_hist_low.items():
@@ -320,11 +321,15 @@ def extract_segdups(mm_hist_low, mm_hist_high, max_read_error):
                 if not high_mm_region[key]:
                     high_mm_region[key].append([ind * COV_WINDOW])
                     high_mm_region[key].append([(ind + 1) * COV_WINDOW])
-                elif ind * COV_WINDOW == high_mm_region[key][-1]:
+                elif ind * COV_WINDOW == high_mm_region[key][1][-1]:
                     high_mm_region[key][1][-1]=(ind + 1) * COV_WINDOW
                 else:
                     high_mm_region[key][0].append(ind * COV_WINDOW)
                     high_mm_region[key][1].append((ind + 1) * COV_WINDOW)
+    if write_segdups_out:
+        for chr_id, values in high_mm_region.items():
+            for (st, end) in zip(values[0], values[1]):
+                write_segdups_out.write('\t'.join([chr_id, str(st), str(end)]) + '\n')
     return high_mm_region
                     
 

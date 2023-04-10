@@ -106,6 +106,7 @@ def main():
     parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
     parser.add_argument("--output-only-pass", dest='output_only_pass', action = "store_true")
     parser.add_argument("--keep-low-coverage", dest='keep_low_coverage', action = "store_true")
+    parser.add_argument("--write-collapsed-dup", dest='write_segdup', action = "store_true")
     
     args = parser.parse_args()
 
@@ -137,6 +138,10 @@ def main():
     thread_pool = Pool(args.threads)
     out_breakpoint_graph = os.path.join(args.out_dir, "breakpoint_graph.gv")
     out_clustered_breakpoints = os.path.join(args.out_dir, "breakpoint_clusters.csv")
+    
+    args.write_segdups_out =''
+    if args.write_segdup:
+        args.write_segdups_out = open(os.path.join(args.out_dir,"SEVERUS_collaped_dup.bed"), "w")
     
     segments_by_read = defaultdict(list)
     genome_ids=[]
