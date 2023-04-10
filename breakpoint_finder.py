@@ -457,9 +457,9 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
             by_genome_id_pass = defaultdict(int)
             happ_support_1 = defaultdict(list)
             for key, values in unique_reads.items():
-                by_genome_id[key] = len(values)
+                by_genome_id[key] = len(set([red.read_id for red in values]))
                 if unique_reads_pass[key]:
-                    by_genome_id_pass[key] = len(unique_reads_pass[key])
+                    by_genome_id_pass[key] = len(set([red.read_id for red in unique_reads_pass[key]]))
                     happ_support_1[key[0]].append(key[1])
             if by_genome_id_pass.values() and max(by_genome_id_pass.values()) >= MIN_FULL_READ_SUPP:
                 position = int(np.median([x.ref_end for x in cl if x.is_pass == 'PASS']))
@@ -494,7 +494,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
 
 def insertion_filter(ins_clusters, min_reads, genome_ids):
     PASS_2_FAIL_RAT = 0.9
-    COV_THR = 3
+    COV_THR = 2
     
     for ins in ins_clusters:
         conn_1 = [cn for cn in ins.bp_1.connections if cn.genome_id == ins.genome_id and cn.haplotype == ins.haplotype_1]
@@ -516,7 +516,7 @@ def insertion_filter(ins_clusters, min_reads, genome_ids):
     clusters = []
     ins_list = []
     for ins in ins_clusters:
-        if cur_cluster and ins.bp_1.position == cur_cluster[-1].bp_1.position and ins.bp_2.position == cur_cluster[-1].bp_2.position:
+        if cur_cluster and ins.bp_1.position == cur_cluster[-1].bp_1.position and ins.length == cur_cluster[-1].length:
             cur_cluster.append(ins)
         else:
             clusters.append(cur_cluster)
