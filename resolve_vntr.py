@@ -32,8 +32,8 @@ def read_vntr_file(vntr_file): ## Add check for chromosome names
 def resolve_vntr_ins(seg,vntr_list):
     tr_reg = vntr_list[seg.ref_id]
     if tr_reg:
-        strt = bisect.bisect_right(tr_reg[0],seg.ref_end)
-        end = bisect.bisect_left(tr_reg[1],seg.ref_end)
+        strt = bisect.bisect_right(tr_reg[2],seg.ref_end)
+        end = bisect.bisect_left(tr_reg[3],seg.ref_end)
         if strt - end == 1:
             return([(seg.ref_id, tr_reg[0][end], tr_reg[1][end]), (seg, '', seg.segment_length)])
     
@@ -267,7 +267,7 @@ def remove_dedup_segments(segments_by_read):
         
 def intrachr_to_ins(dedup_segments):
     MIN_CHR_LEN = 3000
-    MAX_DUP_LEN = 5000
+    MAX_DUP_LEN = 3000
     chr_list = [seg.read_id for seg in dedup_segments]
     new_read = []
     seg_to_remove = []
@@ -329,4 +329,4 @@ def update_segments_by_read(segments_by_read, ref_lengths, thread_pool, args):
     if args.vntr_file:
         resolve_vntr(segments_by_read, args.vntr_file, args.sv_size)
     logger.info("Annotating reads")
-    add_read_qual(segments_by_read, ref_lengths, thread_pool, args.min_mapping_quality, args.max_read_error)
+    add_read_qual(segments_by_read, ref_lengths, thread_pool, args.min_mapping_quality, args.max_read_error, args.write_segdups_out)
