@@ -138,7 +138,7 @@ def write_vcf_header(ref_lengths, outfile):
     outfile.write('##ALT=<ID=INS,Description="Insertion">\n')
     outfile.write('##ALT=<ID=DUP,Description="Duplication">\n')
     outfile.write('##ALT=<ID=INV,Description="Inversion">\n')
-    outfile.write('##ALT=<ID=TRA,Description="Translocation">\n')#
+    outfile.write('##ALT=<ID=BND,Description="Breakend">\n')#
     outfile.write('##FILTER=<ID=PASS,Description="All filters passed">\n') ## add other filters as well!!#
     outfile.write("##INFO=<ID=HAPLOTYPE,Number=1,Type=String,Description=\"Haplotype of the SV\">\n")
     outfile.write("##INFO=<ID=SVLEN,Number=1,Type=Integer,Description=\"Length of the SV\">\n")
@@ -171,6 +171,8 @@ def write_germline_vcf(vcf_list, outfile):
     
 def write_to_vcf(double_breaks, target_ids, control_id, outpath, ref_lengths):
     control_id = list(control_id)
+    if not control_id:
+        control_id = ['']
     vcf_list = db_2_vcf(double_breaks, control_id[0])
     if control_id:
         for target_id in target_ids:
