@@ -241,6 +241,10 @@ def output_clusters_csv(graph, connected_components, out_file):
                 if not _coord_cmp(graph.nodes[u], graph.nodes[v]):
                     u, v = v, u
 
+                #only output insertions once in text
+                if graph.nodes[v]["_insertion"]:
+                    continue
+
                 keys.sort()
                 label_1 = _node_to_str(graph.nodes[u], commas=False)
                 label_2 = _node_to_str(graph.nodes[v], commas=False)
