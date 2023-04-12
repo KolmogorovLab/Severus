@@ -158,9 +158,9 @@ def output_clusters_graphvis(graph, connected_components, out_file):
 
         elif graph[u][v][key]["_type"] == "genomic":
             coverage = graph[u][v][key]["_support"]
-            #length = abs(graph.nodes[u]["_coordinate"][1] - graph.nodes[v]["_coordinate"][1])
-            #graph[u][v][key]["label"] = f"L:{length}\\nC:{coverage}"
-            graph[u][v][key]["label"] = f"C:{coverage}"
+            length_1k = abs(graph.nodes[u]["_coordinate"][1] - graph.nodes[v]["_coordinate"][1]) / 1000
+            graph[u][v][key]["label"] = f"C:{coverage}\\nL:{length_1k:.1f}k"
+            #graph[u][v][key]["label"] = f"C:{coverage}"
 
         elif graph[u][v][key]["_type"] == "complementary":
             graph[u][v][key]["style"] = "invis"
