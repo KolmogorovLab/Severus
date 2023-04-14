@@ -375,7 +375,7 @@ def double_breaks_filter(double_breaks, min_reads, genome_ids):
             continue#
             
         if db.supp < min_reads:
-            db.is_pass = 'FAIL_LessSUPPORT'
+            db.is_pass = 'FAIL_LOWCOV'
             continue#
             
     cur_cluster = []
@@ -401,11 +401,11 @@ def double_breaks_filter(double_breaks, min_reads, genome_ids):
             for (genome_id, haplotype), count in cl[0].bp_1.spanning_reads.items(): 
                 if genome_id in gen_ids and haplotype == cl[0].haplotype_1 and count < COV_THR:
                     for db in cl:
-                        db.is_pass = 'PASS_LOWCOVERAGE'
+                        db.is_pass = 'PASS_LOWCOV'
             for (genome_id, haplotype), count in cl[0].bp_2.spanning_reads.items(): 
                 if genome_id in gen_ids and haplotype == cl[0].haplotype_2 and count < COV_THR:
                     for db in cl:
-                        db.is_pass = 'PASS_LOWCOVERAGE'
+                        db.is_pass = 'PASS_LOWCOV'
                         
         db_list += cl
         
@@ -509,7 +509,7 @@ def insertion_filter(ins_clusters, min_reads, genome_ids):
             continue
         
         if ins.supp < min_reads:
-            ins.is_pass = 'FAIL_LessSUPPORT'
+            ins.is_pass = 'FAIL_LOWCOV'
             continue
         
     cur_cluster = []
@@ -535,7 +535,7 @@ def insertion_filter(ins_clusters, min_reads, genome_ids):
             for (genome_id, haplotype), count in cl[0].bp_1.spanning_reads.items():
                 if genome_id in gen_ids and haplotype == cl[0].haplotype_1 and count < COV_THR:
                     for ins in cl:
-                        ins.is_pass = 'PASS_LOWCOVERAGE'
+                        ins.is_pass = 'PASS_LOWCOV'
                         
         for ins in cl:
             ins_list.append(ins)
@@ -769,7 +769,7 @@ def filter_fail_double_db(double_breaks, output_only_pass, keep_low_coverage):
         return db_list
     elif not keep_low_coverage:
         for db in double_breaks:
-            if not db.is_pass == 'PASS_LOWCOVERAGE':
+            if not db.is_pass == 'PASS_LOWCOV':
                 db_list.append(db)
         return db_list
     else:

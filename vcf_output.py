@@ -9,10 +9,11 @@ import sys
 import os
 import math
 
+
 class vcf_format(object):
-    __slots__ = ('Chrom', 'pos', 'haplotype', 'ID', 'sv_type', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2', 'DR', 'DV', 'mut_type', 'hVaf')
-    def __init__(self, Chrom, pos, haplotype, ID, sv_type, sv_len, qual, Filter, chr2, pos2, DR, DV, mut_type, hVaf):
-        self.Chrom = Chrom
+    __slots__ = ('chrom', 'pos', 'haplotype', 'ID', 'sv_type', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2', 'DR', 'DV', 'mut_type', 'hVaf')
+    def __init__(self, chrom, pos, haplotype, ID, sv_type, sv_len, qual, Filter, chr2, pos2, DR, DV, mut_type, hVaf):
+        self.chrom = chrom
         self.pos = pos
         self.haplotype = haplotype
         self.ID = ID
@@ -49,19 +50,16 @@ class vcf_format(object):
         g_list = [pl - min_pl for pl in g_list]
         GT = genotypes[g_list.index(max(g_list))]
         g_list.sort()
-        GQ = g_list[1]
-        PL = g_list[0]
+        GQ = int(g_list[1])
+        PL = int(g_list[0])
         return GT, GQ, PL
     def info(self):
-        return "SVLEN={0};SVTYPE={1};CHR2={2};END={3};MAPQ={4};SUPPREAD={5};hVAF={6}".format(
-            self.sv_len, self.sv_type, self.chr2, self.pos2, self.qual, self.DV, self.hVAF())
+        return f"SVLEN={self.sv_len};SVTYPE={self.sv_type};CHR2={self.chr2};END={self.pos2};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()}"
     def sample(self):
         GT, GQ, PL = self.call_genotype()
-        return "{0}:{1:.2f}:{2:.2f}:{3:.2f}{4}{5}".format(GT, GQ, PL, self.vaf(), self.DR, self.DV)
+        return f"{GT}:{GQ}:{PL}:{self.vaf():.2f}:{self.DR}:{self.DV}"
     def to_vcf(self):
-        return "{0}\t{1}\t{2}\t N \t <{3}>\t{4}\t{5}\t{6}\t GT:GQ:PL:VAF:DR:DV\t{7}\n".format(
-            self.Chrom, self.pos, self.ID, self.sv_type, self.qual, self.Filter, self.info(), self.sample())
-
+        return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.sv_type}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:PL:VAF:DR:DV\t{self.sample()}\n"
   
  
 def get_sv_type(db):
@@ -107,8 +105,8 @@ def db_2_vcf(double_breaks, control_id):
             pass_list = [db.is_pass for db in db1]
             if 'PASS' in pass_list:
                 sv_pass = 'PASS' 
-            elif 'PASS_LOWCOVERAGE' in pass_list:
-                sv_pass = 'PASS_LOWCOVERAGE' 
+            elif 'PASS_LOWCOV' in pass_list:
+                sv_pass = 'PASS_LOWCOV' 
                 mut_type = 'germline'
             else:
                 sv_pass = db1[0].is_pass
@@ -139,7 +137,13 @@ def write_vcf_header(ref_lengths, outfile):
     outfile.write('##ALT=<ID=DUP,Description="Duplication">\n')
     outfile.write('##ALT=<ID=INV,Description="Inversion">\n')
     outfile.write('##ALT=<ID=BND,Description="Breakend">\n')#
-    outfile.write('##FILTER=<ID=PASS,Description="All filters passed">\n') ## add other filters as well!!#
+
+    outfile.write('##FILTER=<ID=PASS,Description="All filters passed">\n')
+    outfile.write('##FILTER=<ID=PASS_LOWCOV,Description="Low variant coverage, but ok in other samples">\n')
+    outfile.write('##FILTER=<ID=FAIL_READQUAL,Description="Majority of variant reads have low quality">\n')
+    outfile.write('##FILTER=<ID=FAIL_MAPPING,Description="Majority of variant reads have unreliable mappability">\n')
+    outfile.write('##FILTER=<ID=FAIL_LOWCOV,Description="Low variant coverage">\n')
+
     outfile.write("##INFO=<ID=HAPLOTYPE,Number=1,Type=String,Description=\"Haplotype of the SV\">\n")
     outfile.write("##INFO=<ID=SVLEN,Number=1,Type=Integer,Description=\"Length of the SV\">\n")
     outfile.write("##INFO=<ID=SVTYPE,Number=1,Type=String,Description=\"Type of structural variant\">\n")
@@ -147,24 +151,34 @@ def write_vcf_header(ref_lengths, outfile):
     outfile.write("##INFO=<ID=END,Number=1,Type=Integer,Description=\"End position of the SV\">\n")
     outfile.write("##INFO=<ID=MAPQ,Number=1,Type=Integer,Description=\"Median mapping quality of supporting reads\">\n")
     outfile.write("##INFO=<ID=SUPPREAD,Number=1,Type=Integer,Description=\"Number of supporting reads\">\n")#
-    outfile.write("##INFO=<ID=hVAF,Number=1,Type=String,Description=\"# Haplotype specific variant Allele frequency (H0|H1|H2)\">\n")
+    outfile.write("##INFO=<ID=HVAF,Number=1,Type=String,Description=\"Haplotype specific variant Allele frequency (H0|H1|H2)\">\n")
+
     outfile.write("##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n")
-    outfile.write("##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotyping Quality\">\n")
-    outfile.write("##FORMAT=<ID=PL,Number=1,Type=Integer,Description=\"PL\">\n")
-    outfile.write("##FORMAT=<ID=DR,Number=1,Type=Integer,Description=\"# Number of spanning reads\">\n")
-    outfile.write("##FORMAT=<ID=DV,Number=1,Type=Integer,Description=\"# Number of supporting reads\">\n")
-    outfile.write("##FORMAT=<ID=VAF,Number=1,Type=Integer,Description=\"# Variant Allele frequency\">\n")
+    outfile.write("##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotyping quality\">\n")
+    outfile.write("##FORMAT=<ID=PL,Number=1,Type=Integer,Description=\"Phred genotyping quality\">\n")
+    outfile.write("##FORMAT=<ID=DR,Number=1,Type=Integer,Description=\"Number of reference reads\">\n")
+    outfile.write("##FORMAT=<ID=DV,Number=1,Type=Integer,Description=\"Number of variant reads\">\n")
+    outfile.write("##FORMAT=<ID=VAF,Number=1,Type=Float,Description=\"Variant allele frequency\">\n")
     outfile.write("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE\n")
     
 
+def _sorted_breakpoints(bp_list):
+    def chr_sort(x):
+        stripped_chr = x[3:] if x.startswith("chr") else x
+        return int(stripped_chr) if stripped_chr.isnumeric() else sum(map(ord, stripped_chr))
+
+    return sorted(bp_list, key=lambda x: (chr_sort(x.chrom), x.pos))
+
+
 def write_somatic_vcf(vcf_list, outfile):
-    for db in vcf_list:
+    for db in _sorted_breakpoints(vcf_list):
         if db.mut_type == 'somatic':
             outfile.write(db.to_vcf())
     outfile.close()
+
     
 def write_germline_vcf(vcf_list, outfile):
-    for db in vcf_list:
+    for db in _sorted_breakpoints(vcf_list):
         outfile.write(db.to_vcf())
     outfile.close()
     
@@ -185,20 +199,3 @@ def write_to_vcf(double_breaks, target_ids, control_id, outpath, ref_lengths):
         write_vcf_header(ref_lengths, germline_outfile)
         write_germline_vcf(vcf_list[target_id], germline_outfile)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
-    
-            
-        
