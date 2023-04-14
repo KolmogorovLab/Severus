@@ -207,16 +207,28 @@ def update_coverage_hist(genome_ids, ref_lengths, segments_by_read):
     
     for genome_id in genome_ids:
         for chr_id, chr_len in ref_lengths.items():
-            for hp in range(0,NUM_HAPLOTYPES):
+            for hp in range(0, NUM_HAPLOTYPES):
                 coverage_histograms[(genome_id, hp, chr_id)] = [0 for _ in range(chr_len // COV_WINDOW + 1)]
                 
+    total_added = 0
     for read in segments_by_read.values():
         for seg in read:
             if seg.is_pass == 'PASS' and not seg.is_insertion and not seg.is_clipped:
                 hist_start = seg.ref_start // COV_WINDOW
                 hist_end = seg.ref_end // COV_WINDOW
+                total_added = seg.read_end - seg.ref_start
                 for i in range(hist_start + 1, hist_end): ## Check with (hist_start, hist_end + 1)
                     coverage_histograms[(seg.genome_id, seg.haplotype, seg.ref_id)][i] += 1
+
+    for genome_id in genome_ids:
+        by_hp = {}
+        for hp in range(0, NUM_HAPLOTYPES):
+            by_hp[hp] = []
+            for chr_id, _chr_len in ref_lengths.items():
+                by_hp[hp].extend(coverage_histograms[(genome_id, hp, chr_id)])
+
+        hp1_cov, hp2_cov, hp0_cov = np.median(by_hp[1]), np.median(by_hp[2]), np.median(by_hp[0])
+        logger.info(f"\tMedian coverage by PASS reads for {genome_id} (H1 / H2 / H0): {hp1_cov} / {hp2_cov} / {hp0_cov}")
                     
     return coverage_histograms
 
@@ -242,7 +254,7 @@ def add_read_qual(segments_by_read, ref_lengths, thread_pool, min_mapq, max_erro
 def label_reads(read, min_mapq, mm_hist_low, high_mm_region, max_error_rate):
     
     MIN_ALIGNED_RATE = 0.5
-    MIN_ALIGNED_LENGTH = 7000 ##make it dynamic
+    MIN_ALIGNED_LENGTH = 3000 ##make it dynamic
     MAX_SEGMENTED_READ = 10
     #MAX_CHR_SPAN = 2
     MIN_SEGMENT_LEN = 100
