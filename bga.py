@@ -8,7 +8,7 @@ import os
 from multiprocessing import Pool
 from collections import defaultdict
 from build_graph import build_breakpoint_graph, output_clusters_graphvis, output_clusters_csv
-from bam_processing import get_all_reads_parallel, update_coverage_hist
+from bam_processing import get_all_reads_parallel, update_coverage_hist, get_read_statistics
 from breakpoint_finder import call_breakpoints, output_breaks, get_genomic_segments, filter_fail_double_db
 from resolve_vntr import update_segments_by_read
 from vcf_output import write_to_vcf
@@ -149,11 +149,12 @@ def main():
         genome_id = os.path.basename(bam_file)
         genome_ids.append(genome_id)
         logger.info(f"Parsing reads from {genome_id}")
-        segments_by_read_bam =  get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
-                                   args.min_mapping_quality, args.sv_size)
+        segments_by_read_bam = get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
+                                                      args.min_mapping_quality, args.sv_size)
+        get_read_statistics(segments_by_read_bam)
         segments_by_read.update(segments_by_read_bam)
         num_seg = len(segments_by_read_bam)
-        logger.info(f"Parsed {num_seg} segments")
+        #logger.info(f"Parsed {num_seg} segments")
     
     logger.info('Computing read quality') 
     update_segments_by_read(segments_by_read, ref_lengths, thread_pool, args)
