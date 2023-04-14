@@ -21,7 +21,7 @@ import bisect
 import logging
 
 
-from bam_processing import filter_reads
+from bam_processing import filter_reads, _calc_nx
 
 logger = logging.getLogger()
 
@@ -809,14 +809,21 @@ def get_phasingblocks(hb_vcf):
         if 'PS' in var.samples.items()[0][1].items()[-1]:
             haplotype_blocks[(var.chrom, var.samples.items()[0][1]['PS'])].append(var.pos)
 
+    phased_lengths = []
     for (chr_id, block_name), coords in haplotype_blocks.items():
         if max(coords) - min(coords) > MIN_BLOCK_LEN and len(coords) >= MIN_SNP:
             endpoint_list[chr_id].append(min(coords))
             endpoint_list[chr_id].append(max(coords))
+            phased_lengths.append(max(coords) - min(coords))
 
     for chr_id, values in endpoint_list.items():
         values.sort()
         switch_points[chr_id] = [(a + b) // 2 for a, b in zip(values[:-1], values[1:])]
+
+    total_phased = sum(phased_lengths)
+    _l50, n50 = _calc_nx(phased_lengths, total_phased, 0.50) 
+    logger.info(f"\tTotal phased length: {total_phased}")
+    logger.info(f"\tPhase blocks N50: {n50}")
 
     return switch_points
 
