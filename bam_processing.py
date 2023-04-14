@@ -59,7 +59,7 @@ def get_segment(read, genome_id,sv_size):
     nm = read.get_tag('NM')
     indel = sum([b for a, b in cigar if a in [CIGAR_INS, CIGAR_DEL]])
     num_of_mismatch = nm - indel 
-    total_segment_length = sum([b for a, b in cigar if a not in [CIGAR_CLIP, CIGAR_DEL]])
+    total_segment_length = sum([b for a, b in cigar if a not in CIGAR_CLIP + [CIGAR_DEL]])
     mm_rate = num_of_mismatch / total_segment_length
     #mm_rate = read.get_tag('de')
     read_length = np.sum([k[1] for k in cigar if k[0] != CIGAR_DEL])
