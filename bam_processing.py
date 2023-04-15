@@ -394,11 +394,10 @@ def get_read_statistics(read_alignments):
                 continue
 
             alignment_lengths.append(aln.read_end - aln.read_start)
-            aln_error.append(aln.error_rate)
-            aln_mm.append(aln.mismatch_rate)
-
             if not read_counted:
                 read_lengths.append(aln.read_length)
+                aln_error.append(aln.error_rate)
+                aln_mm.append(aln.mismatch_rate)
                 read_counted = True
 
     if not alignment_lengths:
