@@ -107,6 +107,7 @@ def main():
     parser.add_argument("--output-only-pass", dest='output_only_pass', action = "store_true")
     parser.add_argument("--keep-low-coverage", dest='keep_low_coverage', action = "store_true")
     parser.add_argument("--write-collapsed-dup", dest='write_segdup', action = "store_true")
+    parser.add_argument("--germline", dest='write_germline', action = "store_true")
     
     args = parser.parse_args()
 
@@ -161,7 +162,7 @@ def main():
     coverage_histograms = update_coverage_hist(genome_ids, ref_lengths, segments_by_read)
     double_breaks = call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histograms, genome_ids, args)
     logger.info('Writing breakpoints')
-    write_to_vcf(double_breaks, target_genomes, control_genomes, args.out_dir, ref_lengths)
+    write_to_vcf(double_breaks, target_genomes, control_genomes, args.out_dir, ref_lengths, args.write_germline)
     output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
     logger.info('Computing segment coverage')
     double_breaks = filter_fail_double_db(double_breaks, args.output_only_pass, args.keep_low_coverage) # merge it with breakpoint graph double_breaks = filter_fail_double_db(double_breaks)

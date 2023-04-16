@@ -105,7 +105,7 @@ class Breakpoint(object):
 
 class DoubleBreak(object):
     __slots__ = ("bp_1", "direction_1", "bp_2", "direction_2", "genome_id","haplotype_1",'haplotype_2',
-                 "supp",'supp_read_ids','length','genotype','edgestyle', 'is_pass')
+                 "supp",'supp_read_ids','length','genotype','edgestyle', 'is_pass', 'ins_seq')
     def __init__(self, bp_1, direction_1, bp_2, direction_2, genome_id, haplotype_1, haplotype_2, 
                  supp, supp_read_ids, length, genotype, edgestyle):
         self.bp_1 = bp_1
@@ -121,6 +121,7 @@ class DoubleBreak(object):
         self.genotype = genotype
         self.edgestyle = edgestyle
         self.is_pass = 'PASS'
+        self.ins_seq = ''
     #def directional_coord_1(self):
     #    return self.direction_1 * self.bp_1.position
     #def directional_coord_2(self):
@@ -413,6 +414,7 @@ def double_breaks_filter(double_breaks, min_reads, genome_ids):
 
               
 def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
+
     CLUST_LEN = 1000
     sv_len_diff = args.bp_cluster_size
     min_reads = args.bp_min_support
@@ -465,6 +467,10 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
                 position = int(np.median([x.ref_end for x in cl if x.is_pass == 'PASS']))
                 mapq = int(np.median([x.mapq for x in cl if x.is_pass == 'PASS']))
                 ins_length = int(np.median([x.segment_length for x in cl]))
+                ins_seq_loc = [i for i , x in enumerate(cl) if x.ins_seq and ':' not in x.ins_seq]
+                if not ins_seq_loc:
+                    ins_seq_loc = [i for i , x in enumerate(cl) if x.ins_seq]
+                ins_seq = cl[int(np.median(ins_seq_loc))].ins_seq
                 if ins_length < sv_size:
                     continue
                 if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank:
@@ -488,6 +494,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
                         else:
                             genotype = 'het'
                         db_1 = DoubleBreak(bp_1, -1, bp_3, 1, genome_id, key[1], key[1], supp, supp_reads, ins_length, genotype, 'dashed')
+                        db_1.ins_seq = ins_seq
                         ins_clusters.append(db_1)
     return(ins_clusters)
 
@@ -542,6 +549,7 @@ def insertion_filter(ins_clusters, min_reads, genome_ids):
             bp_2 = Breakpoint(ins.bp_1.ref_id, ins.bp_1.position,1, ins.bp_1.qual)
             ins_2 = DoubleBreak(ins.bp_2, 1, bp_2, 1, ins.genome_id, ins.haplotype_1, ins.haplotype_2, ins.supp, ins.supp_read_ids, ins.length, ins.genotype, 'dashed')
             ins_2.is_pass = ins.is_pass
+            ins_2.ins_seq = ins.ins_seq
             ins_list.append(ins_2)
             
     return ins_list
@@ -715,6 +723,7 @@ def dup_to_ins(ins_list_pos, ins_list, dbs, min_sv_size, ins_clusters, double_br
                 ins.genotype = genotype
             else:
                 ins_clusters.append(DoubleBreak(ins.bp_1, ins.direction_1, ins.bp_2, ins.direction_2 ,db.genome_id, db.haplotype_1, db.haplotype_1, db.supp, db.supp_read_ids, ins.length, genotype , 'dashed'))
+            
             db_to_remove.append(db)
             
     if db_to_remove:
@@ -1014,8 +1023,9 @@ def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histog
     compute_bp_coverage(ins_clusters, coverage_histograms, genome_ids)
     ins_clusters = insertion_filter(ins_clusters, args.bp_min_support, genome_ids)
     ins_clusters.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position))
-    
-    
+     
+    #add_ins_seq(ins_clusters, args.all_bams)
+   
     double_breaks +=  ins_clusters 
             
     return double_breaks 
