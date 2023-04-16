@@ -191,9 +191,6 @@ def write_to_vcf(double_breaks, target_ids, control_id, outpath, ref_lengths, wr
         write_germline = True
         
     vcf_list = db_2_vcf(double_breaks, control_id[0])
-    
-    for value in vcf_list.values():
-        value.sort(key=lambda s:(s.Chrom, s.pos))
         
     if control_id:
         for target_id in target_ids:
