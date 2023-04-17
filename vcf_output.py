@@ -11,15 +11,9 @@ import math
 
 
 class vcf_format(object):
-<<<<<<< HEAD
-    __slots__ = ('chrom', 'pos', 'haplotype', 'ID', 'sv_type', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2', 'DR', 'DV', 'mut_type', 'hVaf')
-    def __init__(self, chrom, pos, haplotype, ID, sv_type, sv_len, qual, Filter, chr2, pos2, DR, DV, mut_type, hVaf):
+    __slots__ = ('chrom', 'pos', 'haplotype', 'ID', 'sv_type', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2', 'DR', 'DV', 'mut_type', 'hVaf', 'ins_seq', 'gen_type')
+    def __init__(self, chrom, pos, haplotype, ID, sv_type, sv_len, qual, Filter, chr2, pos2, DR, DV, mut_type, hVaf, gen_type):
         self.chrom = chrom
-=======
-    __slots__ = ('Chrom', 'pos', 'haplotype', 'ID', 'sv_type', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2', 'DR', 'DV', 'mut_type', 'hVaf', 'ins_seq', 'gen_type')
-    def __init__(self, Chrom, pos, haplotype, ID, sv_type, sv_len, qual, Filter, chr2, pos2, DR, DV, mut_type, hVaf, gen_type):
-        self.Chrom = Chrom
->>>>>>> ayse_dev
         self.pos = pos
         self.haplotype = haplotype
         self.ID = ID
@@ -67,21 +61,12 @@ class vcf_format(object):
         return f"SVLEN={self.sv_len};SVTYPE={self.sv_type};CHR2={self.chr2};END={self.pos2};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()}"
     def sample(self):
         GT, GQ, PL = self.call_genotype()
-<<<<<<< HEAD
         return f"{GT}:{GQ}:{PL}:{self.vaf():.2f}:{self.DR}:{self.DV}"
     def to_vcf(self):
-        return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.sv_type}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:PL:VAF:DR:DV\t{self.sample()}\n"
-  
-=======
-        return "{0}:{1:.2f}:{2:.2f}:{3:.2f}:{4}:{5}".format(GT, GQ, PL, self.vaf(), self.DR, self.DV)
-    def to_vcf(self):
         if not self.sv_type == 'INS':
-            return "{0}\t{1}\t{2}\t N \t <{3}>\t{4}\t{5}\t{6}\t GT:GQ:PL:VAF:DR:DV\t{7}\n".format(
-                self.Chrom, self.pos, self.ID, self.sv_type, self.qual, self.Filter, self.info(), self.sample())
+            return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.sv_type}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:PL:VAF:DR:DV\t{self.sample()}\n"
         else:
-            return "{0}\t{1}\t{2}\t N \t <{3}>\t{4}\t{5}\t{6}\t GT:GQ:PL:VAF:DR:DV\t{7}\n".format(
-                self.Chrom, self.pos, self.ID, self.ins_seq, self.qual, self.Filter, self.info(), self.sample())
->>>>>>> ayse_dev
+            return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.ins_seq}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:PL:VAF:DR:DV\t{self.sample()}\n"
  
 def get_sv_type(db):
     if db.bp_2.is_insertion or db.bp_1.is_insertion:
