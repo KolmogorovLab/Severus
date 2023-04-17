@@ -11,9 +11,15 @@ import math
 
 
 class vcf_format(object):
+<<<<<<< HEAD
     __slots__ = ('chrom', 'pos', 'haplotype', 'ID', 'sv_type', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2', 'DR', 'DV', 'mut_type', 'hVaf')
     def __init__(self, chrom, pos, haplotype, ID, sv_type, sv_len, qual, Filter, chr2, pos2, DR, DV, mut_type, hVaf):
         self.chrom = chrom
+=======
+    __slots__ = ('Chrom', 'pos', 'haplotype', 'ID', 'sv_type', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2', 'DR', 'DV', 'mut_type', 'hVaf', 'ins_seq', 'gen_type')
+    def __init__(self, Chrom, pos, haplotype, ID, sv_type, sv_len, qual, Filter, chr2, pos2, DR, DV, mut_type, hVaf, gen_type):
+        self.Chrom = Chrom
+>>>>>>> ayse_dev
         self.pos = pos
         self.haplotype = haplotype
         self.ID = ID
@@ -27,6 +33,8 @@ class vcf_format(object):
         self.DV = DV
         self.hVaf = hVaf
         self.mut_type = mut_type
+        self.ins_seq = ''
+        self.gen_type = gen_type
     def vaf(self):
         return self.DV / (self.DV + self.DR) if self.DV > 0 else 0
     def hVAF(self):
@@ -48,7 +56,9 @@ class vcf_format(object):
         g_list = [-10 * math.log10(p) for p in g_list]
         min_pl = min(g_list)
         g_list = [pl - min_pl for pl in g_list]
-        GT = genotypes[g_list.index(max(g_list))]
+        GT = genotypes[g_list.index(min(g_list))]
+        if GT == "0/1" and self.gen_type:
+            GT = '1|0' if self.gen_type == 'HP1' else '0|1'
         g_list.sort()
         GQ = int(g_list[1])
         PL = int(g_list[0])
@@ -57,10 +67,21 @@ class vcf_format(object):
         return f"SVLEN={self.sv_len};SVTYPE={self.sv_type};CHR2={self.chr2};END={self.pos2};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()}"
     def sample(self):
         GT, GQ, PL = self.call_genotype()
+<<<<<<< HEAD
         return f"{GT}:{GQ}:{PL}:{self.vaf():.2f}:{self.DR}:{self.DV}"
     def to_vcf(self):
         return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.sv_type}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:PL:VAF:DR:DV\t{self.sample()}\n"
   
+=======
+        return "{0}:{1:.2f}:{2:.2f}:{3:.2f}:{4}:{5}".format(GT, GQ, PL, self.vaf(), self.DR, self.DV)
+    def to_vcf(self):
+        if not self.sv_type == 'INS':
+            return "{0}\t{1}\t{2}\t N \t <{3}>\t{4}\t{5}\t{6}\t GT:GQ:PL:VAF:DR:DV\t{7}\n".format(
+                self.Chrom, self.pos, self.ID, self.sv_type, self.qual, self.Filter, self.info(), self.sample())
+        else:
+            return "{0}\t{1}\t{2}\t N \t <{3}>\t{4}\t{5}\t{6}\t GT:GQ:PL:VAF:DR:DV\t{7}\n".format(
+                self.Chrom, self.pos, self.ID, self.ins_seq, self.qual, self.Filter, self.info(), self.sample())
+>>>>>>> ayse_dev
  
 def get_sv_type(db):
     if db.bp_2.is_insertion or db.bp_1.is_insertion:
@@ -94,6 +115,11 @@ def db_2_vcf(double_breaks, control_id):
         for db in db_clust.values():
             db_list[db.genome_id].append(db)
         for db1 in db_list.values():
+            if db1[0].genotype == 'hom':
+                gen_type = ''
+            else:
+                hap_type = [db.haplotype_1 for db in db1]
+                gen_type = 'HP1' if 1 in hap_type else 'HP2'
             hVaf = defaultdict(list)
             for i in range(NUM_HAPLOTYPES):
                 hVaf[i]=0.0
@@ -121,7 +147,10 @@ def db_2_vcf(double_breaks, control_id):
             if not qual_list:
                 qual_list = [0]
             vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, db.length, int(np.median(qual_list)), 
-                                                     sv_pass, db.bp_2.ref_id, db.bp_2.position, DR, DV, mut_type, hVaf))#
+                                                     sv_pass, db.bp_2.ref_id, db.bp_2.position, DR, DV, mut_type, hVaf, gen_type))#
+            if sv_type == 'INS':
+                vcf_list[db.genome_id][-1].ins_seq = db.ins_seq
+            
     return vcf_list
             
 def write_vcf_header(ref_lengths, outfile):
@@ -183,19 +212,25 @@ def write_germline_vcf(vcf_list, outfile):
     outfile.close()
     
     
-def write_to_vcf(double_breaks, target_ids, control_id, outpath, ref_lengths):
+def write_to_vcf(double_breaks, target_ids, control_id, outpath, ref_lengths, write_germline):
+    
     control_id = list(control_id)
     if not control_id:
         control_id = ['']
+        write_germline = True
+        
     vcf_list = db_2_vcf(double_breaks, control_id[0])
+        
     if control_id:
         for target_id in target_ids:
             somatic_outfile = open(os.path.join(outpath,"SEVERUS_somatic_" + target_id + ".vcf"), "w")
             write_vcf_header(ref_lengths,somatic_outfile)
             write_somatic_vcf(vcf_list[target_id], somatic_outfile)
-    all_ids = list(target_ids) + control_id
-    for target_id in all_ids:
-        germline_outfile = open(os.path.join(outpath,"SEVERUS_" + target_id + ".vcf"), "w")
-        write_vcf_header(ref_lengths, germline_outfile)
-        write_germline_vcf(vcf_list[target_id], germline_outfile)
+            
+    if write_germline:
+        all_ids = list(target_ids) + control_id
+        for target_id in all_ids:
+            germline_outfile = open(os.path.join(outpath,"SEVERUS_" + target_id + ".vcf"), "w")
+            write_vcf_header(ref_lengths, germline_outfile)
+            write_germline_vcf(vcf_list[target_id], germline_outfile)
 

@@ -12,7 +12,7 @@ logger = logging.getLogger()
 class ReadSegment(object):
     __slots__ = ("read_start", "read_end", "ref_start", "ref_end", "read_id", "ref_id",
                  "strand", "read_length",'segment_length', "haplotype", "mapq", "genome_id",
-                 'mismatch_rate', 'is_pass', "is_insertion", "is_clipped", 'is_end', 'bg_mm_rate', 'error_rate')
+                 'mismatch_rate', 'is_pass', "is_insertion", "is_clipped", 'is_end', 'bg_mm_rate', 'error_rate', 'ins_seq', 'sequence')
     def __init__(self, read_start, read_end, ref_start, ref_end, read_id, ref_id,
                  strand, read_length,segment_length, haplotype, mapq, genome_id,
                  mismatch_rate, is_insertion, error_rate):
@@ -35,7 +35,8 @@ class ReadSegment(object):
         self.is_end = False
         self.bg_mm_rate = 1
         self.error_rate = error_rate
-
+        self.ins_seq = ''
+        self.sequence = ''
     def __str__(self):
         return "".join(["read_start=", str(self.read_start), " read_end=", str(self.read_end), " ref_start=", str(self.ref_start),
                          " ref_end=", str(self.ref_end), " read_id=", str(self.read_id), " ref_id=", str(self.ref_id), " strand=", str(self.strand),
@@ -72,7 +73,8 @@ def get_segment(read, genome_id,sv_size):
     #mm_rate = read.get_tag('de')
     read_length = np.sum([k[1] for k in cigar if k[0] != CIGAR_DEL])
     strand = '-' if read.is_reverse else '+'
-    
+    sequence = read.query_sequence
+    hc = 0
     if read.has_tag('HP'):
         haplotype = read.get_tag('HP')
     else:
@@ -84,6 +86,7 @@ def get_segment(read, genome_id,sv_size):
         if op in CIGAR_CLIP:
             if first_clip:
                 read_start = op_len
+            hc = op_len if op == 5 else 0 
         first_clip = False
         if op in CIGAR_MATCH:
             read_aligned += op_len
@@ -114,7 +117,7 @@ def get_segment(read, genome_id,sv_size):
             if op_len < sv_size:
                 read_aligned += op_len
             else:
-                ins_start = read_start +read_aligned
+                ins_start = read_start + read_aligned
                 read_aligned += op_len
                 ins_pos= ref_start + ref_aligned
                 ins_end = read_start +read_aligned
@@ -122,7 +125,9 @@ def get_segment(read, genome_id,sv_size):
                 read_segments.append(ReadSegment(ins_start, ins_end, ins_pos, ins_pos, read.query_name,
                                                  read.reference_name, strand, read_length,op_len, haplotype, 
                                                  read.mapping_quality, genome_id, mm_rate, True, error_rate))
-    if ref_aligned !=0:
+                ins_seq = sequence[ins_start - hc: ins_end - hc]
+                read_segments[-1].ins_seq = ins_seq
+    if ref_aligned != 0:
         ref_end = ref_start + ref_aligned
         read_end = read_start + read_aligned
         #mm_rate = num_of_mismatch / read_aligned
@@ -169,7 +174,7 @@ def get_all_reads(bam_file, region, genome_id,sv_size):
     aln_file = pysam.AlignmentFile(bam_file, "rb")
     for aln in aln_file.fetch(ref_id, region_start, region_end,  multiple_iterators=True):
         if not aln.is_secondary and not aln.is_unmapped:
-            new_segment= get_segment(aln, genome_id, sv_size)
+            new_segment = get_segment(aln, genome_id, sv_size)
             for new_seg in new_segment:
                 alignments.append(new_seg)
     return alignments
@@ -198,8 +203,51 @@ def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
             segments_by_read[aln.read_id].append(aln)
     segments_by_read = add_clipped_end(segments_by_read)
     return segments_by_read
+
+
+'''
+def add_ins_seq(ins_clusters, all_bams, genome_ids):
+    MIN_SUPP = 2
+    bam_ids = defaultdict(list)
+    for i in genome_ids:
+        for k in all_bams:
+            if i in k:
+                bam_ids[i].append(k)
+                continue
+     
+    clusters = defaultdict(dict)
+    for br in ins_clusters:
+        if not br.bp_1.is_insertion:
+            clusters[br.to_string()][br.genome_id] = br
         
-           
+    for db_clust in clusters.values():
+        for db1 in db_clust.values():
+            supp_read = list(db1.supp_read_ids)
+            supp_read = [seg for seg in supp_read if not seg.is_clipped]
+            if len(supp_read) >= MIN_SUPP:
+                break
+        ins_seq = get_ins_sequence(bam_ids, db1, supp_read)
+        for db in db_clust.values():
+            db.ins_seq = ins_seq
+    
+
+def get_ins_sequence(bam_ids, db, supp_read):
+    WIN = 1000
+for i in range(1):
+    supp_read.sort(key = lambda s:s.segment_length)
+    seg = supp_read[len(supp_read)//2]
+    ref_id, region_start, region_end = db.bp_1.ref_id, db.bp_1.position - WIN, db.bp_2.position + WIN
+    aln_file = pysam.AlignmentFile(bam_ids[seg.genome_id][0], "rb")
+    for aln in aln_file.fetch(ref_id, region_start, region_end,  multiple_iterators=True):
+        if not aln.is_secondary and aln.query_name == seg.read_id:
+            if aln.is_supplementary:
+                ins_seq = aln.query_sequence[seg.read_start-aln.query_alignment_start:seg.read_end-aln.query_alignment_start]
+            else:
+                ins_seq = aln.query_sequence[seg.read_start:seg.read_end]
+            break
+    return ins_seq
+'''           
+
 COV_WINDOW = 500
 def update_coverage_hist(genome_ids, ref_lengths, segments_by_read):
     NUM_HAPLOTYPES = 3
@@ -281,13 +329,13 @@ def label_reads(read, min_mapq, mm_hist_low, high_mm_region, max_error_rate):
             seg.is_pass = 'HIGH_MM_rate'
             continue#
             
-    aligned_len = sum([seg.segment_length for seg in read if not seg.is_insertion and not seg.is_clipped and seg.is_pass == 'PASS'])
+    aligned_len = sum([seg.segment_length for seg in read if not seg.is_clipped and seg.is_pass == 'PASS'])
     aligned_ratio = aligned_len/read[0].read_length 
     
     if aligned_len < MIN_ALIGNED_LENGTH or aligned_ratio < MIN_ALIGNED_RATE:
         for seg in read:
-            seg.is_pass = 'LOW_ALIGNED_LEN'#
-            
+            if seg.is_pass == 'PASS':
+                seg.is_pass = 'LOW_ALIGNED_LEN'#
     return read
 
 
