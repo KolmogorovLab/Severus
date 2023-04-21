@@ -58,7 +58,8 @@ class vcf_format(object):
         PL = int(g_list[0])
         return GT, GQ, PL
     def info(self):
-        return f"SVLEN={self.sv_len};SVTYPE={self.sv_type};CHR2={self.chr2};END={self.pos2};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()}"
+        if self.gen_type:
+            return f"SVLEN={self.sv_len};SVTYPE={self.sv_type};CHR2={self.chr2};END={self.pos2};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()}"
     def sample(self):
         GT, GQ, PL = self.call_genotype()
         return f"{GT}:{GQ}:{PL}:{self.vaf():.2f}:{self.DR}:{self.DV}"
@@ -81,24 +82,25 @@ def get_sv_type(db):
         return 'DEL'
 
 def db_2_vcf(double_breaks, control_id):
+    
     NUM_HAPLOTYPES = 3
     t = 0
     vcf_list = defaultdict(list)
-    clusters = defaultdict(dict) 
+    clusters = defaultdict(list) 
     for br in double_breaks:
-    	if not br.bp_1.is_insertion:
-            clusters[br.to_string()][br.genome_id] = br
+        clusters[br.to_string()].append(br)
     for db_clust in clusters.values():
+        db_list = defaultdict(list)
+        for db in db_clust:
+            db_list[db.genome_id].append(db)
+            
         mut_type = 'germline'#
-        sample_ids = list(db_clust.keys())
+        sample_ids = list(db_list.keys())
         if not control_id in sample_ids:
             mut_type = 'somatic'
-        sv_type = get_sv_type(db_clust[sample_ids[0]])
+        sv_type = get_sv_type(db_clust[0])
         if not sv_type:
             continue
-        db_list = defaultdict(list)
-        for db in db_clust.values():
-            db_list[db.genome_id].append(db)
         for db1 in db_list.values():
             if db1[0].genotype == 'hom':
                 gen_type = ''
@@ -122,6 +124,7 @@ def db_2_vcf(double_breaks, control_id):
             else:
                 sv_pass = db1[0].is_pass
             for db in db1:
+                db.mut_type = mut_type
                 DR1 = int(np.median([db.bp_1.spanning_reads[(db.genome_id, db.haplotype_1)], db.bp_2.spanning_reads[(db.genome_id, db.haplotype_2)]]))
                 DV1 = db.supp
                 hVaf[db.haplotype_1] =  DV1 / (DV1 + DR1) if DV1 > 0 else 0
@@ -198,24 +201,21 @@ def write_germline_vcf(vcf_list, outfile):
     
     
 def write_to_vcf(double_breaks, target_ids, control_id, outpath, ref_lengths, write_germline):
+    control_id = list(control_id)[0]
+        
+    vcf_list = db_2_vcf(double_breaks, control_id)
     
-    control_id = list(control_id)
-    if not control_id:
-        control_id = ['']
-        write_germline = True
-        
-    vcf_list = db_2_vcf(double_breaks, control_id[0])
-        
-    if control_id:
-        for target_id in target_ids:
-            somatic_outfile = open(os.path.join(outpath,"SEVERUS_somatic_" + target_id + ".vcf"), "w")
-            write_vcf_header(ref_lengths,somatic_outfile)
-            write_somatic_vcf(vcf_list[target_id], somatic_outfile)
-            
     if write_germline:
         all_ids = list(target_ids) + control_id
         for target_id in all_ids:
             germline_outfile = open(os.path.join(outpath,"SEVERUS_" + target_id + ".vcf"), "w")
             write_vcf_header(ref_lengths, germline_outfile)
             write_germline_vcf(vcf_list[target_id], germline_outfile)
+    else:
+        for target_id in target_ids:
+            somatic_outfile = open(os.path.join(outpath,"SEVERUS_somatic_" + target_id + ".vcf"), "w")
+            write_vcf_header(ref_lengths,somatic_outfile)
+            write_somatic_vcf(vcf_list[target_id], somatic_outfile)
+            
+    
 

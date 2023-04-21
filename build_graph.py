@@ -8,7 +8,7 @@ from collections import defaultdict
 from itertools import combinations
 from copy import copy
 
-
+from breakpoint_finder import add_secondary_ins
 #def neg_segment(segment):
 #    if segment.startswith("+"):
 #        return "-" + segment[1:]
@@ -137,7 +137,7 @@ def _coord_cmp(node_data_1, node_data_2):
     elif node_data_2["_insertion"]:
         return node_data_1["_coordinate"][2] == "+"
 
-
+    
 def output_clusters_graphvis(graph, connected_components, out_file):
     #node visual attributes
     for n in graph.nodes:

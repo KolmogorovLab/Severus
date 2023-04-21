@@ -113,6 +113,7 @@ def main():
 
     if args.control_bam is None:
         args.control_bam = []
+        args.write_germline = True
     all_bams = args.target_bam + args.control_bam
     target_genomes = set(os.path.basename(b) for b in args.target_bam)
     control_genomes = set(os.path.basename(b) for b in args.control_bam)
@@ -154,7 +155,7 @@ def main():
                                                       args.min_mapping_quality, args.sv_size)
         get_read_statistics(segments_by_read_bam)
         segments_by_read.update(segments_by_read_bam)
-        num_seg = len(segments_by_read_bam)
+        #num_seg = len(segments_by_read_bam)
         #logger.info(f"Parsed {num_seg} segments")
     
     logger.info('Computing read quality') 
@@ -163,11 +164,11 @@ def main():
     coverage_histograms = update_coverage_hist(genome_ids, ref_lengths, segments_by_read)
     double_breaks = call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histograms, genome_ids, args)
     logger.info('Writing breakpoints')
-    write_to_vcf(double_breaks, target_genomes, control_genomes, args.out_dir, ref_lengths, args.write_germline)
     output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
-    logger.info('Computing segment coverage')
-    double_breaks = filter_fail_double_db(double_breaks, args.output_only_pass, args.keep_low_coverage) # merge it with breakpoint graph double_breaks = filter_fail_double_db(double_breaks)
     
+    write_to_vcf(double_breaks, target_genomes, control_genomes, args.out_dir, ref_lengths, args.write_germline)
+    logger.info('Computing segment coverage')
+    double_breaks = filter_fail_double_db(double_breaks, args.output_only_pass, args.keep_low_coverage, args.write_germline) # merge it with breakpoint graph double_breaks = filter_fail_double_db(double_breaks)
     genomic_segments, hb_points = get_genomic_segments(double_breaks, coverage_histograms, thread_pool, args.phase_vcf)
     
     logger.info('Preparing graph')

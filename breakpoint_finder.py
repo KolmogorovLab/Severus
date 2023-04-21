@@ -105,7 +105,7 @@ class Breakpoint(object):
 
 class DoubleBreak(object):
     __slots__ = ("bp_1", "direction_1", "bp_2", "direction_2", "genome_id","haplotype_1",'haplotype_2',
-                 "supp",'supp_read_ids','length','genotype','edgestyle', 'is_pass', 'ins_seq')
+                 "supp",'supp_read_ids','length','genotype','edgestyle', 'is_pass', 'ins_seq', 'mut_type')
     def __init__(self, bp_1, direction_1, bp_2, direction_2, genome_id, haplotype_1, haplotype_2, 
                  supp, supp_read_ids, length, genotype, edgestyle):
         self.bp_1 = bp_1
@@ -122,6 +122,7 @@ class DoubleBreak(object):
         self.edgestyle = edgestyle
         self.is_pass = 'PASS'
         self.ins_seq = ''
+        self.mut_type = ''
     #def directional_coord_1(self):
     #    return self.direction_1 * self.bp_1.position
     #def directional_coord_2(self):
@@ -546,11 +547,11 @@ def insertion_filter(ins_clusters, min_reads, genome_ids):
                         
         for ins in cl:
             ins_list.append(ins)
-            bp_2 = Breakpoint(ins.bp_1.ref_id, ins.bp_1.position,1, ins.bp_1.qual)
-            ins_2 = DoubleBreak(ins.bp_2, 1, bp_2, 1, ins.genome_id, ins.haplotype_1, ins.haplotype_2, ins.supp, ins.supp_read_ids, ins.length, ins.genotype, 'dashed')
-            ins_2.is_pass = ins.is_pass
-            ins_2.ins_seq = ins.ins_seq
-            ins_list.append(ins_2)
+            #bp_2 = Breakpoint(ins.bp_1.ref_id, ins.bp_1.position,1, ins.bp_1.qual)
+            #ins_2 = DoubleBreak(ins.bp_2, 1, bp_2, 1, ins.genome_id, ins.haplotype_1, ins.haplotype_2, ins.supp, ins.supp_read_ids, ins.length, ins.genotype, 'dashed')
+            #ins_2.is_pass = ins.is_pass
+            #ins_2.ins_seq = ins.ins_seq
+            #ins_list.append(ins_2)
             
     return ins_list
 
@@ -768,9 +769,17 @@ def match_long_ins(ins_clusters, double_breaks, min_sv_size):
             if not tra_to_ins(ins_list_pos, ins_list, db.bp_1, db.direction_1, gen_id_1, ins_clusters, double_breaks):
                 tra_to_ins(ins_list_pos, ins_list, db.bp_2, db.direction_2, gen_id_2, ins_clusters, double_breaks)
 
-
-def filter_fail_double_db(double_breaks, output_only_pass, keep_low_coverage):
+def filter_germline_db(double_breaks):
     db_list = []
+    for db in double_breaks:
+        if not db.mut_type == 'germline':
+            db_list.append(db)
+    return db_list
+
+def filter_fail_double_db(double_breaks, output_only_pass, keep_low_coverage, write_germline):
+    db_list = []
+    if not write_germline:
+        double_breaks = filter_germline_db(double_breaks)
     if output_only_pass:
         for db in double_breaks:
             if db.is_pass == 'PASS':
@@ -934,6 +943,15 @@ def resolve_overlaps(split_reads, min_ovlp_len):
         new_reads.append(upd_segments)
     return new_reads 
 
+def add_secondary_ins(double_breaks):
+    for ins in double_breaks:
+        if not ins.bp_2.is_insertion:
+            continue
+        bp_2 = Breakpoint(ins.bp_1.ref_id, ins.bp_1.position,1, ins.bp_1.qual)
+        ins_2 = DoubleBreak(ins.bp_2, 1, bp_2, 1, ins.genome_id, ins.haplotype_1, ins.haplotype_2, ins.supp, ins.supp_read_ids, ins.length, ins.genotype, 'dashed')
+        ins_2.is_pass = ins.is_pass
+        ins_2.ins_seq = ins.ins_seq
+        double_breaks.append(ins_2)
 
 def write_alignments(allsegments, outpath):
     aln_dump_stream = open(outpath, "w")
@@ -971,14 +989,13 @@ def output_breaks(double_breaks, genome_tags, phasing, out_stream):
             t += 1
     summary_csv = defaultdict(list)
     for br in double_breaks:
-    	if not br.bp_1.is_insertion:
-            if not summary_csv[br.to_string()]:
-                summary_csv[br.to_string()] = def_array[:]
-                idd=(br.genome_id, br.haplotype_1)
-                summary_csv[br.to_string()][loc[idd]] = (br.is_pass, br.supp, br.bp_1.spanning_reads[idd], br.bp_2.spanning_reads[idd])            
-            else:
-                idd=(br.genome_id, br.haplotype_1)
-                summary_csv[br.to_string()][loc[idd]] = (br.is_pass, br.supp, br.bp_1.spanning_reads[idd], br.bp_2.spanning_reads[idd])
+        if not summary_csv[br.to_string()]:
+            summary_csv[br.to_string()] = def_array[:]
+            idd=(br.genome_id, br.haplotype_1)
+            summary_csv[br.to_string()][loc[idd]] = (br.is_pass, br.supp, br.bp_1.spanning_reads[idd], br.bp_2.spanning_reads[idd])            
+        else:
+            idd=(br.genome_id, br.haplotype_1)
+            summary_csv[br.to_string()][loc[idd]] = (br.is_pass, br.supp, br.bp_1.spanning_reads[idd], br.bp_2.spanning_reads[idd])
     out_stream.write(header + "\n")
     for key,values in summary_csv.items():
         bp_array=[]
@@ -1033,7 +1050,7 @@ def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histog
      
     #add_ins_seq(ins_clusters, args.all_bams)
    
-    double_breaks +=  ins_clusters 
+    double_breaks +=  ins_clusters
             
     return double_breaks 
 
