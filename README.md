@@ -23,13 +23,13 @@ The easiest way to install dependencies is through conda.
 ```
 # Single sample somatic SV calling
 
-./bga.py --target-bam phased_tumor.bam --control-bam phased_normal.bam --out-dir bga_out -t 16 --phasing-vcf phased.vcf --vntr-bed ./vntrs/human_GRCh38_no_alt_analysis_set.trf.bed
-dot -Tsvg -O bga_out/breakpoint_graph.dot
+./severus.py --target-bam phased_tumor.bam --control-bam phased_normal.bam --out-dir severus_out -t 16 --phasing-vcf phased.vcf --vntr-bed ./vntrs/human_GRCh38_no_alt_analysis_set.trf.bed
+dot -Tsvg -O severus_out/breakpoint_graph.dot
 
 # Multisample somatic SV calling
 
-./bga.py --target-bam phased_tumor1.bam phased_tumor2.bam --control-bam phased_normal.bam --out-dir bga_out -t 16 --phasing-vcf phased.vcf --vntr-bed ./vntrs/human_GRCh38_no_alt_analysis_set.trf.bed
-dot -Tsvg -O bga_out/breakpoint_graph.gv
+./severus.py --target-bam phased_tumor1.bam phased_tumor2.bam --control-bam phased_normal.bam --out-dir severus_out -t 16 --phasing-vcf phased.vcf --vntr-bed ./vntrs/human_GRCh38_no_alt_analysis_set.trf.bed
+dot -Tsvg -O severus_out/breakpoint_graph.gv
 
 ```
 In the somatic mode default outputs are somatic vcf and somatic breakpoint graph. To generate germline sv calls as well add `--germline`. Providing phased bam files and phasing 
@@ -40,13 +40,13 @@ vcf is optional but recommended. For somatic SV calling single control file is s
 ```
 # Single sample SV calling
 
-./bga.py --target-bam phased_tumor.bam --out-dir bga_out -t 16 --phasing-vcf phased.vcf --vntr-bed ./vntrs/human_GRCh38_no_alt_analysis_set.trf.bed
-dot -Tsvg -O bga_out/breakpoint_graph.gv
+./severus.py --target-bam phased_tumor.bam --out-dir severus_out -t 16 --phasing-vcf phased.vcf --vntr-bed ./vntrs/human_GRCh38_no_alt_analysis_set.trf.bed
+dot -Tsvg -O severus_out/breakpoint_graph.gv
 
 # Multisample SV calling
 
-./bga.py --target-bam phased_tumor1.bam phased_tumor2.bam --out-dir bga_out -t 16 --phasing-vcf phased.vcf --vntr-bed ./vntrs/human_GRCh38_no_alt_analysis_set.trf.bed
-dot -Tsvg -O bga_out/breakpoint_graph.gv
+./severus.py --target-bam phased_tumor1.bam phased_tumor2.bam --out-dir severus_out -t 16 --phasing-vcf phased.vcf --vntr-bed ./vntrs/human_GRCh38_no_alt_analysis_set.trf.bed
+dot -Tsvg -O severus_out/breakpoint_graph.gv
 ```
 
 Providing phased bam files and phasing vcf is optional but recommended.
@@ -83,7 +83,7 @@ If control is provided the default output contains only somatic SV calls. To add
 
 ```
 # To convert gv format to svg
-dot -Tsvg -O bga_out/breakpoint_graph.gv
+dot -Tsvg -O severus_out/breakpoint_graph.gv
 ```
 
 ### VCF file

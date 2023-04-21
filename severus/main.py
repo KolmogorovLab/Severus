@@ -122,7 +122,7 @@ def main():
     if not os.path.isdir(args.out_dir):
         os.mkdir(args.out_dir)
 
-    log_file = os.path.join(args.out_dir, "bga.log")
+    log_file = os.path.join(args.out_dir, "severus.log")
     _enable_logging(log_file, debug=False, overwrite=True)
     logger.debug("Cmd: " + " ".join(sys.argv[1:]))
     
