@@ -162,9 +162,9 @@ def output_clusters_graphvis(graph, connected_components, out_file):
         elif graph[u][v][key]["_type"] == "complementary":
             graph[u][v][key]["style"] = "invis"
 
-    #double edges for homozygous variants
-    if graph[u][v][key]["_genotype"] == "hom":
-        graph[u][v][key]["color"] = graph[u][v][key]["color"] + ":" + graph[u][v][key]["color"]
+        #double edges for homozygous variants
+        if graph[u][v][key]["_genotype"] == "hom":
+            graph[u][v][key]["color"] = graph[u][v][key]["color"] + ":" + graph[u][v][key]["color"]
 
     #adding colors
     key_to_color = {}
