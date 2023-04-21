@@ -1076,7 +1076,7 @@ def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histog
     if not args.write_germline:
         annotate_mut_type(double_breaks, list(control_id)[0])
         
-    adjust_sv_pos(double_breaks)
+    #adjust_sv_pos(double_breaks)
     
     return double_breaks 
 
