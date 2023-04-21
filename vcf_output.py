@@ -11,8 +11,8 @@ import math
 
 
 class vcf_format(object):
-    __slots__ = ('chrom', 'pos', 'haplotype', 'ID', 'sv_type', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2', 'DR', 'DV', 'mut_type', 'hVaf', 'ins_seq', 'gen_type')
-    def __init__(self, chrom, pos, haplotype, ID, sv_type, sv_len, qual, Filter, chr2, pos2, DR, DV, mut_type, hVaf, gen_type):
+    __slots__ = ('chrom', 'pos', 'haplotype', 'ID', 'sv_type', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2', 'DR', 'DV', 'mut_type', 'hVaf', 'ins_seq', 'gen_type', 'cluster_id')
+    def __init__(self, chrom, pos, haplotype, ID, sv_type, sv_len, qual, Filter, chr2, pos2, DR, DV, mut_type, hVaf, gen_type, cluster_id):
         self.chrom = chrom
         self.pos = pos
         self.haplotype = haplotype
@@ -27,8 +27,9 @@ class vcf_format(object):
         self.DV = DV
         self.hVaf = hVaf
         self.mut_type = mut_type
-        self.ins_seq = ''
+        self.ins_seq = None
         self.gen_type = gen_type
+        self.cluster_id = cluster_id
     def vaf(self):
         return self.DV / (self.DV + self.DR) if self.DV > 0 else 0
     def hVAF(self):
@@ -59,7 +60,7 @@ class vcf_format(object):
         return GT, GQ, PL
     def info(self):
         if self.gen_type:
-            return f"SVLEN={self.sv_len};SVTYPE={self.sv_type};CHR2={self.chr2};END={self.pos2};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()}"
+            return f"SVLEN={self.sv_len};SVTYPE={self.sv_type};CHR2={self.chr2};END={self.pos2};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()};CLUSTER_ID=severus_{self.cluster_id}"
     def sample(self):
         GT, GQ, PL = self.call_genotype()
         return f"{GT}:{GQ}:{PL}:{self.vaf():.2f}:{self.DR}:{self.DV}"
@@ -81,23 +82,18 @@ def get_sv_type(db):
     if db.bp_1.dir_1 > 0:
         return 'DEL'
 
-def db_2_vcf(double_breaks, control_id):
-    
+def db_2_vcf(double_breaks, control_id, id_to_cc):
     NUM_HAPLOTYPES = 3
     t = 0
     vcf_list = defaultdict(list)
     clusters = defaultdict(list) 
     for br in double_breaks:
         clusters[br.to_string()].append(br)
-    for db_clust in clusters.values():
+    for key, db_clust in clusters.items():
+        cluster_id = id_to_cc[key]
         db_list = defaultdict(list)
         for db in db_clust:
             db_list[db.genome_id].append(db)
-            
-        mut_type = 'germline'#
-        sample_ids = list(db_list.keys())
-        if not control_id in sample_ids:
-            mut_type = 'somatic'
         sv_type = get_sv_type(db_clust[0])
         if not sv_type:
             continue
@@ -120,11 +116,10 @@ def db_2_vcf(double_breaks, control_id):
                 sv_pass = 'PASS' 
             elif 'PASS_LOWCOV' in pass_list:
                 sv_pass = 'PASS_LOWCOV' 
-                mut_type = 'germline'
             else:
                 sv_pass = db1[0].is_pass
             for db in db1:
-                db.mut_type = mut_type
+                mut_type = db.mut_type
                 DR1 = int(np.median([db.bp_1.spanning_reads[(db.genome_id, db.haplotype_1)], db.bp_2.spanning_reads[(db.genome_id, db.haplotype_2)]]))
                 DV1 = db.supp
                 hVaf[db.haplotype_1] =  DV1 / (DV1 + DR1) if DV1 > 0 else 0
@@ -135,10 +130,9 @@ def db_2_vcf(double_breaks, control_id):
             if not qual_list:
                 qual_list = [0]
             vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, db.length, int(np.median(qual_list)), 
-                                                     sv_pass, db.bp_2.ref_id, db.bp_2.position, DR, DV, mut_type, hVaf, gen_type))#
+                                                     sv_pass, db.bp_2.ref_id, db.bp_2.position, DR, DV, mut_type, hVaf, gen_type, cluster_id))#
             if sv_type == 'INS':
                 vcf_list[db.genome_id][-1].ins_seq = db.ins_seq
-            
     return vcf_list
             
 def write_vcf_header(ref_lengths, outfile):
@@ -169,6 +163,7 @@ def write_vcf_header(ref_lengths, outfile):
     outfile.write("##INFO=<ID=MAPQ,Number=1,Type=Integer,Description=\"Median mapping quality of supporting reads\">\n")
     outfile.write("##INFO=<ID=SUPPREAD,Number=1,Type=Integer,Description=\"Number of supporting reads\">\n")#
     outfile.write("##INFO=<ID=HVAF,Number=1,Type=String,Description=\"Haplotype specific variant Allele frequency (H0|H1|H2)\">\n")
+    outfile.write("##INFO=<ID=CLUSTERID,Number=1,Type=String,Description=\"Cluster ID in breakpoint_graph\">\n")
 
     outfile.write("##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n")
     outfile.write("##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotyping quality\">\n")
@@ -200,10 +195,10 @@ def write_germline_vcf(vcf_list, outfile):
     outfile.close()
     
     
-def write_to_vcf(double_breaks, target_ids, control_id, outpath, ref_lengths, write_germline):
+def write_to_vcf(double_breaks, target_ids, control_id, id_to_cc, outpath, ref_lengths, write_germline):
     control_id = list(control_id)[0]
         
-    vcf_list = db_2_vcf(double_breaks, control_id)
+    vcf_list = db_2_vcf(double_breaks, control_id, id_to_cc)
     
     if write_germline:
         all_ids = list(target_ids) + control_id

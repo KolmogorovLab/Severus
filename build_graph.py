@@ -21,6 +21,7 @@ SEQUENCE_KEY = "__genomic"
 
 
 def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, reference_adjacencies):
+    add_secondary_ins(double_breaks)
     g = nx.MultiGraph()
 
     node_ids = {}
@@ -252,8 +253,23 @@ def output_clusters_csv(graph, connected_components, out_file):
                 keys_text = ",".join(keys)
                 read_support = ",".join([str(graph[u][v][k]["_support"]) for k in keys])
                 genotypes = ",".join([graph[u][v][k]["_genotype"] for k in keys])
-                fout.write(f"bga_{subgr_num}\t{label_1}\t{label_2}\t{keys_text}\t{read_support}\t{genotypes}\n")
+                fout.write(f"severus_{subgr_num}\t{label_1}\t{label_2}\t{keys_text}\t{read_support}\t{genotypes}\n")
 
+def cc_to_label(graph, connected_components):
+    id_to_cc = defaultdict(int)
+    for subgr_num, (rank, cc, _, _, _) in enumerate(connected_components):
+        all_adj = defaultdict(list)
+        for u, v, key in graph.edges(cc, keys=True):
+            if key != SEQUENCE_KEY and graph[u][v][key]["_type"] == "adjacency":
+                all_adj[(u, v)].append(key)
+        for (u, v), keys in all_adj.items():
+            if graph.nodes[u]["_insertion"]:
+                continue
+            keys.sort()
+            label_1 = _node_to_str(graph.nodes[u], commas=False)
+            label_2 = _node_to_str(graph.nodes[v], commas=False)
+            id_to_cc[label_1 + '|' + label_2] = subgr_num
+    return id_to_cc
 
 def cluster_adjacencies(graph, target_genomes, control_genomes):
     components_list = []

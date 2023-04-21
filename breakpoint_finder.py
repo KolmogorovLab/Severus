@@ -769,6 +769,28 @@ def match_long_ins(ins_clusters, double_breaks, min_sv_size):
             if not tra_to_ins(ins_list_pos, ins_list, db.bp_1, db.direction_1, gen_id_1, ins_clusters, double_breaks):
                 tra_to_ins(ins_list_pos, ins_list, db.bp_2, db.direction_2, gen_id_2, ins_clusters, double_breaks)
 
+def annotate_mut_type(double_breaks, control_id):
+    
+    clusters = defaultdict(list) 
+    for br in double_breaks:
+        clusters[br.to_string()].append(br)
+        
+    for db_clust in clusters.values():
+        db_list = defaultdict(list)
+        for db in db_clust:
+            db_list[db.genome_id].append(db)
+            
+        mut_type = 'germline'#
+        sample_ids = list(db_list.keys())
+        if not control_id in sample_ids:
+            mut_type = 'somatic'
+        for db1 in db_list.values():
+            pass_list = [db.is_pass for db in db1]
+            if 'PASS_LOWCOV' in pass_list:
+                mut_type = 'germline'
+            for db in db1:
+                db.mut_type = mut_type
+
 def filter_germline_db(double_breaks):
     db_list = []
     for db in double_breaks:
@@ -941,7 +963,7 @@ def resolve_overlaps(split_reads, min_ovlp_len):
                     seg.ref_end = seg.ref_end - left_ovlp
             upd_segments.append(seg)
         new_reads.append(upd_segments)
-    return new_reads 
+    return new_reads     
 
 def add_secondary_ins(double_breaks):
     for ins in double_breaks:
@@ -1009,7 +1031,7 @@ def output_breaks(double_breaks, genome_tags, phasing, out_stream):
         out_stream.write("\n")
     
         
-def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histograms, genome_ids, args):
+def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histograms, genome_ids, control_id, args):
     
     logger.info('Filtering reads')
     segments_by_read_filtered = filter_reads(segments_by_read)
@@ -1051,7 +1073,11 @@ def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histog
     #add_ins_seq(ins_clusters, args.all_bams)
    
     double_breaks +=  ins_clusters
-            
+    if not args.write_germline:
+        annotate_mut_type(double_breaks, list(control_id)[0])
+        
+    adjust_sv_pos(double_breaks)
+    
     return double_breaks 
 
 
