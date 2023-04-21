@@ -7,12 +7,13 @@ import argparse
 import os
 from multiprocessing import Pool
 from collections import defaultdict
-from build_graph import build_breakpoint_graph, output_clusters_graphvis, output_clusters_csv,cc_to_label
-from bam_processing import get_all_reads_parallel, update_coverage_hist, get_read_statistics
-from breakpoint_finder import call_breakpoints, output_breaks, get_genomic_segments, filter_fail_double_db
-from resolve_vntr import update_segments_by_read
-from vcf_output import write_to_vcf
 import logging
+
+from severus.build_graph import build_breakpoint_graph, output_clusters_graphvis, output_clusters_csv,cc_to_label
+from severus.bam_processing import get_all_reads_parallel, update_coverage_hist, get_read_statistics
+from severus.breakpoint_finder import call_breakpoints, output_breaks, get_genomic_segments, filter_fail_double_db
+from severus.resolve_vntr import update_segments_by_read
+from severus.vcf_output import write_to_vcf
 
 
 logger = logging.getLogger()

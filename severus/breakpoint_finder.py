@@ -20,8 +20,8 @@ import subprocess
 import bisect
 import logging
 
+from severus.bam_processing import filter_reads, _calc_nx
 
-from bam_processing import filter_reads, _calc_nx
 
 logger = logging.getLogger()
 

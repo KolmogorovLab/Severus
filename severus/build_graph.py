@@ -8,12 +8,8 @@ from collections import defaultdict
 from itertools import combinations
 from copy import copy
 
-from breakpoint_finder import add_secondary_ins
-#def neg_segment(segment):
-#    if segment.startswith("+"):
-#        return "-" + segment[1:]
-#    else:
-#        return "+" + segment[1:]
+from severus.breakpoint_finder import add_secondary_ins
+
 
 #COLORS = ["yellowgreen", "thistle", "peachpuff", "yellow", "khaki", "steelblue", "hotpink", "preu"]
 COLORS = ["#189BA0", "#830042", "#B2C971", "#8470FF", "#1B80B3", "#FF7A33", "#B35900", "#006400"]

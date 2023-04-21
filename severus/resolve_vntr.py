@@ -2,8 +2,9 @@
 
 import bisect
 from collections import  defaultdict
-from bam_processing import ReadSegment, add_read_qual
 import logging
+
+from severus.bam_processing import ReadSegment, add_read_qual
 
 logger = logging.getLogger()
 
