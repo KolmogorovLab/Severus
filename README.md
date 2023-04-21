@@ -2,7 +2,10 @@
 
 A tool to build breakpoint graphs for one or multiple long-read cancer samples. This is work in progress and subject to frequent updates. 
 
-<img width="1373" alt="bp_example" src="https://github.com/aysegokce/trial/blob/ba01ed0c6aeca4ea9d42c86f221ba8ad69a4b363/Screenshot%202023-04-03%20at%207.28.49%20PM.png">
+<p align="center">
+  <img src="docs/severus_overview.png" alt="Severus overview"/>
+</p>
+
 
 
 ## Installation
