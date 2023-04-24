@@ -35,8 +35,8 @@ class ReadSegment(object):
         self.is_end = False
         self.bg_mm_rate = 1
         self.error_rate = error_rate
-        self.ins_seq = ''
-        self.sequence = ''
+        self.ins_seq = None
+        self.sequence = None
     def __str__(self):
         return "".join(["read_start=", str(self.read_start), " read_end=", str(self.read_end), " ref_start=", str(self.ref_start),
                          " ref_end=", str(self.ref_end), " read_id=", str(self.read_id), " ref_id=", str(self.ref_id), " strand=", str(self.strand),
@@ -70,9 +70,8 @@ def get_segment(read, genome_id,sv_size):
     total_segment_length = sum([b for a, b in cigar if a not in CIGAR_CLIP + [CIGAR_DEL]])
     mm_rate = num_of_mismatch / total_segment_length
     error_rate = nm / total_segment_length
-    #mm_rate = read.get_tag('de')
     read_length = np.sum([k[1] for k in cigar if k[0] != CIGAR_DEL])
-    strand = '-' if read.is_reverse else '+'
+    strand = -1 if read.is_reverse else 1
     sequence = read.query_sequence
     hc = 0
     if read.has_tag('HP'):
@@ -91,8 +90,6 @@ def get_segment(read, genome_id,sv_size):
         if op in CIGAR_MATCH:
             read_aligned += op_len
             ref_aligned += op_len
-            #if op == CIGAR_MM:
-                #num_of_mismatch += op_len
         if op == CIGAR_DEL:
             if op_len < sv_size:
                 ref_aligned += op_len
@@ -103,7 +100,6 @@ def get_segment(read, genome_id,sv_size):
                     del_start, del_end = read_length - read_end, read_length - read_start
                 else:
                     del_start, del_end = read_start , read_end
-                #mm_rate = num_of_mismatch / read_aligned
                 read_segments.append(ReadSegment(del_start, del_end, ref_start, ref_end, read.query_name,
                                                  read.reference_name, strand, read_length,read_aligned, 
                                                  haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate))
@@ -111,7 +107,6 @@ def get_segment(read, genome_id,sv_size):
                 ref_start = ref_end+op_len+1
                 read_aligned = 0
                 ref_aligned = 0
-                #num_of_mismatch = 0
 
         if op == CIGAR_INS:
             if op_len < sv_size:
@@ -121,7 +116,6 @@ def get_segment(read, genome_id,sv_size):
                 read_aligned += op_len
                 ins_pos= ref_start + ref_aligned
                 ins_end = read_start +read_aligned
-                #mm_rate = 0
                 read_segments.append(ReadSegment(ins_start, ins_end, ins_pos, ins_pos, read.query_name,
                                                  read.reference_name, strand, read_length,op_len, haplotype, 
                                                  read.mapping_quality, genome_id, mm_rate, True, error_rate))
@@ -130,7 +124,6 @@ def get_segment(read, genome_id,sv_size):
     if ref_aligned != 0:
         ref_end = ref_start + ref_aligned
         read_end = read_start + read_aligned
-        #mm_rate = num_of_mismatch / read_aligned
         if read.is_reverse:
             read_start, read_end = read_length - read_end, read_length - read_start
         read_segments.append(ReadSegment(read_start, read_end, ref_start, ref_end, read.query_name,
@@ -139,29 +132,30 @@ def get_segment(read, genome_id,sv_size):
     return read_segments 
 
 
-def add_clipped_end(segments_by_read):
+def extract_clipped_end(segments_by_read):
     MAX_CLIPPED_LENGTH = 200
     
     for read in segments_by_read.values():
-        read2 = [seg for seg  in read if not seg.is_insertion]
+        read2 = [seg for seg  in read if not seg.is_insertion and seg.is_pass == 'PASS']
+        if not read2:
+            continue
         read2.sort(key=lambda s: s.read_start)
         s1 = read2[0]
         s2 = read2[-1]
         s1.is_end = True
         s2.is_end = True
         if s1.read_start > MAX_CLIPPED_LENGTH:
-            pos = s1.ref_start if s1.strand == '+' else s1.ref_end
+            pos = s1.ref_start if s1.strand == 1 else s1.ref_end
             read.append(ReadSegment(0, s1.read_start, pos, pos, s1.read_id,
                                     s1.ref_id, s1.strand, s1.read_length,0, s1.haplotype, s1.mapq, s1.genome_id, 0, False, 0))
             read[-1].is_clipped = True
         end_clip_length = s2.read_length - s2.read_end
         if end_clip_length > MAX_CLIPPED_LENGTH:
-            pos = s2.ref_end if s2.strand == '+' else s2.ref_start
+            pos = s2.ref_end if s2.strand == 1 else s2.ref_start
             read.append(ReadSegment(s2.read_end, s2.read_length, pos, pos, s2.read_id,
                                     s2.ref_id, s2.strand, s2.read_length, 0, s2.haplotype, s2.mapq, s2.genome_id, 0, False, 0))
             read[-1].is_clipped = True
         read.sort(key=lambda s: s.read_start)
-    return segments_by_read
             
 
 def get_all_reads(bam_file, region, genome_id,sv_size):
@@ -201,52 +195,8 @@ def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
     for alignments in parsing_results:
         for aln in alignments:
             segments_by_read[aln.read_id].append(aln)
-    segments_by_read = add_clipped_end(segments_by_read)
-    return segments_by_read
-
-
-'''
-def add_ins_seq(ins_clusters, all_bams, genome_ids):
-    MIN_SUPP = 2
-    bam_ids = defaultdict(list)
-    for i in genome_ids:
-        for k in all_bams:
-            if i in k:
-                bam_ids[i].append(k)
-                continue
-     
-    clusters = defaultdict(dict)
-    for br in ins_clusters:
-        if not br.bp_1.is_insertion:
-            clusters[br.to_string()][br.genome_id] = br
-        
-    for db_clust in clusters.values():
-        for db1 in db_clust.values():
-            supp_read = list(db1.supp_read_ids)
-            supp_read = [seg for seg in supp_read if not seg.is_clipped]
-            if len(supp_read) >= MIN_SUPP:
-                break
-        ins_seq = get_ins_sequence(bam_ids, db1, supp_read)
-        for db in db_clust.values():
-            db.ins_seq = ins_seq
     
-
-def get_ins_sequence(bam_ids, db, supp_read):
-    WIN = 1000
-for i in range(1):
-    supp_read.sort(key = lambda s:s.segment_length)
-    seg = supp_read[len(supp_read)//2]
-    ref_id, region_start, region_end = db.bp_1.ref_id, db.bp_1.position - WIN, db.bp_2.position + WIN
-    aln_file = pysam.AlignmentFile(bam_ids[seg.genome_id][0], "rb")
-    for aln in aln_file.fetch(ref_id, region_start, region_end,  multiple_iterators=True):
-        if not aln.is_secondary and aln.query_name == seg.read_id:
-            if aln.is_supplementary:
-                ins_seq = aln.query_sequence[seg.read_start-aln.query_alignment_start:seg.read_end-aln.query_alignment_start]
-            else:
-                ins_seq = aln.query_sequence[seg.read_start:seg.read_end]
-            break
-    return ins_seq
-'''           
+    return segments_by_read
 
 COV_WINDOW = 500
 def update_coverage_hist(genome_ids, ref_lengths, segments_by_read):
@@ -258,14 +208,12 @@ def update_coverage_hist(genome_ids, ref_lengths, segments_by_read):
             for hp in range(0, NUM_HAPLOTYPES):
                 coverage_histograms[(genome_id, hp, chr_id)] = [0 for _ in range(chr_len // COV_WINDOW + 1)]
                 
-    total_added = 0
     for read in segments_by_read.values():
         for seg in read:
             if seg.is_pass == 'PASS' and not seg.is_insertion and not seg.is_clipped:
                 hist_start = seg.ref_start // COV_WINDOW
                 hist_end = seg.ref_end // COV_WINDOW
-                total_added = seg.read_end - seg.ref_start
-                for i in range(hist_start + 1, hist_end): ## Check with (hist_start, hist_end + 1)
+                for i in range(hist_start + 1, hist_end):
                     coverage_histograms[(seg.genome_id, seg.haplotype, seg.ref_id)][i] += 1
 
     for genome_id in genome_ids:
@@ -279,17 +227,6 @@ def update_coverage_hist(genome_ids, ref_lengths, segments_by_read):
         logger.info(f"\tMedian coverage by PASS reads for {genome_id} (H1 / H2 / H0): {hp1_cov} / {hp2_cov} / {hp0_cov}")
                     
     return coverage_histograms
-
-
-def filter_reads(segments_by_read):
-    segments_by_read_filtered = []
-    for read in segments_by_read.values():
-        new_read = []
-        for seg in read:
-            if seg.is_pass == 'PASS':
-                new_read.append(seg)
-        segments_by_read_filtered.append(new_read)
-    return segments_by_read_filtered
         
 
 def add_read_qual(segments_by_read, ref_lengths, thread_pool, min_mapq, max_error_rate, write_segdups_out):
@@ -310,9 +247,6 @@ def label_reads(read, min_mapq, mm_hist_low, high_mm_region, max_error_rate):
     
     n_seg = sum([1 for seg in read if not seg.is_insertion and not seg.is_clipped])
     
-    #chr_list = [seg.ref_id for seg in read if not seg.is_insertion and not seg.is_clipped]
-    
-    #if n_seg > MAX_SEGMENTED_READ or len(set(chr_list)) > MAX_CHR_SPAN:
     if n_seg > MAX_SEGMENTED_READ:
         for seg in read:
             seg.is_pass = 'SEGMENTED'

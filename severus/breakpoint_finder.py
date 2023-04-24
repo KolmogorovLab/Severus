@@ -20,7 +20,7 @@ import subprocess
 import bisect
 import logging
 
-from severus.bam_processing import filter_reads, _calc_nx
+from severus.bam_processing import _calc_nx, extract_clipped_end
 
 
 logger = logging.getLogger()
@@ -121,8 +121,8 @@ class DoubleBreak(object):
         self.genotype = genotype
         self.edgestyle = edgestyle
         self.is_pass = 'PASS'
-        self.ins_seq = ''
-        self.mut_type = ''
+        self.ins_seq = None
+        self.mut_type = None
     #def directional_coord_1(self):
     #    return self.direction_1 * self.bp_1.position
     #def directional_coord_2(self):
@@ -184,11 +184,11 @@ def get_breakpoints(split_reads, thread_pool, ref_lengths, args):
     def _signed_breakpoint(seg, direction):
         ref_bp, sign = None, None
         if direction == "right":
-            ref_bp = seg.ref_end if seg.strand == "+" else seg.ref_start
-            sign = 1 if seg.strand == "+" else -1
+            ref_bp = seg.ref_end if seg.strand == 1 else seg.ref_start
+            sign = 1 if seg.strand == 1 else -1
         elif direction == "left":
-            ref_bp = seg.ref_start if seg.strand == "+" else seg.ref_end
-            sign = -1 if seg.strand == "+" else 1
+            ref_bp = seg.ref_start if seg.strand == 1else seg.ref_end
+            sign = -1 if seg.strand == 1 else 1
         return ref_bp, sign
     
     def _add_double(seg_1, seg_2):
@@ -204,7 +204,7 @@ def get_breakpoints(split_reads, thread_pool, ref_lengths, args):
                                 s1.haplotype, s2.haplotype, s1.read_id, s1.genome_id, s1.is_pass, s2.is_pass, seg_1.mapq, seg_1.mapq)
             seq_breakpoints_r[s1.ref_id].append(rc)
             seq_breakpoints_l[s2.ref_id].append(rc)
-            
+        
     for read_segments in split_reads:
         for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
             if abs(s2.read_start - s1.read_end) < MAX_SEGMENT_DIST:
@@ -555,9 +555,9 @@ def insertion_filter(ins_clusters, min_reads, genome_ids):
             
     return ins_list
 
-def get_clipped_reads(segments_by_read_filtered):
+def get_clipped_reads(segments_by_read):
     clipped_reads = defaultdict(list)
-    for read in segments_by_read_filtered:
+    for read in segments_by_read.values():
         for seg in read:
             if seg.is_clipped:
                 clipped_reads[seg.ref_id].append(seg)
@@ -955,7 +955,7 @@ def resolve_overlaps(split_reads, min_ovlp_len):
             left_ovlp = left_ovlp
             seg = read_segments[i]
             if left_ovlp > 0:
-                if seg.strand == "+":
+                if seg.strand == 1:
                     seg.read_start = seg.read_start + left_ovlp
                     seg.ref_start = seg.ref_start + left_ovlp
                 else:
@@ -1033,9 +1033,6 @@ def output_breaks(double_breaks, genome_tags, phasing, out_stream):
         
 def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histograms, genome_ids, control_id, args):
     
-    logger.info('Filtering reads')
-    segments_by_read_filtered = filter_reads(segments_by_read)
-    
     if args.write_alignments:
         outpath_alignments = os.path.join(args.out_dir, "read_alignments")
         write_alignments(segments_by_read, outpath_alignments)
@@ -1049,7 +1046,8 @@ def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histog
     
     logger.info('Extracting clipped reads')
     clipped_clusters = []
-    clipped_reads = get_clipped_reads(segments_by_read_filtered)
+    extract_clipped_end(segments_by_read)
+    clipped_reads = get_clipped_reads(segments_by_read)
     clipped_clusters = cluster_clipped_ends(clipped_reads, args.bp_cluster_size, args.min_ref_flank, ref_lengths)
     
     logger.info('Starting breakpoint detection')
@@ -1069,14 +1067,10 @@ def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histog
     compute_bp_coverage(ins_clusters, coverage_histograms, genome_ids)
     ins_clusters = insertion_filter(ins_clusters, args.bp_min_support, genome_ids)
     ins_clusters.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position))
-     
-    #add_ins_seq(ins_clusters, args.all_bams)
    
     double_breaks +=  ins_clusters
     if not args.write_germline:
         annotate_mut_type(double_breaks, list(control_id)[0])
-        
-    #adjust_sv_pos(double_breaks)
     
     return double_breaks 
 

@@ -40,10 +40,10 @@ def resolve_vntr_ins(seg,vntr_list):
     
     
 def order_bp(seg1, seg2):
-    ref_bp1 = seg1.ref_end if seg1.strand == "+" else seg1.ref_start
-    sign1 = 1 if seg1.strand == "+" else -1
-    ref_bp2 = seg2.ref_start if seg2.strand == "+" else seg2.ref_end
-    sign2 = -1 if seg2.strand == "+" else 1
+    ref_bp1 = seg1.ref_end if seg1.strand == 1 else seg1.ref_start
+    sign1 = 1 if seg1.strand == 1 else -1
+    ref_bp2 = seg2.ref_start if seg2.strand == 1 else seg2.ref_end
+    sign2 = -1 if seg2.strand == 1 else 1
     if sign1 == sign2:
         return False
     bp_order = [(ref_bp1, sign1, seg1),(ref_bp2, sign2, seg2)]
@@ -146,10 +146,10 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, split
             s1.segment_length = abs(s1.ref_end - s1.ref_start)
             s2.segment_length = abs(s2.ref_end - s2.ref_start)
             s2.ref_start = vntr_strt - bp_len
-            if s1.strand == '+':
+            if s1.strand == 1:
                 s1.read_end = s1.read_start + s1.segment_length
                 s2.read_start = s1.read_end + 1
-            if s1.strand == '-':
+            if s1.strand == -1:
                 s2.read_end= s2.read_start + s2.segment_length
                 s1.read_start = s2.read_end + 1
             return [s1, s2] + clipped_segs
@@ -168,7 +168,7 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, split
                 s2_new.ins_seq = ins_seq
                 
             if split_seg_vntr:
-                if s1.strand == '+':
+                if s1.strand == 1:
                     s1.read_end = s2.read_end
                 else:
                     s1.read_start = s2.read_start
@@ -176,7 +176,7 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, split
         else:
             s1.ref_end = s2.ref_end
             s1.segment_length = s1.ref_end - s1.ref_start
-            if s1.strand == '+':
+            if s1.strand == 1:
                 s1.read_end = s2.read_end
             else:
                 s1.read_start = s2.read_start
@@ -308,7 +308,7 @@ def intrachr_to_ins(dedup_segments):
             bp_order.sort(key = lambda s:s[1])
             s1 = bp_order[0][2]
             s1.segment_length += bp_order[1][2].ref_end.segment_length 
-            if s1.strand == '-':
+            if s1.strand == -1:
                 ins_end = s1.read_start
                 ins_st = bp_order[1][2].read_end
                 s1.read_start = bp_order[1][2].read_start
