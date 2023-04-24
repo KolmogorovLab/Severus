@@ -162,10 +162,6 @@ def output_clusters_graphvis(graph, connected_components, out_file):
         elif graph[u][v][key]["_type"] == "complementary":
             graph[u][v][key]["style"] = "invis"
 
-        #double edges for homozygous variants
-        if graph[u][v][key]["_genotype"] == "hom":
-            graph[u][v][key]["color"] = graph[u][v][key]["color"] + ":" + graph[u][v][key]["color"]
-
     #adding colors
     key_to_color = {}
     next_color = 0
@@ -178,7 +174,7 @@ def output_clusters_graphvis(graph, connected_components, out_file):
             if graph[u][v][_key]["_genotype"] == "het":
                 graph[u][v][_key]["color"] = key_to_color[_key]
             else:
-                graph[u][v][_key]["color"] = key_to_color[_key] +":" + key_to_color[_key]
+                graph[u][v][_key]["color"] = key_to_color[_key] + ":" + key_to_color[_key]
 
     def _add_legend(key_to_color, fout):
         fout.write("subgraph cluster_01 {\n\tlabel = \"Legend\";\n\tnode [shape=point]\n{\n\trank=same\n")
