@@ -345,6 +345,7 @@ def double_breaks_filter(double_breaks, min_reads, genome_ids):
     CONN_2_PASS = 0.7
     CHR_CONN = 2
     COV_THR = 3
+    NUM_HAPLOTYPES = 3
     
     for db in double_breaks:
         conn_1 = [cn for cn in db.bp_1.connections if cn.genome_id == db.genome_id and cn.haplotype_1 == db.haplotype_1]
@@ -392,12 +393,21 @@ def double_breaks_filter(double_breaks, min_reads, genome_ids):
         
         gen_ids = list(set(genome_ids) - set([db1.genome_id for db1 in cl]))
         if gen_ids:
+            span_bp1 = defaultdict(int)
+            span_bp2 = defaultdict(int)
+            for gen_id in gen_ids:
+                for i in range(NUM_HAPLOTYPES):
+                    span_bp1[gen_id] += cl[0].bp_1.spanning_reads[(gen_id, i)]
+                    span_bp2[gen_id] += cl[0].bp_2.spanning_reads[(gen_id, i)]
+                
             for (genome_id, haplotype), count in cl[0].bp_1.spanning_reads.items(): 
+                count = count if not haplotype == 0 else span_bp1[genome_id] 
                 if genome_id in gen_ids and count < COV_THR:
                     for db in cl:
                         if db.haplotype_1 == haplotype:
                             db.is_pass = 'PASS_LOWCOV'
-            for (genome_id, haplotype), count in cl[0].bp_2.spanning_reads.items(): 
+            for (genome_id, haplotype), count in cl[0].bp_2.spanning_reads.items():
+                count = count if not haplotype == 0 else span_bp2[genome_id] 
                 if genome_id in gen_ids and count < COV_THR:
                     for db in cl:
                         if db.haplotype_2 == haplotype:
@@ -497,6 +507,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
 def insertion_filter(ins_clusters, min_reads, genome_ids):
     PASS_2_FAIL_RAT = 0.9
     COV_THR = 2
+    NUM_HAPLOTYPES = 3
     
     for ins in ins_clusters:
         conn_1 = [cn for cn in ins.bp_1.connections if cn.genome_id == ins.genome_id and cn.haplotype == ins.haplotype_1]
@@ -534,7 +545,12 @@ def insertion_filter(ins_clusters, min_reads, genome_ids):
         
         gen_ids = list(set(genome_ids) - set([db1.genome_id for db1 in cl]))
         if gen_ids:
+            span_bp1 = defaultdict(int)
+            for gen_id in gen_ids:
+                for i in range(NUM_HAPLOTYPES):
+                    span_bp1[gen_id] += cl[0].bp_1.spanning_reads[(gen_id, i)]
             for (genome_id, haplotype), count in cl[0].bp_1.spanning_reads.items():
+                count = count if not haplotype == 0 else span_bp1[genome_id]
                 if genome_id in gen_ids and count < COV_THR:
                     for ins in cl:
                         if ins.haplotype_1 == haplotype:
@@ -543,11 +559,6 @@ def insertion_filter(ins_clusters, min_reads, genome_ids):
                         
         for ins in cl:
             ins_list.append(ins)
-            #bp_2 = Breakpoint(ins.bp_1.ref_id, ins.bp_1.position,1, ins.bp_1.qual)
-            #ins_2 = DoubleBreak(ins.bp_2, 1, bp_2, 1, ins.genome_id, ins.haplotype_1, ins.haplotype_2, ins.supp, ins.supp_read_ids, ins.length, ins.genotype, 'dashed')
-            #ins_2.is_pass = ins.is_pass
-            #ins_2.ins_seq = ins.ins_seq
-            #ins_list.append(ins_2)
             
     return ins_list
 

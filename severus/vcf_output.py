@@ -88,14 +88,22 @@ def db_2_vcf(double_breaks, id_to_cc):
     clusters = defaultdict(list) 
     for br in double_breaks:
         clusters[br.to_string()].append(br)
+        
     for key, db_clust in clusters.items():
         cluster_id = id_to_cc[key]
         db_list = defaultdict(list)
+        pass_list = [db.is_pass for db in db_clust]
+        new_pass = True if 'PASS' in pass_list else False
+        
         for db in db_clust:
+            if new_pass:
+                db.is_pass = 'PASS'
             db_list[db.genome_id].append(db)
+            
         sv_type = get_sv_type(db_clust[0])
         if not sv_type:
             continue
+        
         for db1 in db_list.values():
             if db1[0].genotype == 'hom':
                 gen_type = ''
