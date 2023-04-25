@@ -55,12 +55,11 @@ class vcf_format(object):
         if GT == "0/1" and self.gen_type:
             GT = '1|0' if self.gen_type == 'HP1' else '0|1'
         g_list.sort()
-        GQ = int(g_list[1])
-        PL = int(g_list[0])
+        GQ = int(g_list[2])
+        PL = int(g_list[1])
         return GT, GQ, PL
     def info(self):
-        if self.gen_type:
-            return f"SVLEN={self.sv_len};SVTYPE={self.sv_type};CHR2={self.chr2};END={self.pos2};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()};CLUSTER_ID=severus_{self.cluster_id}"
+        return f"SVLEN={self.sv_len};SVTYPE={self.sv_type};CHR2={self.chr2};END={self.pos2};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()};CLUSTER_ID=severus_{self.cluster_id}"
     def sample(self):
         GT, GQ, PL = self.call_genotype()
         return f"{GT}:{GQ}:{PL}:{self.vaf():.2f}:{self.DR}:{self.DV}"
@@ -82,7 +81,7 @@ def get_sv_type(db):
     if db.bp_1.dir_1 > 0:
         return 'DEL'
 
-def db_2_vcf(double_breaks, control_id, id_to_cc):
+def db_2_vcf(double_breaks, id_to_cc):
     NUM_HAPLOTYPES = 3
     t = 0
     vcf_list = defaultdict(list)
@@ -104,12 +103,16 @@ def db_2_vcf(double_breaks, control_id, id_to_cc):
                 hap_type = [db.haplotype_1 for db in db1]
                 gen_type = 'HP1' if 1 in hap_type else 'HP2'
             hVaf = defaultdict(list)
+            span_bp1 = 0
+            span_bp2 = 0
             for i in range(NUM_HAPLOTYPES):
                 hVaf[i]=0.0
+                span_bp1 += db.bp_1.spanning_reads[(db.genome_id, i)]
+                span_bp2 += db.bp_2.spanning_reads[(db.genome_id, i)]
             ID = 'SEVERUS_' + sv_type + str(t)
             t += 1
-            DR = 0
             DV = 0
+            DR = int(np.mean([span_bp1, span_bp2]))
             qual_list = []
             pass_list = [db.is_pass for db in db1]
             if 'PASS' in pass_list:
@@ -119,18 +122,16 @@ def db_2_vcf(double_breaks, control_id, id_to_cc):
             else:
                 sv_pass = db1[0].is_pass
             for db in db1:
-                mut_type = db.mut_type
                 DR1 = int(np.median([db.bp_1.spanning_reads[(db.genome_id, db.haplotype_1)], db.bp_2.spanning_reads[(db.genome_id, db.haplotype_2)]]))
                 DV1 = db.supp
                 hVaf[db.haplotype_1] =  DV1 / (DV1 + DR1) if DV1 > 0 else 0
-                DR += DR1
                 DV += DV1
                 if db.is_pass == 'PASS':
                     qual_list += [db.bp_1.qual, db.bp_2.qual]
             if not qual_list:
                 qual_list = [0]
             vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, db.length, int(np.median(qual_list)), 
-                                                     sv_pass, db.bp_2.ref_id, db.bp_2.position, DR, DV, mut_type, hVaf, gen_type, cluster_id))#
+                                                     sv_pass, db.bp_2.ref_id, db.bp_2.position, DR, DV, db.mut_type, hVaf, gen_type, cluster_id))#
             if sv_type == 'INS':
                 vcf_list[db.genome_id][-1].ins_seq = db.ins_seq
     return vcf_list
@@ -196,12 +197,11 @@ def write_germline_vcf(vcf_list, outfile):
     
     
 def write_to_vcf(double_breaks, target_ids, control_id, id_to_cc, outpath, ref_lengths, write_germline):
-    control_id = list(control_id)[0]
-        
-    vcf_list = db_2_vcf(double_breaks, control_id, id_to_cc)
+    
+    vcf_list = db_2_vcf(double_breaks, id_to_cc)
     
     if write_germline:
-        all_ids = list(target_ids) + control_id
+        all_ids = list(target_ids) + list(control_id)
         for target_id in all_ids:
             germline_outfile = open(os.path.join(outpath,"SEVERUS_" + target_id + ".vcf"), "w")
             write_vcf_header(ref_lengths, germline_outfile)

@@ -375,7 +375,7 @@ def get_read_statistics(read_alignments):
             if aln.is_insertion or aln.is_clipped:
                 continue
 
-            alignment_lengths.append(aln.read_end - aln.read_start)
+            alignment_lengths.append(aln.segment_length)
             if not read_counted:
                 read_lengths.append(aln.read_length)
                 aln_error.append(aln.error_rate)

@@ -187,7 +187,7 @@ def get_breakpoints(split_reads, thread_pool, ref_lengths, args):
             ref_bp = seg.ref_end if seg.strand == 1 else seg.ref_start
             sign = 1 if seg.strand == 1 else -1
         elif direction == "left":
-            ref_bp = seg.ref_start if seg.strand == 1else seg.ref_end
+            ref_bp = seg.ref_start if seg.strand == 1 else seg.ref_end
             sign = -1 if seg.strand == 1 else 1
         return ref_bp, sign
     
@@ -380,20 +380,12 @@ def double_breaks_filter(double_breaks, min_reads, genome_ids):
             db.is_pass = 'FAIL_LOWCOV'
             continue#
             
-    cur_cluster = []
-    clusters = []
     db_list = []
-    for db in double_breaks:
-        if cur_cluster and db.bp_1.position == cur_cluster[-1].bp_1.position and db.bp_2.position == cur_cluster[-1].bp_2.position:
-            cur_cluster.append(db)
-        else:
-            clusters.append(cur_cluster)
-            cur_cluster = [db]
-    if cur_cluster:
-        clusters.append(cur_cluster)
-    clusters = clusters[1:]
+    clusters = defaultdict(list) 
+    for br in double_breaks:
+        clusters[br.to_string()].append(br)
         
-    for cl in clusters:
+    for cl in clusters.values():
         count_pass = Counter([db1.is_pass for db1 in cl])
         if not count_pass['PASS']:
             continue
@@ -401,13 +393,15 @@ def double_breaks_filter(double_breaks, min_reads, genome_ids):
         gen_ids = list(set(genome_ids) - set([db1.genome_id for db1 in cl]))
         if gen_ids:
             for (genome_id, haplotype), count in cl[0].bp_1.spanning_reads.items(): 
-                if genome_id in gen_ids and haplotype == cl[0].haplotype_1 and count < COV_THR:
+                if genome_id in gen_ids and count < COV_THR:
                     for db in cl:
-                        db.is_pass = 'PASS_LOWCOV'
+                        if db.haplotype_1 == haplotype:
+                            db.is_pass = 'PASS_LOWCOV'
             for (genome_id, haplotype), count in cl[0].bp_2.spanning_reads.items(): 
-                if genome_id in gen_ids and haplotype == cl[0].haplotype_2 and count < COV_THR:
+                if genome_id in gen_ids and count < COV_THR:
                     for db in cl:
-                        db.is_pass = 'PASS_LOWCOV'
+                        if db.haplotype_2 == haplotype:
+                            db.is_pass = 'PASS_LOWCOV'
                         
         db_list += cl
         
@@ -541,9 +535,11 @@ def insertion_filter(ins_clusters, min_reads, genome_ids):
         gen_ids = list(set(genome_ids) - set([db1.genome_id for db1 in cl]))
         if gen_ids:
             for (genome_id, haplotype), count in cl[0].bp_1.spanning_reads.items():
-                if genome_id in gen_ids and haplotype == cl[0].haplotype_1 and count < COV_THR:
+                if genome_id in gen_ids and count < COV_THR:
                     for ins in cl:
-                        ins.is_pass = 'PASS_LOWCOV'
+                        if ins.haplotype_1 == haplotype:
+                            ins.is_pass = 'PASS_LOWCOV'
+                            
                         
         for ins in cl:
             ins_list.append(ins)
@@ -786,7 +782,7 @@ def annotate_mut_type(double_breaks, control_id):
             mut_type = 'somatic'
         for db1 in db_list.values():
             pass_list = [db.is_pass for db in db1]
-            if 'PASS_LOWCOV' in pass_list:
+            if 'PASS_LOWCOV' in pass_list and not 'PASS' in pass_list:
                 mut_type = 'germline'
             for db in db1:
                 db.mut_type = mut_type
