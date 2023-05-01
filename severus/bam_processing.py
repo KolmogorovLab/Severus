@@ -29,7 +29,7 @@ class ReadSegment(object):
         self.mapq = mapq
         self.genome_id = genome_id
         self.mismatch_rate = mismatch_rate
-        self.is_pass = 'PASS'
+        self.is_pass = ''
         self.is_insertion = is_insertion
         self.is_clipped = False
         self.is_end = False
@@ -229,47 +229,44 @@ def update_coverage_hist(genome_ids, ref_lengths, segments_by_read):
     return coverage_histograms
         
 
-def add_read_qual(segments_by_read, ref_lengths, thread_pool, min_mapq, max_error_rate, write_segdups_out):
+def add_read_qual(segments_by_read, ref_lengths, args):
+    min_mapq = args.min_mapping_quality
+    max_error_rate = args.max_read_error 
+    write_segdups_out = args.write_segdups_out
+    min_aligned_length = args.min_aligned_length
+    
     mm_hist_low, mm_hist_high = background_mm_hist(segments_by_read, ref_lengths)
     high_mm_region = extract_segdups(mm_hist_low, mm_hist_high, max_error_rate, write_segdups_out)
     for read, alignments in segments_by_read.items():
-        segments_by_read[read] = label_reads(alignments, min_mapq, mm_hist_low, high_mm_region, max_error_rate)
+        segments_by_read[read] = label_reads(alignments, min_mapq, mm_hist_low, high_mm_region, max_error_rate, min_aligned_length)
     
     
-def label_reads(read, min_mapq, mm_hist_low, high_mm_region, max_error_rate):
+def label_reads(read, min_mapq, mm_hist_low, high_mm_region, max_error_rate, min_aligned_length):
     
     MIN_ALIGNED_RATE = 0.5
-    MIN_ALIGNED_LENGTH = 3000 ##make it dynamic
-    MAX_SEGMENTED_READ = 10
-    #MAX_CHR_SPAN = 2
     MIN_SEGMENT_LEN = 100
-    #chr_list = []
-    
-    n_seg = sum([1 for seg in read if not seg.is_insertion and not seg.is_clipped])
-    
-    if n_seg > MAX_SEGMENTED_READ:
-        for seg in read:
-            seg.is_pass = 'SEGMENTED'
     
     for seg in read:
-        if not seg.is_insertion and not seg.is_clipped and seg.segment_length < MIN_SEGMENT_LEN:
-            seg.is_pass = 'SEG_LENGTH'
+        if seg.is_insertion and not seg.is_clipped:
             continue
+        #if seg.segment_length < MIN_SEGMENT_LEN:
+        #    seg.is_pass += 'SEG_LENGTH'
         if seg.mapq < min_mapq:
-            seg.is_pass = 'LOW_MAPQ'
-            continue
+            seg.is_pass += '_LOW_MAPQ'
         high_mm_check(high_mm_region, mm_hist_low, seg)
         if seg.mismatch_rate > seg.bg_mm_rate + max_error_rate:
-            seg.is_pass = 'HIGH_MM_rate'
-            continue#
+            seg.is_pass += '_HIGH_MM_rate'
             
-    aligned_len = sum([seg.segment_length for seg in read if not seg.is_clipped and seg.is_pass == 'PASS'])
+    aligned_len = sum([seg.segment_length for seg in read if not seg.is_clipped and not seg.is_pass])
     aligned_ratio = aligned_len/read[0].read_length 
     
-    if aligned_len < MIN_ALIGNED_LENGTH or aligned_ratio < MIN_ALIGNED_RATE:
+    if aligned_len < min_aligned_length or aligned_ratio < MIN_ALIGNED_RATE:
         for seg in read:
-            if seg.is_pass == 'PASS':
-                seg.is_pass = 'LOW_ALIGNED_LEN'#
+            seg.is_pass += '_LOW_ALIGNED_LEN'#
+            
+    for seg in read:
+        if not seg.is_pass:
+            seg.is_pass = 'PASS'
     return read
 
 
@@ -402,4 +399,6 @@ def get_read_statistics(read_alignments):
     logger.info(f"\tAlignments N50 / N90: {aln_n50} / {aln_n90}")
     logger.info(f"\tRead error rate (Q25 / Q50 / Q75): {error_25:.4f} / {error_50:.4f} / {error_75:.4f}")
     logger.info(f"\tRead mismatch rate (Q25 / Q50 / Q75): {mm_25:.4f} / {mm_50:.4f} / {mm_75:.4f}")
+    
+    return reads_n90
     

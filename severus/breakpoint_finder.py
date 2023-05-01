@@ -123,10 +123,6 @@ class DoubleBreak(object):
         self.is_pass = 'PASS'
         self.ins_seq = None
         self.mut_type = None
-    #def directional_coord_1(self):
-    #    return self.direction_1 * self.bp_1.position
-    #def directional_coord_2(self):
-    #    return self.direction_2 * self.bp_2.position
     def to_string(self):
         strand_1 = "+" if self.direction_1 > 0 else "-"
         strand_2 = "+" if self.direction_2 > 0 else "-"
@@ -167,7 +163,7 @@ class GenomicSegment(object):
         return (self.ref_id, self.pos2, self.dir2)
 
 
-def get_breakpoints(split_reads, thread_pool, ref_lengths, args):
+def get_breakpoints(split_reads, ref_lengths, args):
     """
     Finds regular 1-sided breakpoints, where split reads consistently connect
     two different parts of the genome
@@ -358,27 +354,27 @@ def double_breaks_filter(double_breaks, min_reads, genome_ids):
         conn_count_2 = Counter([cn.is_pass2 for cn in conn_2])#
         
         if not conn_count_1['PASS'] or not conn_count_2['PASS']:
-            db.is_pass = 'FAIL_READQUAL'
+            db.is_pass = 'FAIL_LOWSUPP'
             continue#
             
         if conn_count_1['PASS'] < len(conn_1) * PASS_2_FAIL_RAT or conn_count_2['PASS'] < len(conn_2) * PASS_2_FAIL_RAT:
-            db.is_pass = 'FAIL_READQUAL'
+            db.is_pass = 'FAIL_MAP_CONS'
             continue#
             
         conn_valid_1 = Counter([len(cn.bp_list) for cn in conn_pass_1])
         conn_valid_2 = Counter([len(cn.bp_list) for cn in conn_pass_2])
         if conn_valid_1[2] < len(conn_pass_1) * CONN_2_PASS and conn_valid_2[2] < len(conn_pass_2) * CONN_2_PASS:
-            db.is_pass = 'FAIL_MAPPING'
+            db.is_pass = 'FAIL_CONN_CONS'
             continue#
             
         conn_ref_1 = Counter([cn.ref_id_1 for cn in conn_pass_1])
         conn_ref_2 = Counter([cn.ref_id_2 for cn in conn_pass_2])
         if len(conn_ref_1) > CHR_CONN or len(conn_ref_2) > CHR_CONN :
-            db.is_pass = 'FAIL_MAPPING'
+            db.is_pass = 'FAIL_CONN_CONS'
             continue#
             
         if db.supp < min_reads:
-            db.is_pass = 'FAIL_LOWCOV'
+            db.is_pass = 'FAIL_LOWSUPP'
             continue#
             
     db_list = []
@@ -405,13 +401,13 @@ def double_breaks_filter(double_breaks, min_reads, genome_ids):
                 if genome_id in gen_ids and count < COV_THR:
                     for db in cl:
                         if db.haplotype_1 == haplotype:
-                            db.is_pass = 'PASS_LOWCOV'
+                            db.is_pass = 'FAIL_LOWCOV_OTHER'
             for (genome_id, haplotype), count in cl[0].bp_2.spanning_reads.items():
                 count = count if not haplotype == 0 else span_bp2[genome_id] 
                 if genome_id in gen_ids and count < COV_THR:
                     for db in cl:
                         if db.haplotype_2 == haplotype:
-                            db.is_pass = 'PASS_LOWCOV'
+                            db.is_pass = 'FAIL_LOWCOV_OTHER'
                         
         db_list += cl
         
@@ -428,14 +424,17 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
     MIN_FULL_READ_SUPP = 2
     NUM_HAPLOTYPES = 3
     ins_clusters = []
+    
     for seq, ins_pos in ins_list.items():
         clusters = []
         cur_cluster = []
         ins_pos.sort(key=lambda x:x.ref_end)
+        
         if clipped_clusters:
             clipped_clusters_seq = clipped_clusters[seq]
             clipped_clusters_seq.sort(key=lambda x:x.position)
             clipped_clusters_pos = [bp.position for bp in clipped_clusters_seq]
+            
         for rc in ins_pos:
             if cur_cluster and rc.ref_end - cur_cluster[-1].ref_end > CLUST_LEN:
                 cur_cluster.sort(key=lambda x:x.segment_length)
@@ -451,8 +450,10 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
                 cur_cluster = [rc]
             else:
                 cur_cluster.append(rc)
+                
         if cur_cluster:
             clusters.append(cur_cluster)
+        
         for cl in clusters:
             unique_reads = defaultdict(set)
             unique_reads_pass = defaultdict(set)
@@ -484,6 +485,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
                                         happ_support_1, unique_reads, unique_reads_pass)
                     if not by_genome_id_pass.values() or not max(by_genome_id_pass.values()) >= min_reads:
                         continue
+                        
                     for key in unique_reads.keys():
                         bp_1 = Breakpoint(seq, position, -1, mapq)
                         bp_1.read_ids = [x.read_id for x in unique_reads_pass[key]]
@@ -514,15 +516,15 @@ def insertion_filter(ins_clusters, min_reads, genome_ids):
         conn_count_1 = Counter([cn.is_pass for cn in conn_1])
         
         if not conn_count_1['PASS']:
-            ins.is_pass = 'FAIL_READQUAL'
+            ins.is_pass = 'FAIL_MAP_CONS'
             continue
         
         if conn_count_1['PASS'] < len(conn_1) * PASS_2_FAIL_RAT:
-            ins.is_pass = 'FAIL_READQUAL'
+            ins.is_pass = 'FAIL_MAP_CONS'
             continue
         
         if ins.supp < min_reads:
-            ins.is_pass = 'FAIL_LOWCOV'
+            ins.is_pass = 'FAIL_LOWSUPP'
             continue
         
     cur_cluster = []
@@ -554,8 +556,7 @@ def insertion_filter(ins_clusters, min_reads, genome_ids):
                 if genome_id in gen_ids and count < COV_THR:
                     for ins in cl:
                         if ins.haplotype_1 == haplotype:
-                            ins.is_pass = 'PASS_LOWCOV'
-                            
+                            ins.is_pass = 'FAIL_LOWCOV_OTHER'
                         
         for ins in cl:
             ins_list.append(ins)
@@ -775,7 +776,8 @@ def match_long_ins(ins_clusters, double_breaks, min_sv_size):
                 
             if not tra_to_ins(ins_list_pos, ins_list, db.bp_1, db.direction_1, gen_id_1, ins_clusters, double_breaks):
                 tra_to_ins(ins_list_pos, ins_list, db.bp_2, db.direction_2, gen_id_2, ins_clusters, double_breaks)
-
+                
+    
 def annotate_mut_type(double_breaks, control_id):
     
     clusters = defaultdict(list) 
@@ -793,7 +795,7 @@ def annotate_mut_type(double_breaks, control_id):
             mut_type = 'somatic'
         for db1 in db_list.values():
             pass_list = [db.is_pass for db in db1]
-            if 'PASS_LOWCOV' in pass_list and not 'PASS' in pass_list:
+            if 'FAIL_LOWCOV_OTHER' in pass_list and not 'PASS' in pass_list:
                 mut_type = 'germline'
             for db in db1:
                 db.mut_type = mut_type
@@ -816,7 +818,7 @@ def filter_fail_double_db(double_breaks, output_only_pass, keep_low_coverage, wr
         return db_list
     elif not keep_low_coverage:
         for db in double_breaks:
-            if not db.is_pass == 'PASS_LOWCOV':
+            if not db.is_pass == 'FAIL_LOWCOV_OTHER':
                 db_list.append(db)
         return db_list
     else:
@@ -1038,7 +1040,7 @@ def output_breaks(double_breaks, genome_tags, phasing, out_stream):
         out_stream.write("\n")
     
         
-def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histograms, genome_ids, control_id, args):
+def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, genome_ids, control_id, args):
     
     if args.write_alignments:
         outpath_alignments = os.path.join(args.out_dir, "read_alignments")
@@ -1058,7 +1060,7 @@ def call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histog
     clipped_clusters = cluster_clipped_ends(clipped_reads, args.bp_cluster_size, args.min_ref_flank, ref_lengths)
     
     logger.info('Starting breakpoint detection')
-    double_breaks = get_breakpoints(split_reads,thread_pool, ref_lengths, args)
+    double_breaks = get_breakpoints(split_reads, ref_lengths, args)
     double_breaks.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position, b.direction_1))
     
     logger.info('Clustering unmapped insertions')

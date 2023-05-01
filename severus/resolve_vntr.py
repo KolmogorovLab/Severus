@@ -265,7 +265,8 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
             new_segments = calc_new_segments(segments, clipped_segs, key[1], key[2],bp_len, split_seg_vntr, min_sv_size, ins_seq)
             if new_segments:
                 new_read += new_segments
-                
+    
+    new_read = list(set(new_read))            
     new_read.sort(key = lambda s:s.read_start)
     
     return new_read
@@ -346,9 +347,9 @@ def resolve_vntr(segments_by_read, vntr_file, min_sv_size):
         del segments_by_read[key]
 
 
-def update_segments_by_read(segments_by_read, ref_lengths, thread_pool, args):
+def update_segments_by_read(segments_by_read, ref_lengths, args):
     remove_dedup_segments(segments_by_read)
     if args.vntr_file:
         resolve_vntr(segments_by_read, args.vntr_file, args.sv_size)
     logger.info("Annotating reads")
-    add_read_qual(segments_by_read, ref_lengths, thread_pool, args.min_mapping_quality, args.max_read_error, args.write_segdups_out)
+    add_read_qual(segments_by_read, ref_lengths, args)

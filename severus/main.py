@@ -47,16 +47,16 @@ def main():
     MAX_READ_ERROR = 0.005
     MIN_BREAKPOINT_READS = 3
     MIN_MAPQ = 10
-    #MIN_DOUBLE_BP_READS = 5
     MIN_REF_FLANK = 10000
     MAX_GENOMIC_LEN = 50000
+    MIN_ALIGNED_LENGTH = 7000
 
     #breakpoint
     BP_CLUSTER_SIZE = 50
     MAX_UNALIGNED_LEN = 500
     MIN_SV_SIZE = 50
     MIN_SV_THR = 15
-    #MIN_GRAPH_SUPPORT = 3
+    
 
     SAMTOOLS_BIN = "samtools"
 
@@ -148,22 +148,22 @@ def main():
     
     segments_by_read = defaultdict(list)
     genome_ids=[]
+    n90 = [MIN_ALIGNED_LENGTH]
     for bam_file in all_bams:
         genome_id = os.path.basename(bam_file)
         genome_ids.append(genome_id)
         logger.info(f"Parsing reads from {genome_id}")
         segments_by_read_bam = get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
                                                       args.min_mapping_quality, args.sv_size)
-        get_read_statistics(segments_by_read_bam)
+        n90.append(get_read_statistics(segments_by_read_bam))
         segments_by_read.update(segments_by_read_bam)
-        #num_seg = len(segments_by_read_bam)
-        #logger.info(f"Parsed {num_seg} segments")
     
+    args.min_aligned_length = min(n90)
     logger.info('Computing read quality') 
-    update_segments_by_read(segments_by_read, ref_lengths, thread_pool, args)
+    update_segments_by_read(segments_by_read, ref_lengths, args)
     logger.info('Computing coverage histogram')
     coverage_histograms = update_coverage_hist(genome_ids, ref_lengths, segments_by_read)
-    double_breaks = call_breakpoints(segments_by_read, thread_pool, ref_lengths, coverage_histograms, genome_ids, control_genomes, args)
+    double_breaks = call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, genome_ids, control_genomes, args)
     logger.info('Writing breakpoints')
     output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
     

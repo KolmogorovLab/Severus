@@ -59,7 +59,7 @@ class vcf_format(object):
         PL = int(g_list[1])
         return GT, GQ, PL
     def info(self):
-        return f"SVLEN={self.sv_len};SVTYPE={self.sv_type};CHR2={self.chr2};END={self.pos2};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()};CLUSTER_ID=severus_{self.cluster_id}"
+        return f"SVLEN={self.sv_len};SVTYPE={self.sv_type};CHR2={self.chr2};END={self.pos2};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()};CLUSTERID=severus_{self.cluster_id}"
     def sample(self):
         GT, GQ, PL = self.call_genotype()
         return f"{GT}:{GQ}:{PL}:{self.vaf():.2f}:{self.DR}:{self.DV}"
@@ -159,10 +159,10 @@ def write_vcf_header(ref_lengths, outfile):
     outfile.write('##ALT=<ID=BND,Description="Breakend">\n')#
 
     outfile.write('##FILTER=<ID=PASS,Description="All filters passed">\n')
-    outfile.write('##FILTER=<ID=PASS_LOWCOV,Description="Low variant coverage, but ok in other samples">\n')
-    outfile.write('##FILTER=<ID=FAIL_READQUAL,Description="Majority of variant reads have low quality">\n')
-    outfile.write('##FILTER=<ID=FAIL_MAPPING,Description="Majority of variant reads have unreliable mappability">\n')
-    outfile.write('##FILTER=<ID=FAIL_LOWCOV,Description="Low variant coverage">\n')
+    outfile.write('##FILTER=<ID=FAIL_LOWSUPP,Description="Less number of support, but ok in other samples">\n')
+    outfile.write('##FILTER=<ID=FAIL_MAP_CONS,Description="Majority of variant reads have unreliable mappability">\n')
+    outfile.write('##FILTER=<ID=FAIL_CONN_CONS,Description="Majority of variant reads have unreliable connections">\n')
+    outfile.write('##FILTER=<ID=FAIL_LOWCOV_OTHER,Description="Low variant coverage in other samples">\n')
 
     outfile.write("##INFO=<ID=HAPLOTYPE,Number=1,Type=String,Description=\"Haplotype of the SV\">\n")
     outfile.write("##INFO=<ID=SVLEN,Number=1,Type=Integer,Description=\"Length of the SV\">\n")
