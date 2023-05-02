@@ -81,7 +81,7 @@ def get_sv_type(db):
     if db.bp_1.dir_1 > 0:
         return 'DEL'
 
-def db_2_vcf(double_breaks, id_to_cc):
+def db_2_vcf(double_breaks, id_to_cc, no_ins):
     NUM_HAPLOTYPES = 3
     t = 0
     vcf_list = defaultdict(list)
@@ -140,7 +140,11 @@ def db_2_vcf(double_breaks, id_to_cc):
                 qual_list = [0]
             vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, db.length, int(np.median(qual_list)), 
                                                      sv_pass, db.bp_2.ref_id, db.bp_2.position, DR, DV, db.mut_type, hVaf, gen_type, cluster_id))#
-            if sv_type == 'INS':
+            if sv_type == "BND":
+                vcf_list[db.genome_id].append(vcf_format(db.bp_2.ref_id, db.bp_2.position, db.haplotype_1, ID, sv_type, db.length, int(np.median(qual_list)), 
+                                                         sv_pass, db.bp_1.ref_id, db.bp_1.position, DR, DV, db.mut_type, hVaf, gen_type, cluster_id))#
+                
+            if sv_type == 'INS' and not no_ins:
                 vcf_list[db.genome_id][-1].ins_seq = db.ins_seq
     return vcf_list
             
@@ -154,7 +158,7 @@ def write_vcf_header(ref_lengths, outfile):
         outfile.write("##contig=<ID={0},length={1}>\n".format(chr_id, chr_len))#
     outfile.write('##ALT=<ID=DEL,Description="Deletion">\n')
     outfile.write('##ALT=<ID=INS,Description="Insertion">\n')
-    outfile.write('##ALT=<ID=DUP,Description="Duplication">\n')
+    #outfile.write('##ALT=<ID=DUP,Description="Duplication">\n')
     outfile.write('##ALT=<ID=INV,Description="Inversion">\n')
     outfile.write('##ALT=<ID=BND,Description="Breakend">\n')#
 
@@ -204,9 +208,9 @@ def write_germline_vcf(vcf_list, outfile):
     outfile.close()
     
     
-def write_to_vcf(double_breaks, target_ids, control_id, id_to_cc, outpath, ref_lengths, write_germline):
+def write_to_vcf(double_breaks, target_ids, control_id, id_to_cc, outpath, ref_lengths, write_germline, no_ins):
     
-    vcf_list = db_2_vcf(double_breaks, id_to_cc)
+    vcf_list = db_2_vcf(double_breaks, id_to_cc, no_ins)
     
     if write_germline:
         all_ids = list(target_ids) + list(control_id)

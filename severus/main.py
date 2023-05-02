@@ -109,6 +109,7 @@ def main():
     parser.add_argument("--keep-low-coverage", dest='keep_low_coverage', action = "store_true")
     parser.add_argument("--write-collapsed-dup", dest='write_segdup', action = "store_true")
     parser.add_argument("--germline", dest='write_germline', action = "store_true")
+    parser.add_argument("--no_ins", dest='no_ins', action = "store_true")
     
     args = parser.parse_args()
 
@@ -180,7 +181,7 @@ def main():
     
     logger.info('Writing vcf')
     id_to_cc = cc_to_label(graph, adj_clusters)
-    write_to_vcf(double_breaks, target_genomes, control_genomes, id_to_cc, args.out_dir, ref_lengths, args.write_germline)
+    write_to_vcf(double_breaks, target_genomes, control_genomes, id_to_cc, args.out_dir, ref_lengths, args.write_germline, args.no_ins)
 
 
 if __name__ == "__main__":

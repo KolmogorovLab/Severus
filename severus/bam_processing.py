@@ -283,6 +283,7 @@ def get_background_mm_rate(seg, mismatch_histograms):
 def background_mm_hist(segments_by_read, ref_lengths):
     COV_WINDOW  = 500
     MED_THR = 3
+    MED_PER = 0.05
     MIN_READ = 5
     mismatch_histograms = defaultdict(list)
     mm_hist_low = {}
@@ -309,8 +310,9 @@ def background_mm_hist(segments_by_read, ref_lengths):
                 mm_hist_high[chr_id][i] = 1
                 continue
             mm_list.sort()
-            mm_hist_low[chr_id][i] = mm_list[MED_THR]
-            mm_hist_high[chr_id][i] = mm_list[-MED_THR]
+            med_thr = max([MED_THR, int(len(mm_list)*MED_PER)])
+            mm_hist_low[chr_id][i] = mm_list[med_thr]
+            mm_hist_high[chr_id][i] = mm_list[-med_thr-1]
     return mm_hist_low, mm_hist_high
 
 
