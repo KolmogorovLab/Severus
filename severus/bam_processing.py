@@ -5,7 +5,6 @@ import time
 import bisect
 import logging
 
-
 logger = logging.getLogger()
 
 
@@ -235,16 +234,16 @@ def add_read_qual(segments_by_read, ref_lengths, args):
     write_segdups_out = args.write_segdups_out
     min_aligned_length = args.min_aligned_length
     
-    mm_hist_low, mm_hist_high = background_mm_hist(segments_by_read, ref_lengths)
-    high_mm_region = extract_segdups(mm_hist_low, mm_hist_high, max_error_rate, write_segdups_out)
+    mm_hist_bg = background_mm_hist(segments_by_read, ref_lengths) ###
+    high_mm_region = extract_segdups(mm_hist_bg, write_segdups_out) ###
     for read, alignments in segments_by_read.items():
-        segments_by_read[read] = label_reads(alignments, min_mapq, mm_hist_low, high_mm_region, max_error_rate, min_aligned_length)
-    
-    
-def label_reads(read, min_mapq, mm_hist_low, high_mm_region, max_error_rate, min_aligned_length):
+        segments_by_read[read] = label_reads(alignments, min_mapq, mm_hist_bg, high_mm_region, max_error_rate, min_aligned_length)
+
+ 
+def label_reads(read, min_mapq, mm_hist_bg, high_mm_region, max_error_rate, min_aligned_length):
     
     MIN_ALIGNED_RATE = 0.5
-    MIN_SEGMENT_LEN = 100
+    #MIN_SEGMENT_LEN = 100
     
     for seg in read:
         if seg.is_insertion and not seg.is_clipped:
@@ -253,11 +252,12 @@ def label_reads(read, min_mapq, mm_hist_low, high_mm_region, max_error_rate, min
         #    seg.is_pass += 'SEG_LENGTH'
         if seg.mapq < min_mapq:
             seg.is_pass += '_LOW_MAPQ'
-        high_mm_check(high_mm_region, mm_hist_low, seg)
-        if seg.mismatch_rate > seg.bg_mm_rate + max_error_rate:
+        high_mm_check(high_mm_region, mm_hist_bg, seg)
+        #if seg.mismatch_rate > seg.bg_mm_rate + max_error_rate:
+        if seg.mismatch_rate > seg.bg_mm_rate:
             seg.is_pass += '_HIGH_MM_rate'
             
-    aligned_len = sum([seg.segment_length for seg in read if not seg.is_clipped and not seg.is_pass])
+    aligned_len = sum([seg.read_end - seg.read_start for seg in read if not seg.is_clipped and not seg.is_pass])
     aligned_ratio = aligned_len/read[0].read_length 
     
     if aligned_len < min_aligned_length or aligned_ratio < MIN_ALIGNED_RATE:
@@ -268,31 +268,31 @@ def label_reads(read, min_mapq, mm_hist_low, high_mm_region, max_error_rate, min
         if not seg.is_pass:
             seg.is_pass = 'PASS'
     return read
-
+            
 
 def get_background_mm_rate(seg, mismatch_histograms):
     hist_start = seg.ref_start // COV_WINDOW
     hist_end = seg.ref_end // COV_WINDOW
     mm_list = mismatch_histograms[seg.ref_id][hist_start : hist_end + 1]
-    if mm_list:
-        seg.bg_mm_rate = float(np.median(mm_list))
+    mm_list_nz = [mm for mm in mm_list if mm > 0]
+    if mm_list_nz:
+        seg.bg_mm_rate = float(np.median(mm_list_nz))
     else:
         seg.bg_mm_rate = 1
         
 
 def background_mm_hist(segments_by_read, ref_lengths):
     COV_WINDOW  = 500
-    MED_THR = 3
-    MED_PER = 0.05
+    MED_THR = 5
+    MED_PER = 0.1
     MIN_READ = 5
+    MAX_COV = 15
     mismatch_histograms = defaultdict(list)
-    mm_hist_low = {}
     mm_hist_high = {}
     
     for chr_id, chr_len in ref_lengths.items():
         mismatch_histograms[chr_id] = [[] for _ in range(chr_len // COV_WINDOW + 2)]
-        mm_hist_low[chr_id] = [1 for _ in range(chr_len // COV_WINDOW + 2)]
-        mm_hist_high[chr_id] = [1 for _ in range(chr_len // COV_WINDOW + 2)]
+        mm_hist_high[chr_id] = [0 for _ in range(chr_len // COV_WINDOW + 2)]
         
     for read in segments_by_read.values():
         for seg in read:
@@ -306,39 +306,69 @@ def background_mm_hist(segments_by_read, ref_lengths):
     for chr_id, mm_rate in mismatch_histograms.items():
         for i, mm_list in enumerate(mm_rate):
             if not mm_list or len(mm_list) < MIN_READ:
-                mm_hist_low[chr_id][i] = 1
                 mm_hist_high[chr_id][i] = 1
                 continue
+           
+            #mm_list= np.reshape(mm_list, (-1, 1))
+            #bandwidth = estimate_bandwidth(mm_list, quantile = 0.5) 
+            #kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(mm_list)
+            #s = np.linspace(0,max(mm_list))
+            #e = kde.score_samples(s.reshape(-1,1))
+            #mi = argrelextrema(e, np.less)[0]
+            #if mi.size > 0:
+            #    mm_hist_high[chr_id][i] = s[mi[-1]]
+                
+            #mm_list.sort()
+            #mm_list= np.reshape(mm_list, (-1, 1))
+            #bandwidth = estimate_bandwidth(mm_list, quantile = 0.5) 
+            #ms = MeanShift(bandwidth=bandwidth, bin_seeding = True).fit(mm_list)
+            #best_clust = ms.labels_[0]
+            #ind = list(ms.labels_).count(best_clust)
+            #if ind + 3 < len(mm_list):
+            #    mm_hist_high[chr_id][i] = float(mm_list[ind])
+            
+            #q3, q1 = np.percentile(mm_list, [75,25])
+            #iqr = float(q3) - float(q1)
+            #upper_bound = q3 + 1.5 * iqr
+            #outlier_mm = [mm for mm in mm_list if mm > upper_bound]
+            #if len(outlier_mm) > MIN_READ:
+               # mm_hist_high[chr_id][i] = upper_bound
+            
             mm_list.sort()
-            med_thr = max([MED_THR, int(len(mm_list)*MED_PER)])
-            mm_hist_low[chr_id][i] = mm_list[med_thr]
-            mm_hist_high[chr_id][i] = mm_list[-med_thr-1]
-    return mm_hist_low, mm_hist_high
+            mm_diff = np.diff(mm_list)
+            med_thr = max([MED_THR, min([int(len(mm_list)*MED_PER), MAX_COV])])
+            if max(mm_diff[:med_thr]) * 5 < max(mm_diff[:-3]):
+                thr = max(mm_diff[:med_thr]) * 5
+                for k, mm in enumerate(mm_diff):
+                    if mm > thr:
+                        mm_hist_high[chr_id][i] = mm_list[k]
+                        break
+        
+    return mm_hist_high
 
 
-def extract_segdups(mm_hist_low, mm_hist_high, max_read_error, write_segdups_out):
+def extract_segdups(mm_hist_high, write_segdups_out):
     COV_WINDOW = 500
     high_mm_region = defaultdict(list)
-    for key, mm_low_chrom in mm_hist_low.items():
-        mm_high_chrom = mm_hist_high[key]
-        for ind, (a, b)  in enumerate(zip(mm_low_chrom, mm_high_chrom)):
-            if b - a >= max_read_error:
-                if not high_mm_region[key]:
-                    high_mm_region[key].append([ind * COV_WINDOW])
-                    high_mm_region[key].append([(ind + 1) * COV_WINDOW])
-                elif ind * COV_WINDOW == high_mm_region[key][1][-1]:
-                    high_mm_region[key][1][-1]=(ind + 1) * COV_WINDOW
-                else:
-                    high_mm_region[key][0].append(ind * COV_WINDOW)
-                    high_mm_region[key][1].append((ind + 1) * COV_WINDOW)
+    for key, mm_high_chrom in mm_hist_high.items():
+        for ind, a in enumerate(mm_high_chrom):
+            if a == 0:
+                continue
+            if not high_mm_region[key]:
+                high_mm_region[key].append([ind * COV_WINDOW])
+                high_mm_region[key].append([(ind + 1) * COV_WINDOW])
+            elif ind * COV_WINDOW == high_mm_region[key][1][-1]:
+                high_mm_region[key][1][-1]=(ind + 1) * COV_WINDOW
+            else:
+                high_mm_region[key][0].append(ind * COV_WINDOW)
+                high_mm_region[key][1].append((ind + 1) * COV_WINDOW)
     if write_segdups_out:
         for chr_id, values in high_mm_region.items():
             for (st, end) in zip(values[0], values[1]):
                 write_segdups_out.write('\t'.join([chr_id, str(st), str(end)]) + '\n')
     return high_mm_region
-                    
 
-def high_mm_check(high_mm_region, mm_hist_low, seg):
+def high_mm_check(high_mm_region, mm_hist_bg, seg):
     high_mm_reg = high_mm_region[seg.ref_id]
     if high_mm_reg:
         strt = bisect.bisect_right(high_mm_reg[0], seg.ref_start)
@@ -346,8 +376,7 @@ def high_mm_check(high_mm_region, mm_hist_low, seg):
         end = bisect.bisect_left(high_mm_reg[0],seg.ref_end)
         end_1 = bisect.bisect_left(high_mm_reg[1],seg.ref_end)
         if not strt == strt_2 or not end == end_1:
-            get_background_mm_rate(seg, mm_hist_low)
-
+            get_background_mm_rate(seg, mm_hist_bg)
 
 def _calc_nx(lengths, norm_len, rate):
     n50 = 0
