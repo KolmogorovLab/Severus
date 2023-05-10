@@ -3,8 +3,9 @@
 import bisect
 from collections import  defaultdict
 import logging
+import os
 
-from severus.bam_processing import ReadSegment, add_read_qual
+from severus.bam_processing import ReadSegment, add_read_qual, write_readqual
 
 logger = logging.getLogger()
 
@@ -353,3 +354,4 @@ def update_segments_by_read(segments_by_read, ref_lengths, args):
         resolve_vntr(segments_by_read, args.vntr_file, args.sv_size)
     logger.info("Annotating reads")
     add_read_qual(segments_by_read, ref_lengths, args)
+    

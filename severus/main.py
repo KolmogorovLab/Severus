@@ -9,11 +9,11 @@ from multiprocessing import Pool
 from collections import defaultdict
 import logging
 
-from severus.build_graph import build_breakpoint_graph, output_clusters_graphvis, output_clusters_csv,cc_to_label
+from severus.build_graph import output_graphs
 from severus.bam_processing import get_all_reads_parallel, update_coverage_hist, get_read_statistics
-from severus.breakpoint_finder import call_breakpoints, output_breaks, get_genomic_segments, filter_fail_double_db
+from severus.breakpoint_finder import call_breakpoints
 from severus.resolve_vntr import update_segments_by_read
-from severus.vcf_output import write_to_vcf
+
 
 
 logger = logging.getLogger()
@@ -53,7 +53,6 @@ def main():
 
     #breakpoint
     BP_CLUSTER_SIZE = 50
-    MAX_UNALIGNED_LEN = 500
     MIN_SV_SIZE = 50
     MIN_SV_THR = 15
     
@@ -77,15 +76,13 @@ def main():
     parser.add_argument("--min-support", dest="bp_min_support",
                         default=MIN_BREAKPOINT_READS, metavar="int", type=int,
                         help=f"minimum reads supporting double breakpoint [{MIN_BREAKPOINT_READS}]")
-    #parser.add_argument("--double-breakpoint-min-reads", dest="double_bp_min_reads",
-    #                    default=MIN_DOUBLE_BP_READS, metavar="int", type=int, help="minimum reads in double breakpoint [5]")
     parser.add_argument("--min-reference-flank", dest="min_ref_flank",
                         default=MIN_REF_FLANK, metavar="int", type=int,
                         help=f"minimum distance between breakpoint and sequence ends [{MIN_REF_FLANK}]")
-    parser.add_argument("--bp_cluster_size", dest="bp_cluster_size",
+    parser.add_argument("--bp-cluster-size", dest="bp_cluster_size",
                         default=BP_CLUSTER_SIZE, metavar="int", type=int,
                         help=f"maximum distance in bp cluster [{BP_CLUSTER_SIZE}]")
-    parser.add_argument("--min_sv_size", dest="min_sv_size",
+    parser.add_argument("--min-sv-size", dest="min_sv_size",
                         default=MIN_SV_SIZE, metavar="int", type=int,
                         help=f"minimim size for sv [{MIN_SV_SIZE}]")
     parser.add_argument("--max-read-error", dest="max_read_error",
@@ -108,21 +105,22 @@ def main():
     parser.add_argument("--output-only-pass", dest='output_only_pass', action = "store_true")
     parser.add_argument("--keep-low-coverage", dest='keep_low_coverage', action = "store_true")
     parser.add_argument("--write-collapsed-dup", dest='write_segdup', action = "store_true")
-    parser.add_argument("--germline", dest='write_germline', action = "store_true")
-    parser.add_argument("--no_ins", dest='no_ins', action = "store_true")
+    parser.add_argument("--only-somatic", dest='only_somatic', action = "store_true")
+    parser.add_argument("--no-ins", dest='no_ins', action = "store_true")
     
     args = parser.parse_args()
-
+    
+    args.only_germline = False
     if args.control_bam is None:
         args.control_bam = []
-        args.write_germline = True
+        args.only_germline = True
     all_bams = args.target_bam + args.control_bam
-    target_genomes = set(os.path.basename(b) for b in args.target_bam)
-    control_genomes = set(os.path.basename(b) for b in args.control_bam)
+    target_genomes = list(set(os.path.basename(b) for b in args.target_bam))
+    control_genomes = list(set(os.path.basename(b) for b in args.control_bam))
 
     if not os.path.isdir(args.out_dir):
-        os.mkdir(args.out_dir)
-
+        os.makedirs(args.out_dir)
+        
     log_file = os.path.join(args.out_dir, "severus.log")
     _enable_logging(log_file, debug=False, overwrite=True)
     logger.debug("Cmd: " + " ".join(sys.argv[1:]))
@@ -140,12 +138,12 @@ def main():
         ref_lengths = dict(zip(a.references, a.lengths))
 
     thread_pool = Pool(args.threads)
-    out_breakpoint_graph = os.path.join(args.out_dir, "breakpoint_graph.gv")
-    out_clustered_breakpoints = os.path.join(args.out_dir, "breakpoint_clusters.csv")
+    
     
     args.write_segdups_out =''
     if args.write_segdup:
         args.write_segdups_out = open(os.path.join(args.out_dir,"SEVERUS_collaped_dup.bed"), "w")
+    args.outpath_readqual = os.path.join(args.out_dir, "read_qual.txt")
     
     segments_by_read = defaultdict(list)
     genome_ids=[]
@@ -162,27 +160,12 @@ def main():
     args.min_aligned_length = min(n90)
     logger.info('Computing read quality') 
     update_segments_by_read(segments_by_read, ref_lengths, args)
+    
     logger.info('Computing coverage histogram')
     coverage_histograms = update_coverage_hist(genome_ids, ref_lengths, segments_by_read)
     double_breaks = call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, genome_ids, control_genomes, args)
-    logger.info('Writing breakpoints')
-    output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
     
-    
-    logger.info('Computing segment coverage')
-    double_breaks = filter_fail_double_db(double_breaks, args.output_only_pass, args.keep_low_coverage, args.write_germline) # merge it with breakpoint graph double_breaks = filter_fail_double_db(double_breaks)
-    genomic_segments, hb_points = get_genomic_segments(double_breaks, coverage_histograms, thread_pool, args.phase_vcf)
-    
-    logger.info('Preparing graph')
-    graph, adj_clusters = build_breakpoint_graph(double_breaks, genomic_segments, hb_points, args.max_genomic_len,
-                                                                args.reference_adjacencies, target_genomes, control_genomes)
-    output_clusters_graphvis(graph, adj_clusters, out_breakpoint_graph)
-    output_clusters_csv(graph, adj_clusters, out_clustered_breakpoints)
-    
-    logger.info('Writing vcf')
-    id_to_cc = cc_to_label(graph, adj_clusters)
-    write_to_vcf(double_breaks, target_genomes, control_genomes, id_to_cc, args.out_dir, ref_lengths, args.write_germline, args.no_ins)
-
+    output_graphs(double_breaks, coverage_histograms, thread_pool, target_genomes, control_genomes, ref_lengths, args)
 
 if __name__ == "__main__":
     main()

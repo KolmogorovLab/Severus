@@ -7,15 +7,19 @@ import networkx as nx
 from collections import defaultdict
 from itertools import combinations
 from copy import copy
+import logging
 
-from severus.breakpoint_finder import add_secondary_ins
+from severus.breakpoint_finder import add_secondary_ins, get_genomic_segments, filter_fail_double_db
+from severus.vcf_output import write_to_vcf
+
+logger = logging.getLogger()
 
 
 #COLORS = ["yellowgreen", "thistle", "peachpuff", "yellow", "khaki", "steelblue", "hotpink", "preu"]
 COLORS = ["#189BA0", "#830042", "#B2C971", "#8470FF", "#1B80B3", "#FF7A33", "#B35900", "#006400"]
 SEQUENCE_KEY = "__genomic"
 
-
+            
 def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, reference_adjacencies):
     add_secondary_ins(double_breaks)
     g = nx.MultiGraph()
@@ -302,3 +306,37 @@ def build_breakpoint_graph(double_breaks, genomicsegments, hb_points, max_genomi
     graph = build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, reference_adjacencies)
     adj_clusters = cluster_adjacencies(graph, target_genomes, control_genomes)
     return graph, adj_clusters
+
+            
+            
+def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, control_genomes, ref_lengths, args):
+    
+    for key, double_breaks in db_list.items():
+        if key == 'germline' and args.only_somatic:
+            continue
+        
+        sub_fol = "all_SVs" if key == 'germline' else 'somatic_SVs'
+        out_folder = os.path.join(args.out_dir, sub_fol)
+        if not os.path.isdir(out_folder):
+            os.mkdir(out_folder)
+        all_ids = target_genomes + control_genomes if key == 'germline' else target_genomes   
+            
+        logger.info(f"Preparing outputs for {sub_fol}")
+        
+        out_breakpoint_graph = os.path.join(out_folder, "breakpoint_graph.gv")
+        out_clustered_breakpoints = os.path.join(out_folder, "breakpoint_clusters.csv")
+        
+        logger.info("\tComputing segment coverage")
+        genomic_segments, hb_points = get_genomic_segments(double_breaks, coverage_histograms, thread_pool, args.phase_vcf)
+        
+        logger.info("\tPreparing graph")
+        graph, adj_clusters = build_breakpoint_graph(double_breaks, genomic_segments, hb_points, args.max_genomic_len,
+                                                                    args.reference_adjacencies, target_genomes, control_genomes)
+        output_clusters_graphvis(graph, adj_clusters, out_breakpoint_graph)
+        output_clusters_csv(graph, adj_clusters, out_clustered_breakpoints)
+        
+        logger.info("\tWriting vcf")
+        id_to_cc = cc_to_label(graph, adj_clusters)
+        write_to_vcf(double_breaks, all_ids, id_to_cc, out_folder, key, ref_lengths, args.only_somatic, args.no_ins)
+        
+    

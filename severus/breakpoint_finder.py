@@ -122,7 +122,7 @@ class DoubleBreak(object):
         self.edgestyle = edgestyle
         self.is_pass = 'PASS'
         self.ins_seq = None
-        self.mut_type = None
+        self.mut_type = 'germline'
     def to_string(self):
         strand_1 = "+" if self.direction_1 > 0 else "-"
         strand_2 = "+" if self.direction_2 > 0 else "-"
@@ -801,28 +801,28 @@ def annotate_mut_type(double_breaks, control_id):
                 db.mut_type = mut_type
 
 def filter_germline_db(double_breaks):
-    db_list = []
+    db_list = defaultdict(list) 
     for db in double_breaks:
-        if not db.mut_type == 'germline':
-            db_list.append(db)
+        db_list['germline'].append(db)
+        if db.mut_type == 'somatic':
+            db_list['somatic'].append(db)
     return db_list
 
-def filter_fail_double_db(double_breaks, output_only_pass, keep_low_coverage, write_germline):
+def filter_fail_double_db(double_breaks, output_only_pass, keep_low_coverage):
     db_list = []
-    if not write_germline:
-        double_breaks = filter_germline_db(double_breaks)
     if output_only_pass:
         for db in double_breaks:
             if db.is_pass == 'PASS':
                 db_list.append(db)
-        return db_list
     elif not keep_low_coverage:
         for db in double_breaks:
             if not db.is_pass == 'FAIL_LOWCOV_OTHER':
                 db_list.append(db)
-        return db_list
     else:
-        return double_breaks
+        db_list = double_breaks
+    
+    db_list = filter_germline_db(db_list)
+    return db_list
             
     
 def compute_bp_coverage(double_breaks, coverage_histograms, genome_ids):
@@ -1078,8 +1078,13 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, genome_
     ins_clusters.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position))
    
     double_breaks +=  ins_clusters
-    if not args.write_germline:
+    if not args.only_germline:
         annotate_mut_type(double_breaks, list(control_id)[0])
+        
+    logger.info('Writing breakpoints')
+    output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
+    
+    double_breaks = filter_fail_double_db(double_breaks, args.output_only_pass, args.keep_low_coverage)
     
     return double_breaks 
 

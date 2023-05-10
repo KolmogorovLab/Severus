@@ -7,7 +7,6 @@ import logging
 
 logger = logging.getLogger()
 
-
 class ReadSegment(object):
     __slots__ = ("read_start", "read_end", "ref_start", "ref_end", "read_id", "ref_id",
                  "strand", "read_length",'segment_length', "haplotype", "mapq", "genome_id",
@@ -238,6 +237,8 @@ def add_read_qual(segments_by_read, ref_lengths, args):
     high_mm_region = extract_segdups(mm_hist_bg, write_segdups_out) ###
     for read, alignments in segments_by_read.items():
         segments_by_read[read] = label_reads(alignments, min_mapq, mm_hist_bg, high_mm_region, max_error_rate, min_aligned_length)
+        
+    write_readqual(segments_by_read, args.outpath_readqual)
 
  
 def label_reads(read, min_mapq, mm_hist_bg, high_mm_region, max_error_rate, min_aligned_length):
@@ -254,7 +255,7 @@ def label_reads(read, min_mapq, mm_hist_bg, high_mm_region, max_error_rate, min_
             seg.is_pass += '_LOW_MAPQ'
         high_mm_check(high_mm_region, mm_hist_bg, seg)
         #if seg.mismatch_rate > seg.bg_mm_rate + max_error_rate:
-        if seg.mismatch_rate > seg.bg_mm_rate:
+        if seg.mismatch_rate >= seg.bg_mm_rate:
             seg.is_pass += '_HIGH_MM_rate'
             
     aligned_len = sum([seg.read_end - seg.read_start for seg in read if not seg.is_clipped and not seg.is_pass])
@@ -268,11 +269,27 @@ def label_reads(read, min_mapq, mm_hist_bg, high_mm_region, max_error_rate, min_
         if not seg.is_pass:
             seg.is_pass = 'PASS'
     return read
-            
 
+def write_readqual(segments_by_read, outpath):
+    read_qual = defaultdict(int)
+    read_qual_len = defaultdict(int)
+    for read in segments_by_read.values():
+        for seg in read:
+            if seg.is_clipped or seg.is_insertion:
+                continue 
+            read_qual[seg.is_pass] += 1
+            read_qual_len[seg.is_pass] += seg.segment_length
+            
+    f = open(outpath, "w")
+    f.write('Number of segments:')
+    f.writelines('{}\t{}\n'.format(k,v) for k, v in read_qual.items()) 
+    f.write('Total length of segments:')
+    f.writelines('\n{}\t{}'.format(k,v) for k, v in read_qual_len.items()) 
+            
+COV_WINDOW_MM  = 500
 def get_background_mm_rate(seg, mismatch_histograms):
-    hist_start = seg.ref_start // COV_WINDOW
-    hist_end = seg.ref_end // COV_WINDOW
+    hist_start = seg.ref_start // COV_WINDOW_MM
+    hist_end = seg.ref_end // COV_WINDOW_MM
     mm_list = mismatch_histograms[seg.ref_id][hist_start : hist_end + 1]
     mm_list_nz = [mm for mm in mm_list if mm > 0]
     if mm_list_nz:
@@ -282,24 +299,24 @@ def get_background_mm_rate(seg, mismatch_histograms):
         
 
 def background_mm_hist(segments_by_read, ref_lengths):
-    COV_WINDOW  = 500
     MED_THR = 5
     MED_PER = 0.1
     MIN_READ = 5
     MAX_COV = 15
+    c = 0.001
     mismatch_histograms = defaultdict(list)
     mm_hist_high = {}
     
     for chr_id, chr_len in ref_lengths.items():
-        mismatch_histograms[chr_id] = [[] for _ in range(chr_len // COV_WINDOW + 2)]
-        mm_hist_high[chr_id] = [0 for _ in range(chr_len // COV_WINDOW + 2)]
+        mismatch_histograms[chr_id] = [[] for _ in range(chr_len // COV_WINDOW_MM + 2)]
+        mm_hist_high[chr_id] = [0 for _ in range(chr_len // COV_WINDOW_MM + 2)]
         
     for read in segments_by_read.values():
         for seg in read:
             if seg.is_clipped or seg.is_insertion:
                 continue
-            hist_start = seg.ref_start // COV_WINDOW
-            hist_end = seg.ref_end // COV_WINDOW
+            hist_start = seg.ref_start // COV_WINDOW_MM
+            hist_end = seg.ref_end // COV_WINDOW_MM
             for i in range(hist_start, hist_end + 1):
                 mismatch_histograms[seg.ref_id][i].append(seg.mismatch_rate)
                 
@@ -308,36 +325,11 @@ def background_mm_hist(segments_by_read, ref_lengths):
             if not mm_list or len(mm_list) < MIN_READ:
                 mm_hist_high[chr_id][i] = 1
                 continue
-           
-            #mm_list= np.reshape(mm_list, (-1, 1))
-            #bandwidth = estimate_bandwidth(mm_list, quantile = 0.5) 
-            #kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(mm_list)
-            #s = np.linspace(0,max(mm_list))
-            #e = kde.score_samples(s.reshape(-1,1))
-            #mi = argrelextrema(e, np.less)[0]
-            #if mi.size > 0:
-            #    mm_hist_high[chr_id][i] = s[mi[-1]]
-                
-            #mm_list.sort()
-            #mm_list= np.reshape(mm_list, (-1, 1))
-            #bandwidth = estimate_bandwidth(mm_list, quantile = 0.5) 
-            #ms = MeanShift(bandwidth=bandwidth, bin_seeding = True).fit(mm_list)
-            #best_clust = ms.labels_[0]
-            #ind = list(ms.labels_).count(best_clust)
-            #if ind + 3 < len(mm_list):
-            #    mm_hist_high[chr_id][i] = float(mm_list[ind])
-            
-            #q3, q1 = np.percentile(mm_list, [75,25])
-            #iqr = float(q3) - float(q1)
-            #upper_bound = q3 + 1.5 * iqr
-            #outlier_mm = [mm for mm in mm_list if mm > upper_bound]
-            #if len(outlier_mm) > MIN_READ:
-               # mm_hist_high[chr_id][i] = upper_bound
-            
             mm_list.sort()
             mm_diff = np.diff(mm_list)
             med_thr = max([MED_THR, min([int(len(mm_list)*MED_PER), MAX_COV])])
-            if max(mm_diff[:med_thr]) * 5 < max(mm_diff[:-3]):
+            mm_thr = max(mm_diff[:med_thr]) + c
+            if  mm_thr * 5 < max(mm_diff[:-3]):
                 thr = max(mm_diff[:med_thr]) * 5
                 for k, mm in enumerate(mm_diff):
                     if mm > thr:
@@ -348,20 +340,19 @@ def background_mm_hist(segments_by_read, ref_lengths):
 
 
 def extract_segdups(mm_hist_high, write_segdups_out):
-    COV_WINDOW = 500
     high_mm_region = defaultdict(list)
     for key, mm_high_chrom in mm_hist_high.items():
         for ind, a in enumerate(mm_high_chrom):
             if a == 0:
                 continue
             if not high_mm_region[key]:
-                high_mm_region[key].append([ind * COV_WINDOW])
-                high_mm_region[key].append([(ind + 1) * COV_WINDOW])
-            elif ind * COV_WINDOW == high_mm_region[key][1][-1]:
-                high_mm_region[key][1][-1]=(ind + 1) * COV_WINDOW
+                high_mm_region[key].append([ind * COV_WINDOW_MM])
+                high_mm_region[key].append([(ind + 1) * COV_WINDOW_MM])
+            elif ind * COV_WINDOW_MM == high_mm_region[key][1][-1]:
+                high_mm_region[key][1][-1]=(ind + 1) * COV_WINDOW_MM
             else:
-                high_mm_region[key][0].append(ind * COV_WINDOW)
-                high_mm_region[key][1].append((ind + 1) * COV_WINDOW)
+                high_mm_region[key][0].append(ind * COV_WINDOW_MM)
+                high_mm_region[key][1].append((ind + 1) * COV_WINDOW_MM)
     if write_segdups_out:
         for chr_id, values in high_mm_region.items():
             for (st, end) in zip(values[0], values[1]):

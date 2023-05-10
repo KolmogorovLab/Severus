@@ -56,18 +56,17 @@ class vcf_format(object):
             GT = '1|0' if self.gen_type == 'HP1' else '0|1'
         g_list.sort()
         GQ = int(g_list[2])
-        PL = int(g_list[1])
-        return GT, GQ, PL
+        return GT, GQ
     def info(self):
-        return f"SVLEN={self.sv_len};SVTYPE={self.sv_type};CHR2={self.chr2};END={self.pos2};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()};CLUSTERID=severus_{self.cluster_id}"
+        return f"SVTYPE={self.sv_type};SVLEN={self.sv_len};CHR2={self.chr2};END={self.pos2};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()};CLUSTERID=severus_{self.cluster_id}"
     def sample(self):
-        GT, GQ, PL = self.call_genotype()
-        return f"{GT}:{GQ}:{PL}:{self.vaf():.2f}:{self.DR}:{self.DV}"
+        GT, GQ= self.call_genotype()
+        return f"{GT}:{GQ}:{self.vaf():.2f}:{self.DR}:{self.DV}"
     def to_vcf(self):
         if not self.sv_type == 'INS':
-            return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.sv_type}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:PL:VAF:DR:DV\t{self.sample()}\n"
+            return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.sv_type}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:DR:DV\t{self.sample()}\n"
         else:
-            return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.ins_seq}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:PL:VAF:DR:DV\t{self.sample()}\n"
+            return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.ins_seq}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:DR:DV\t{self.sample()}\n"
  
 def get_sv_type(db):
     if db.bp_2.is_insertion or db.bp_1.is_insertion:
@@ -144,8 +143,11 @@ def db_2_vcf(double_breaks, id_to_cc, no_ins):
                 vcf_list[db.genome_id].append(vcf_format(db.bp_2.ref_id, db.bp_2.position, db.haplotype_1, ID, sv_type, db.length, int(np.median(qual_list)), 
                                                          sv_pass, db.bp_1.ref_id, db.bp_1.position, DR, DV, db.mut_type, hVaf, gen_type, cluster_id))#
                 
-            if sv_type == 'INS' and not no_ins:
-                vcf_list[db.genome_id][-1].ins_seq = db.ins_seq
+            if sv_type == 'INS':
+                if not no_ins:
+                    vcf_list[db.genome_id][-1].ins_seq = db.ins_seq
+                else:
+                    vcf_list[db.genome_id][-1].ins_seq = 'INS'
     return vcf_list
             
 def write_vcf_header(ref_lengths, outfile):
@@ -180,7 +182,6 @@ def write_vcf_header(ref_lengths, outfile):
 
     outfile.write("##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n")
     outfile.write("##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotyping quality\">\n")
-    outfile.write("##FORMAT=<ID=PL,Number=1,Type=Integer,Description=\"Phred genotyping quality\">\n")
     outfile.write("##FORMAT=<ID=DR,Number=1,Type=Integer,Description=\"Number of reference reads\">\n")
     outfile.write("##FORMAT=<ID=DV,Number=1,Type=Integer,Description=\"Number of variant reads\">\n")
     outfile.write("##FORMAT=<ID=VAF,Number=1,Type=Float,Description=\"Variant allele frequency\">\n")
@@ -208,21 +209,13 @@ def write_germline_vcf(vcf_list, outfile):
     outfile.close()
     
     
-def write_to_vcf(double_breaks, target_ids, control_id, id_to_cc, outpath, ref_lengths, write_germline, no_ins):
-    
+def write_to_vcf(double_breaks, all_ids, id_to_cc, outpath, out_key, ref_lengths, only_somatic, no_ins):
     vcf_list = db_2_vcf(double_breaks, id_to_cc, no_ins)
-    
-    if write_germline:
-        all_ids = list(target_ids) + list(control_id)
-        for target_id in all_ids:
-            germline_outfile = open(os.path.join(outpath,"SEVERUS_" + target_id + ".vcf"), "w")
-            write_vcf_header(ref_lengths, germline_outfile)
-            write_germline_vcf(vcf_list[target_id], germline_outfile)
-    else:
-        for target_id in target_ids:
-            somatic_outfile = open(os.path.join(outpath,"SEVERUS_somatic_" + target_id + ".vcf"), "w")
-            write_vcf_header(ref_lengths,somatic_outfile)
-            write_somatic_vcf(vcf_list[target_id], somatic_outfile)
+    key = 'somatic_' if out_key == 'somatic' else 'all_'
+    for target_id in all_ids:
+        germline_outfile = open(os.path.join(outpath, 'SEVERUS_' + key + target_id.replace('.bam' , '') + ".vcf"), "w")
+        write_vcf_header(ref_lengths, germline_outfile)
+        write_germline_vcf(vcf_list[target_id], germline_outfile)
             
     
 
