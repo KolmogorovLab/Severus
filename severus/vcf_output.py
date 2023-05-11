@@ -69,6 +69,8 @@ class vcf_format(object):
             return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.ins_seq}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:DR:DV\t{self.sample()}\n"
  
 def get_sv_type(db):
+    if db.is_dup:
+        return 'DUP'
     if db.bp_2.is_insertion or db.bp_1.is_insertion:
         return 'INS'
     if not db.bp_1.ref_id == db.bp_2.ref_id:
@@ -86,6 +88,8 @@ def db_2_vcf(double_breaks, id_to_cc, no_ins):
     vcf_list = defaultdict(list)
     clusters = defaultdict(list) 
     for br in double_breaks:
+        if br.bp_1.is_insertion:
+            continue
         clusters[br.to_string()].append(br)
         
     for key, db_clust in clusters.items():
@@ -139,6 +143,7 @@ def db_2_vcf(double_breaks, id_to_cc, no_ins):
                 qual_list = [0]
             vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, db.length, int(np.median(qual_list)), 
                                                      sv_pass, db.bp_2.ref_id, db.bp_2.position, DR, DV, db.mut_type, hVaf, gen_type, cluster_id))#
+            
             if sv_type == "BND":
                 vcf_list[db.genome_id].append(vcf_format(db.bp_2.ref_id, db.bp_2.position, db.haplotype_1, ID, sv_type, db.length, int(np.median(qual_list)), 
                                                          sv_pass, db.bp_1.ref_id, db.bp_1.position, DR, DV, db.mut_type, hVaf, gen_type, cluster_id))#
@@ -160,7 +165,7 @@ def write_vcf_header(ref_lengths, outfile):
         outfile.write("##contig=<ID={0},length={1}>\n".format(chr_id, chr_len))#
     outfile.write('##ALT=<ID=DEL,Description="Deletion">\n')
     outfile.write('##ALT=<ID=INS,Description="Insertion">\n')
-    #outfile.write('##ALT=<ID=DUP,Description="Duplication">\n')
+    outfile.write('##ALT=<ID=DUP,Description="Duplication">\n')
     outfile.write('##ALT=<ID=INV,Description="Inversion">\n')
     outfile.write('##ALT=<ID=BND,Description="Breakend">\n')#
 

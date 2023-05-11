@@ -97,9 +97,9 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, split
         s1 = seg_span[0]
         if abs(bp_len) < min_sv_size:
             if s1.ref_start > vntr_strt:
-                s1.ref_start = vntr_strt
+                s1.ref_start = vntr_strt + bp_len
             else:
-                s1.ref_end = vntr_end
+                s1.ref_end = vntr_end - bp_len 
             s1.segment_length = s1.ref_end - s1.ref_start
             return [s1] + clipped_segs 
         if is_end:
@@ -134,9 +134,9 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, split
                 return clipped_segs
             else:
                 if s1.ref_start >= vntr_strt:
-                    s1.ref_start = vntr_strt
+                    s1.ref_start = vntr_strt + bp_len
                 else:
-                    s1.ref_end = vntr_end
+                    s1.ref_end = vntr_end - bp_len
                     s1.segment_length += seg_len
                 return [s1] + clipped_segs 
     else:
@@ -203,6 +203,7 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
     new_read = []
     split_seg_vntr = []
     s2 = []
+    seg_to_remove = []
     for s in read:
         if s.is_insertion:
             ins_segs.append(s)
@@ -220,7 +221,7 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
             new_read.append(ins)
         else:
             seg_in_vntr[ins_vntr[0]].append(ins_vntr[1])
-            
+        
     if len(split_segs) < 2:
         new_read.append(split_segs[0])
         new_read += clipped_segs
@@ -237,9 +238,10 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
                 seg_in_vntr[split_seg_vntr[0]].append(split_seg_vntr[1])
             else:
                 new_read.append(s1)
+                
         if not split_seg_vntr and s2:
             new_read.append(s2)
-            
+        
     for key, bp_in_vntr in seg_in_vntr.items():
         segments = []
         bp_len = 0
@@ -264,10 +266,17 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
         else:
             segments.sort(key = lambda s:s.ref_start)
             new_segments = calc_new_segments(segments, clipped_segs, key[1], key[2],bp_len, split_seg_vntr, min_sv_size, ins_seq)
+            seg_to_remove += list(set(segments) - set(new_segments))
+                
             if new_segments:
                 new_read += new_segments
-    
-    new_read = list(set(new_read))            
+   
+    new_read = list(set(new_read))   
+    if seg_to_remove:
+        for seg in list(set(seg_to_remove)):
+            if seg in new_read:
+                new_read.remove(seg)
+             
     new_read.sort(key = lambda s:s.read_start)
     
     return new_read
