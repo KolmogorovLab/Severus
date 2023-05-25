@@ -211,6 +211,7 @@ def get_breakpoints(split_reads, ref_lengths, args):
             seq_breakpoints_l[s2.ref_id].append(rc)
         
     for read_segments in split_reads:
+        read_segments.sort(key=lambda x:x.read_start)
         for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
             if abs(s2.read_start - s1.read_end) < MAX_SEGMENT_DIST:
                 _add_double(s1, s2)
@@ -759,9 +760,9 @@ def match_long_ins(ins_clusters, double_breaks, min_sv_size):
     
     for dbs in clusters.values():
         db = dbs[0]
-        if db.direction_1 * db.direction_2 > 0:
+        if db.bp_1.ref_id == db.bp_2.ref_id and  db.direction_1 * db.direction_2 > 0:
             continue
-        if db.direction_1 > 0 and db.direction_2 < 0 and db.bp_2.position - db.bp_1.position < DEL_THR:
+        if db.bp_1.ref_id == db.bp_2.ref_id and db.direction_1 > 0 and db.direction_2 < 0 and db.bp_2.position - db.bp_1.position < DEL_THR:
             continue
         if db.is_dup:
             ins_to_remove += dup_to_ins(ins_list_pos, ins_list, dbs, min_sv_size, ins_clusters, double_breaks)
@@ -934,48 +935,94 @@ def get_insertionreads(segments_by_read):
 def get_splitreads(segments_by_read):
     split_reads = []
     for read in segments_by_read.values():
-        split_reads_add = []
-        if len(read)>1:
-            for seg in read:
-                if not seg.is_insertion and not seg.is_clipped:
-                    split_reads_add.append(seg)
-            split_reads.append(split_reads_add)
+        split = [seg for seg in read if not seg.is_insertion and not seg.is_clipped]
+        if len(split)>1:
+            split_reads.append(split)
     return split_reads
 
-def resolve_overlaps(split_reads, min_ovlp_len):
+def resolve_overlaps(split_reads, min_ovlp_len, min_mapq):
     """
     Some supplementary alignments may be overlapping (e.g. in case of inversions with flanking repeat).
     This function checks if the overlap has ok structe, trims and outputs non-overlapping alignments
     """
-    def _get_ovlp(seg_1, seg_2):
-        max_ovlp_len = min(seg_1.read_end - seg_1.read_start, seg_2.read_end - seg_2.read_start)
-        if (seg_1.read_end - seg_2.read_start > min_ovlp_len and
-            seg_1.read_end - seg_2.read_start < max_ovlp_len and
-            seg_2.read_end > seg_1.read_end and
-            seg_2.read_start > seg_1.read_start):
-            return seg_1.read_end - seg_2.read_start
+    def _get_ovlp(seglist_1, seglist_2):
+        
+        alg_strt = [seglist_1[-1].align_start, seglist_2[-1].align_start]
+        alg_end = [seglist_1[-1].read_end, seglist_2[-1].read_end]
+        
+        if alg_end[0] - alg_strt[1] > min_ovlp_len:
+            return  alg_end[0] - alg_strt[1] + 1
         else:
             return 0
         
-    new_reads = []
-    for read_segments in split_reads:
-        upd_segments = []
-        for i in range(len(read_segments)):
-            left_ovlp = 0
-            if i > 0 and read_segments[i - 1].ref_id == read_segments[i].ref_id:
-                left_ovlp = _get_ovlp(read_segments[i - 1], read_segments[i])
-            left_ovlp = left_ovlp
-            seg = read_segments[i]
-            if left_ovlp > 0:
+    def _get_full_ovlp(seglist_1, seglist_2):
+        alg_strt = [seglist_1[-1].align_start, seglist_2[-1].align_start]
+        alg_end = [seglist_1[-1].read_end, seglist_2[-1].read_end]
+        
+        max_ovlp_len = [alg_end[0] - alg_strt[0], alg_end[1] - alg_strt[1]]
+        if alg_end[0] - alg_strt[1] == min(max_ovlp_len):
+            seg = [seglist_1, seglist_2]
+            return seg[max_ovlp_len.index(min(max_ovlp_len))]
+        else:
+            return False
+            
+    def _update_ovlp_seg(seglist_1, seglist_2, left_ovlp, min_mapq):
+        seg_to_remove = []
+        
+        if not seglist_1[-1].mapq > min_mapq and seglist_2[-1].mapq > min_mapq:
+            seg2 = seglist_1
+            
+        else:
+            seg2 = seglist_2
+        
+        for seg in seg2:
+            seg.align_start += left_ovlp
+            if seg.read_start >= seg.align_start:
+                continue
+            if seg.read_end < seg.align_start:
+                seg_to_remove.append(seg)
+            else:
+                seg.read_start += left_ovlp
+                seg.segment_length = seg.read_end - seg.read_start
                 if seg.strand == 1:
-                    seg.read_start = seg.read_start + left_ovlp
                     seg.ref_start = seg.ref_start + left_ovlp
                 else:
-                    seg.read_start = seg.read_start + left_ovlp
-                    seg.ref_end = seg.ref_end - left_ovlp
-            upd_segments.append(seg)
-        new_reads.append(upd_segments)
-    return new_reads     
+                    seg.ref_start = seg.ref_end - left_ovlp
+                
+        return seg_to_remove
+        
+
+    for read_segments in split_reads:
+        segs_to_remove =[]
+        cur_cluster = []
+        clusters = []
+        read_segments.sort(key=lambda s:(s.align_start, s.read_start))
+        for seg in read_segments:
+            if cur_cluster and (not seg.ref_id == cur_cluster[-1].ref_id or not seg.align_start == cur_cluster[-1].align_start): 
+                clusters.append(cur_cluster)
+                cur_cluster = [seg]
+            else:
+                cur_cluster.append(seg)
+        if cur_cluster:
+            clusters.append(cur_cluster)
+        if len(clusters) < 2:
+            continue
+        for i in range(len(clusters)):
+            left_ovlp = 0
+            seg = False
+            if i > 0 and clusters[i-1][0].ref_id == clusters[i][0].ref_id:
+                seg_to_remove = _get_full_ovlp(clusters[i-1], clusters[i])
+                if seg_to_remove:
+                    segs_to_remove += seg_to_remove
+                    continue
+                left_ovlp = _get_ovlp(clusters[i-1], clusters[i])
+            if left_ovlp > 0:
+                seg_to_remove = _update_ovlp_seg(clusters[i-1], clusters[i], left_ovlp, min_mapq)
+                segs_to_remove += seg_to_remove
+        for seg in list(set(segs_to_remove)):
+            read_segments.remove(seg)
+        if len(read_segments) < 2:
+            split_reads.remove(read_segments)
 
 def add_secondary_ins(double_breaks):
     for ins in double_breaks:
@@ -1052,7 +1099,7 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, genome_
     logger.info('Extracting split alignments')
     split_reads = get_splitreads(segments_by_read)
     logger.info('Resolving overlaps')
-    split_reads = resolve_overlaps(split_reads,  args.sv_size)
+    resolve_overlaps(split_reads,  args.sv_size, args.min_mapping_quality)
     
     ins_list_all = get_insertionreads(segments_by_read)
     
