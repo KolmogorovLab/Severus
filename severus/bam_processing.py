@@ -149,17 +149,16 @@ def extract_clipped_end(segments_by_read):
         if s1.read_start > MAX_CLIPPED_LENGTH:
             pos = s1.ref_start if s1.strand == 1 else s1.ref_end
             read.append(ReadSegment(0, 0, s1.read_start, pos, pos, s1.read_id,
-                                    s1.ref_id, s1.strand, s1.read_length,0, s1.haplotype, s1.mapq, s1.genome_id, 0, False, 0))
+                                    s1.ref_id, 1, s1.read_length,0, s1.haplotype, s1.mapq, s1.genome_id, 0, False, 0))
             read[-1].is_clipped = True
         end_clip_length = s2.read_length - s2.read_end
         if end_clip_length > MAX_CLIPPED_LENGTH:
             pos = s2.ref_end if s2.strand == 1 else s2.ref_start
             read.append(ReadSegment(s2.read_end, s2.read_end, s2.read_length, pos, pos, s2.read_id,
-                                    s2.ref_id, s2.strand, s2.read_length, 0, s2.haplotype, s2.mapq, s2.genome_id, 0, False, 0))
+                                    s2.ref_id, -1, s2.read_length, 0, s2.haplotype, s2.mapq, s2.genome_id, 0, False, 0))
             read[-1].is_clipped = True
         read.sort(key=lambda s: s.read_start)
-            
-
+        
 def get_all_reads(bam_file, region, genome_id,sv_size):
     """
     Yields set of split reads for each contig separately. Only reads primary alignments

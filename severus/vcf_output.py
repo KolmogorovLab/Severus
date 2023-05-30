@@ -2,12 +2,13 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-import pysam
-from collections import namedtuple, defaultdict, Counter
+from collections import defaultdict
 from datetime import datetime
 import sys
 import os
 import math
+
+
 
 
 class vcf_format(object):
@@ -69,6 +70,10 @@ class vcf_format(object):
             return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.ins_seq}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:DR:DV\t{self.sample()}\n"
  
 def get_sv_type(db):
+    if db.bp_2.contig_id:
+        return 'BND'
+    if db.bp_2.loose_end_id:
+        return 'BND'
     if db.is_dup:
         return 'DUP'
     if db.bp_2.is_insertion or db.bp_1.is_insertion:
@@ -154,7 +159,9 @@ def db_2_vcf(double_breaks, id_to_cc, no_ins):
                 else:
                     vcf_list[db.genome_id][-1].ins_seq = 'INS'
     return vcf_list
-            
+
+
+          
 def write_vcf_header(ref_lengths, outfile):
     outfile.write("##fileformat=VCFv4.2\n")
     outfile.write('##source=SEVERUS\n')
@@ -221,6 +228,7 @@ def write_to_vcf(double_breaks, all_ids, id_to_cc, outpath, out_key, ref_lengths
         germline_outfile = open(os.path.join(outpath, 'SEVERUS_' + key + target_id.replace('.bam' , '') + ".vcf"), "w")
         write_vcf_header(ref_lengths, germline_outfile)
         write_germline_vcf(vcf_list[target_id], germline_outfile)
+    
             
     
 

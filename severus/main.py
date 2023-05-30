@@ -107,6 +107,7 @@ def main():
     parser.add_argument("--write-collapsed-dup", dest='write_segdup', action = "store_true")
     parser.add_argument("--only-somatic", dest='only_somatic', action = "store_true")
     parser.add_argument("--no-ins", dest='no_ins', action = "store_true")
+    parser.add_argument("--inbetween_ins", dest='inbetween_ins', action = "store_true")
     
     args = parser.parse_args()
     
