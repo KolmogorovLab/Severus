@@ -12,13 +12,14 @@ import math
 
 
 class vcf_format(object):
-    __slots__ = ('chrom', 'pos', 'haplotype', 'ID', 'sv_type', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2', 'DR', 'DV', 'mut_type', 'hVaf', 'ins_seq', 'gen_type', 'cluster_id', 'ins_len', 'detailed_type')
-    def __init__(self, chrom, pos, haplotype, ID, sv_type, sv_len, qual, Filter, chr2, pos2, DR, DV, mut_type, hVaf, gen_type, cluster_id, ins_len, detailed_type):
+    __slots__ = ('chrom', 'pos', 'haplotype', 'ID', 'sv_type','alt', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2', 'DR', 'DV', 'mut_type', 'hVaf', 'ins_seq', 'gen_type', 'cluster_id', 'ins_len', 'detailed_type')
+    def __init__(self, chrom, pos, haplotype, ID, sv_type, alt, sv_len, qual, Filter, chr2, pos2, DR, DV, mut_type, hVaf, gen_type, cluster_id, ins_len, detailed_type):
         self.chrom = chrom
         self.pos = pos
         self.haplotype = haplotype
         self.ID = ID
-        self.sv_type = sv_type 
+        self.sv_type = sv_type
+        self.alt = alt
         self.sv_len = sv_len
         self.qual = qual
         self.Filter = Filter
@@ -66,10 +67,14 @@ class vcf_format(object):
         GT, GQ= self.call_genotype()
         return f"{GT}:{GQ}:{self.vaf():.2f}:{self.DR}:{self.DV}"
     def to_vcf(self):
-        if not self.ins_seq:
-            return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.sv_type}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:DR:DV\t{self.sample()}\n"
-        else:
+        if self.ins_seq:
             return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.ins_seq}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:DR:DV\t{self.sample()}\n"
+        elif not self.sv_type == self.alt:
+            return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t{self.alt}\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:DR:DV\t{self.sample()}\n"
+        else:
+            return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.sv_type}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:DR:DV\t{self.sample()}\n"
+            
+            
  
 def get_sv_type(db):
     if db.bp_2.loose_end_id:
@@ -137,22 +142,21 @@ def db_2_vcf(double_breaks, id_to_cc, no_ins):
                 qual_list = [0]
             if sv_type == "BND" and not db.bp_2.loose_end_id:
                 if db.bp_2.dir_1 == 1:
-                    alt = '[' + db.bp_2.ref_id + str(db.bp_2.position) + ']N'
+                    alt = '[' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + '[N'
                 else:
-                    alt = 'N[' + db.bp_2.ref_id + str(db.bp_2.position) + ']'
-                vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, alt, db.length, int(np.median(qual_list)), 
+                    alt = 'N]' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + '['
+                vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, alt, db.length, int(np.median(qual_list)), 
                                                          sv_pass, db.bp_2.ref_id, db.bp_2.position, db.DR, db.DV, db.mut_type, hVaf, gen_type, cluster_id,db.has_ins,db.sv_type))#
-                   
                 if db.bp_1.dir_1 == 1:
-                    alt = '[' + db.bp_1.ref_id + str(db.bp_1.position) + ']N'
+                    alt = '[' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + '[N'
                 else:
-                    alt = 'N[' + db.bp_1.ref_id + str(db.bp_1.position) + ']'
+                    alt = 'N]' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + '['
                     
-                vcf_list[db.genome_id].append(vcf_format(db.bp_2.ref_id, db.bp_2.position, db.haplotype_1, ID, alt, db.length, int(np.median(qual_list)), 
+                vcf_list[db.genome_id].append(vcf_format(db.bp_2.ref_id, db.bp_2.position, db.haplotype_1, ID, sv_type, alt, db.length, int(np.median(qual_list)), 
                                                          sv_pass, db.bp_1.ref_id, db.bp_1.position, db.DR, db.DV, db.mut_type, hVaf, gen_type, cluster_id,db.has_ins,db.sv_type))#
             else:
             
-                vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, db.length, int(np.median(qual_list)), 
+                vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, sv_type, db.length, int(np.median(qual_list)), 
                                                      sv_pass, db.bp_2.ref_id, db.bp_2.position, db.DR, db.DV, db.mut_type, hVaf, gen_type, cluster_id,db.has_ins,db.sv_type))#
             
             if sv_type == 'INS':
@@ -227,7 +231,7 @@ def write_to_vcf(double_breaks, all_ids, id_to_cc, outpath, out_key, ref_lengths
     vcf_list = db_2_vcf(double_breaks, id_to_cc, no_ins)
     key = 'somatic_' if out_key == 'somatic' else 'all_'
     for target_id in all_ids:
-        germline_outfile = open(os.path.join(outpath, 'SEVERUS_' + key + target_id.replace('.bam' , '') + ".vcf"), "w")
+        germline_outfile = open(os.path.join(outpath, 'severus_' + key + target_id.replace('.bam' , '') + ".vcf"), "w")
         write_vcf_header(ref_lengths, germline_outfile)
         write_germline_vcf(vcf_list[target_id], germline_outfile)
     
