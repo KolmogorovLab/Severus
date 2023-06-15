@@ -12,8 +12,8 @@ import math
 
 
 class vcf_format(object):
-    __slots__ = ('chrom', 'pos', 'haplotype', 'ID', 'sv_type', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2', 'DR', 'DV', 'mut_type', 'hVaf', 'ins_seq', 'gen_type', 'cluster_id')
-    def __init__(self, chrom, pos, haplotype, ID, sv_type, sv_len, qual, Filter, chr2, pos2, DR, DV, mut_type, hVaf, gen_type, cluster_id):
+    __slots__ = ('chrom', 'pos', 'haplotype', 'ID', 'sv_type', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2', 'DR', 'DV', 'mut_type', 'hVaf', 'ins_seq', 'gen_type', 'cluster_id', 'ins_len', 'detailed_type')
+    def __init__(self, chrom, pos, haplotype, ID, sv_type, sv_len, qual, Filter, chr2, pos2, DR, DV, mut_type, hVaf, gen_type, cluster_id, ins_len, detailed_type):
         self.chrom = chrom
         self.pos = pos
         self.haplotype = haplotype
@@ -31,6 +31,8 @@ class vcf_format(object):
         self.ins_seq = None
         self.gen_type = gen_type
         self.cluster_id = cluster_id
+        self.ins_len = ins_len
+        self.detailed_type = detailed_type
     def vaf(self):
         return self.DV / (self.DV + self.DR) if self.DV > 0 else 0
     def hVAF(self):
@@ -59,20 +61,19 @@ class vcf_format(object):
         GQ = int(g_list[2])
         return GT, GQ
     def info(self):
-        return f"SVTYPE={self.sv_type};SVLEN={self.sv_len};CHR2={self.chr2};END={self.pos2};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()};CLUSTERID=severus_{self.cluster_id}"
+        return f"SVTYPE={self.sv_type};SVLEN={self.sv_len};CHR2={self.chr2};END={self.pos2};DETAILED_TYPE={self.detailed_type};INSLEN={self.ins_len};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()};CLUSTERID=severus_{self.cluster_id}"
     def sample(self):
         GT, GQ= self.call_genotype()
         return f"{GT}:{GQ}:{self.vaf():.2f}:{self.DR}:{self.DV}"
     def to_vcf(self):
-        if not self.sv_type == 'INS':
+        if not self.ins_seq:
             return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.sv_type}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:DR:DV\t{self.sample()}\n"
         else:
             return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.ins_seq}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:DR:DV\t{self.sample()}\n"
  
 def get_sv_type(db):
-    if db.bp_2.contig_id:
-        return 'BND'
     if db.bp_2.loose_end_id:
+        db.sv_type = 'loose_end'
         return 'BND'
     if db.is_dup:
         return 'DUP'
@@ -83,12 +84,11 @@ def get_sv_type(db):
     if db.direction_1 == db.direction_2:
         return 'INV'
     if db.bp_1.dir_1 < 0:
-        return 'BND'
+        return 'INS'
     if db.bp_1.dir_1 > 0:
         return 'DEL'
 
 def db_2_vcf(double_breaks, id_to_cc, no_ins):
-    NUM_HAPLOTYPES = 3
     t = 0
     vcf_list = defaultdict(list)
     clusters = defaultdict(list) 
@@ -118,41 +118,43 @@ def db_2_vcf(double_breaks, id_to_cc, no_ins):
             else:
                 hap_type = [db.haplotype_1 for db in db1]
                 gen_type = 'HP1' if 1 in hap_type else 'HP2'
-            hVaf = defaultdict(list)
-            span_bp1 = 0
-            span_bp2 = 0
-            for i in range(NUM_HAPLOTYPES):
-                hVaf[i]=0.0
-                span_bp1 += db.bp_1.spanning_reads[(db.genome_id, i)]
-                span_bp2 += db.bp_2.spanning_reads[(db.genome_id, i)]
             ID = 'SEVERUS_' + sv_type + str(t)
             t += 1
-            DV = 0
-            DR = int(np.mean([span_bp1, span_bp2]))
             qual_list = []
             pass_list = [db.is_pass for db in db1]
             if 'PASS' in pass_list:
                 sv_pass = 'PASS' 
-            elif 'PASS_LOWCOV' in pass_list:
-                sv_pass = 'PASS_LOWCOV' 
+            elif 'FAIL_LOWCOV_OTHER' in pass_list:
+                sv_pass = 'FAIL_LOWCOV_OTHER' 
             else:
                 sv_pass = db1[0].is_pass
+            hVaf = [0.0, 0.0, 0.0]
             for db in db1:
-                DR1 = int(np.median([db.bp_1.spanning_reads[(db.genome_id, db.haplotype_1)], db.bp_2.spanning_reads[(db.genome_id, db.haplotype_2)]]))
-                DV1 = db.supp
-                hVaf[db.haplotype_1] =  DV1 / (DV1 + DR1) if DV1 > 0 else 0
-                DV += DV1
                 if db.is_pass == 'PASS':
                     qual_list += [db.bp_1.qual, db.bp_2.qual]
+                hVaf[db.haplotype_1]  = db.hvaf
             if not qual_list:
                 qual_list = [0]
-            vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, db.length, int(np.median(qual_list)), 
-                                                     sv_pass, db.bp_2.ref_id, db.bp_2.position, DR, DV, db.mut_type, hVaf, gen_type, cluster_id))#
+            if sv_type == "BND" and not db.bp_2.loose_end_id:
+                if db.bp_2.dir_1 == 1:
+                    alt = '[' + db.bp_2.ref_id + str(db.bp_2.position) + ']N'
+                else:
+                    alt = 'N[' + db.bp_2.ref_id + str(db.bp_2.position) + ']'
+                vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, alt, db.length, int(np.median(qual_list)), 
+                                                         sv_pass, db.bp_2.ref_id, db.bp_2.position, db.DR, db.DV, db.mut_type, hVaf, gen_type, cluster_id,db.has_ins,db.sv_type))#
+                   
+                if db.bp_1.dir_1 == 1:
+                    alt = '[' + db.bp_1.ref_id + str(db.bp_1.position) + ']N'
+                else:
+                    alt = 'N[' + db.bp_1.ref_id + str(db.bp_1.position) + ']'
+                    
+                vcf_list[db.genome_id].append(vcf_format(db.bp_2.ref_id, db.bp_2.position, db.haplotype_1, ID, alt, db.length, int(np.median(qual_list)), 
+                                                         sv_pass, db.bp_1.ref_id, db.bp_1.position, db.DR, db.DV, db.mut_type, hVaf, gen_type, cluster_id,db.has_ins,db.sv_type))#
+            else:
             
-            if sv_type == "BND":
-                vcf_list[db.genome_id].append(vcf_format(db.bp_2.ref_id, db.bp_2.position, db.haplotype_1, ID, sv_type, db.length, int(np.median(qual_list)), 
-                                                         sv_pass, db.bp_1.ref_id, db.bp_1.position, DR, DV, db.mut_type, hVaf, gen_type, cluster_id))#
-                
+                vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, db.length, int(np.median(qual_list)), 
+                                                     sv_pass, db.bp_2.ref_id, db.bp_2.position, db.DR, db.DV, db.mut_type, hVaf, gen_type, cluster_id,db.has_ins,db.sv_type))#
+            
             if sv_type == 'INS':
                 if not no_ins:
                     vcf_list[db.genome_id][-1].ins_seq = db.ins_seq

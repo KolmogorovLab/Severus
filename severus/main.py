@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Jun  6 14:05:48 2023
+
+@author: keskusa2
+"""
+
+#!/usr/bin/env python3
 
 import sys
 import shutil
@@ -55,6 +63,7 @@ def main():
     BP_CLUSTER_SIZE = 50
     MIN_SV_SIZE = 50
     MIN_SV_THR = 15
+    VAF_THR = 0.1
     
 
     SAMTOOLS_BIN = "samtools"
@@ -74,7 +83,7 @@ def main():
     parser.add_argument("-t", "--threads", dest="threads",
                         default=8, metavar="int", type=int, help="number of parallel threads [8]")
     parser.add_argument("--min-support", dest="bp_min_support",
-                        default=MIN_BREAKPOINT_READS, metavar="int", type=int,
+                        default=0, metavar="int", type=int,
                         help=f"minimum reads supporting double breakpoint [{MIN_BREAKPOINT_READS}]")
     parser.add_argument("--min-reference-flank", dest="min_ref_flank",
                         default=MIN_REF_FLANK, metavar="int", type=int,
@@ -107,7 +116,8 @@ def main():
     parser.add_argument("--write-collapsed-dup", dest='write_segdup', action = "store_true")
     parser.add_argument("--only-somatic", dest='only_somatic', action = "store_true")
     parser.add_argument("--no-ins", dest='no_ins', action = "store_true")
-    parser.add_argument("--inbetween_ins", dest='inbetween_ins', action = "store_true")
+    parser.add_argument("--inbetween-ins", dest='inbetween_ins', action = "store_true")
+    parser.add_argument("--filter-small-svs", dest='filter_small_svs', action = "store_true")
     
     args = parser.parse_args()
     
@@ -131,6 +141,11 @@ def main():
     if not shutil.which(SAMTOOLS_BIN):
         logger.error("samtools not found")
         return 1
+    if args.bp_min_support == 0:
+        args.bp_min_support = 3
+        args.vaf_thr = VAF_THR
+    else:
+        args.vaf_thr = 0
 
     #TODO: check that all bams have the same reference
     first_bam = all_bams[0]
@@ -140,6 +155,8 @@ def main():
 
     thread_pool = Pool(args.threads)
     
+    if args.filter_small_svs:
+        args.max_genomic_len = 100000000
     
     args.write_segdups_out =''
     if args.write_segdup:

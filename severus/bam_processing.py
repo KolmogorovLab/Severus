@@ -213,7 +213,7 @@ def update_coverage_hist(genome_ids, ref_lengths, segments_by_read):
         for seg in read:
             if seg.is_pass == 'PASS' and not seg.is_insertion and not seg.is_clipped:
                 hist_start = seg.ref_start // COV_WINDOW
-                hist_end = seg.ref_end // COV_WINDOW
+                hist_end = min([seg.ref_end, ref_lengths[seg.ref_id]])// COV_WINDOW
                 for i in range(hist_start + 1, hist_end):
                     coverage_histograms[(seg.genome_id, seg.haplotype, seg.ref_id)][i] += 1
 
@@ -319,7 +319,7 @@ def background_mm_hist(segments_by_read, ref_lengths):
             if seg.is_clipped or seg.is_insertion:
                 continue
             hist_start = seg.ref_start // COV_WINDOW_MM
-            hist_end = seg.ref_end // COV_WINDOW_MM
+            hist_end = min([seg.ref_end, ref_lengths[seg.ref_id]])// COV_WINDOW_MM
             for i in range(hist_start, hist_end + 1):
                 mismatch_histograms[seg.ref_id][i].append(seg.mismatch_rate)
                 

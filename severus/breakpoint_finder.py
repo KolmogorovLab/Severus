@@ -81,17 +81,20 @@ class Breakpoint(object):
         self.loose_end_id = False
 
     def fancy_name(self):
-        if not self.is_insertion:
+        if not self.is_insertion or self.contig_id:
             return self.unique_name()
+        if self.loose_end_id:
+            return ''
         else:
             return f"INS:{self.insertion_size}"
 
     def unique_name(self):
-        if not self.is_insertion:
-            sign = '-' if self.dir_1 == -1 else '+'
-            return f"{sign}{self.ref_id}:{self.position}"
-        else:
+        if self.is_insertion:
             return f"INS:{self.ref_id}:{self.position}"
+        elif self.loose_end_id:
+            return f"loose:{self.ref_id}:{self.position}"
+        else:
+            return f"{self.ref_id}:{self.position}"
 
     def coord_tuple(self):
         sign = '-' if self.dir_1 == -1 else '+'
@@ -99,8 +102,9 @@ class Breakpoint(object):
 
 
 class DoubleBreak(object):
-    __slots__ = ("bp_1", "direction_1", "bp_2", "direction_2", "genome_id","haplotype_1",'haplotype_2',"supp",
-                 'supp_read_ids','length','genotype','edgestyle', 'is_pass', 'ins_seq', 'mut_type', 'is_dup', 'has_ins')
+    __slots__ = ("bp_1", "direction_1", "bp_2", "direction_2", "genome_id","haplotype_1",'haplotype_2',"supp",'supp_read_ids',
+                 'length','genotype','edgestyle', 'is_pass', 'ins_seq', 'mut_type', 'is_dup', 'has_ins','subgraph_id', 'sv_type',
+                 'DR', 'DV', 'hvaf', 'vaf')
     def __init__(self, bp_1, direction_1, bp_2, direction_2, genome_id, haplotype_1, haplotype_2, 
                  supp, supp_read_ids, length, genotype, edgestyle):
         self.bp_1 = bp_1
@@ -120,6 +124,12 @@ class DoubleBreak(object):
         self.is_dup = None
         self.mut_type = 'germline'
         self.has_ins = 0
+        self.subgraph_id = []
+        self.sv_type = None
+        self.DR =0
+        self.DV = 0
+        self.hvaf = 0.0
+        self.vaf = 0.0
     def to_string(self):
         strand_1 = "+" if self.direction_1 > 0 else "-"
         strand_2 = "+" if self.direction_2 > 0 else "-"
@@ -134,6 +144,7 @@ class DoubleBreak(object):
                 label_1, label_2 = label_2, label_1
         bp_name = label_1 + "|" + label_2
         return bp_name
+        
     
 
 class GenomicSegment(object):
@@ -150,10 +161,10 @@ class GenomicSegment(object):
         self.length_bp = length_bp
 
     def left_coord_str(self):
-        return f"{self.dir1}{self.ref_id}:{self.pos1}"
+        return f"{self.ref_id}:{self.pos1}"
 
     def right_coord_str(self):
-        return f"{self.dir2}{self.ref_id}:{self.pos2}"
+        return f"{self.ref_id}:{self.pos2}"
 
     def left_coord_tuple(self):
         return (self.ref_id, self.pos1, self.dir1)
@@ -187,10 +198,10 @@ def get_breakpoints(split_reads, ref_lengths, args):
         return ref_bp, sign
     
     def _add_double(s1, s2):
-        has_ins = False
+        has_ins = 0
         dist = abs(s2.read_start - s1.read_end)
         if dist > sv_size:
-            has_ins = True
+            has_ins = dist
         
         ref_bp_1, sign_1 = _signed_breakpoint(s1, "right")
         ref_bp_2, sign_2 = _signed_breakpoint(s2, "left")
@@ -345,10 +356,10 @@ def get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads):
     return db_list
 
 #TODO BAM/HAPLOTYPE SPECIFIC FILTER
-def double_breaks_filter(double_breaks, min_reads, genome_ids):
+def double_breaks_filter(double_breaks, min_reads, genome_ids, control_id):
 
-    PASS_2_FAIL_RAT = 0.8
-    CONN_2_PASS = 0.7
+    PASS_2_FAIL_RAT = 0.5
+    CONN_2_PASS = 0.5
     CHR_CONN = 2
     COV_THR = 3
     NUM_HAPLOTYPES = 3
@@ -406,6 +417,9 @@ def double_breaks_filter(double_breaks, min_reads, genome_ids):
         if not count_pass['PASS']:
             continue
         
+        for db in cl:
+            db.is_pass = 'PASS'
+        
         gen_ids = list(set(genome_ids) - set([db1.genome_id for db1 in cl]))
         if gen_ids:
             span_bp1 = defaultdict(int)
@@ -415,12 +429,15 @@ def double_breaks_filter(double_breaks, min_reads, genome_ids):
                     span_bp1[gen_id] += cl[0].bp_1.spanning_reads[(gen_id, i)]
                     span_bp2[gen_id] += cl[0].bp_2.spanning_reads[(gen_id, i)]
                 
-            for (genome_id, haplotype), count in cl[0].bp_1.spanning_reads.items(): 
+            for (genome_id, haplotype), count in cl[0].bp_1.spanning_reads.items():
+                if genome_id == control_id:
+                    continue
                 count = count if not haplotype == 0 else span_bp1[genome_id] 
                 if genome_id in gen_ids and count < COV_THR:
                     for db in cl:
                         if db.haplotype_1 == haplotype:
                             db.is_pass = 'FAIL_LOWCOV_OTHER'
+                            
             for (genome_id, haplotype), count in cl[0].bp_2.spanning_reads.items():
                 count = count if not haplotype == 0 else span_bp2[genome_id] 
                 if genome_id in gen_ids and count < COV_THR:
@@ -440,13 +457,16 @@ def add_inbetween_ins(double_breaks):
             new_double_breaks.append(db)
             continue
         contig_id = 'contig_' + str(t)
-        new_bp = Breakpoint(contig_id, db.has_ins, 1, 60)
+        new_bp = Breakpoint(db.bp_1.ref_id, db.bp_1.position+1, 1, 60)
+        new_bp.insertion_size = db.has_ins
         new_bp.contig_id = contig_id
         t += 1
-        new_double_breaks.append(DoubleBreak(db.bp_1, db.direction_1, new_bp, 1, db.genome_id, db.haplotype_1, db.haplotype_1,
+        new_double_breaks.append(DoubleBreak(db.bp_1, db.direction_1, new_bp, -1, db.genome_id, db.haplotype_1, db.haplotype_1,
                                              db.supp, db.supp_read_ids, db.has_ins, db.genotype, db.edgestyle))
-        new_double_breaks.append(DoubleBreak(db.bp_2, db.direction_2, new_bp, 1, db.genome_id, db.haplotype_2, db.haplotype_1,
+        new_double_breaks[-1].has_ins = db.has_ins
+        new_double_breaks.append(DoubleBreak(db.bp_2, db.direction_2, new_bp, -1, db.genome_id, db.haplotype_2, db.haplotype_1,
                                              db.supp, db.supp_read_ids, db.has_ins, db.genotype, db.edgestyle))
+        new_double_breaks[-1].has_ins = db.has_ins
     return new_double_breaks
 
               
@@ -545,7 +565,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
     return ins_clusters
 
 
-def insertion_filter(ins_clusters, min_reads, genome_ids):
+def insertion_filter(ins_clusters, min_reads, genome_ids, control_id):
     PASS_2_FAIL_RAT = 0.9
     COV_THR = 2
     NUM_HAPLOTYPES = 3
@@ -591,6 +611,8 @@ def insertion_filter(ins_clusters, min_reads, genome_ids):
                 for i in range(NUM_HAPLOTYPES):
                     span_bp1[gen_id] += cl[0].bp_1.spanning_reads[(gen_id, i)]
             for (genome_id, haplotype), count in cl[0].bp_1.spanning_reads.items():
+                if genome_id == control_id:
+                    continue
                 count = count if not haplotype == 0 else span_bp1[genome_id]
                 if genome_id in gen_ids and count < COV_THR:
                     for ins in cl:
@@ -697,8 +719,10 @@ def add_breakends(double_breaks, clipped_clusters, min_reads):
                     loose_end_id = 'loose_end_' + str(t)
                     t += 1
                     for key, unique_reads in unique_reads_pass.items():
-                        new_bp = Breakpoint(loose_end_id, 0, 1, 60)
+                        new_bp = Breakpoint(bp_1.ref_id, bp_1.position, 1, 60) #### direction!
                         new_bp.loose_end_id = loose_end_id
+                        new_bp.insertion_size = bp_1.insertion_size
+                        bp_1.insertion_size = None
                         supp = len(unique_reads)
                         supp_reads = unique_reads
                         genome_id = key[0]
@@ -707,6 +731,7 @@ def add_breakends(double_breaks, clipped_clusters, min_reads):
                         else:
                             genotype = 'het'
                         double_breaks.append(DoubleBreak(bp_1, -1, new_bp, 1, genome_id, key[1], key[1], supp, supp_reads, bp_1.insertion_size, genotype, 'dashed'))
+                        double_breaks[-1].sv_type = 'loose_end'
 
 def tra_to_ins(ins_list_pos, ins_list, bp, dir_bp, dbs, ins_clusters, double_breaks):
     
@@ -853,10 +878,31 @@ def match_long_ins(ins_clusters, double_breaks, min_sv_size):
     if ins_to_remove:
         for ins in list(set(ins_to_remove)):
             ins_clusters.remove(ins) 
-                
+
+def calc_vaf(db_list):
+    NUM_HAPLOTYPES = 3
+    for db1 in db_list.values():
+        db = db1[0]
+        span_bp1 = 0
+        span_bp2 = 0
+        for i in range(NUM_HAPLOTYPES):
+            span_bp1 += db.bp_1.spanning_reads[(db.genome_id, i)]
+            span_bp2 += db.bp_2.spanning_reads[(db.genome_id, i)]
+        DV = 0
+        DR = int(np.mean([span_bp1, span_bp2]))
+        for db in db1:
+            DR1 = int(np.median([db.bp_1.spanning_reads[(db.genome_id, db.haplotype_1)], db.bp_2.spanning_reads[(db.genome_id, db.haplotype_2)]]))
+            DV1 = db.supp
+            db.hvaf =  DV1 / (DV1 + DR1) if DV1 > 0 else 0
+            DV += DV1
+        vaf =  DV / (DV + DR) if DV > 0 else 0
+        for db in db1:
+            db.DR = DR
+            db.DV = DV
+            db.vaf = vaf
+        
     
 def annotate_mut_type(double_breaks, control_id):
-    
     clusters = defaultdict(list) 
     for br in double_breaks:
         clusters[br.to_string()].append(br)
@@ -866,6 +912,8 @@ def annotate_mut_type(double_breaks, control_id):
         for db in db_clust:
             db_list[db.genome_id].append(db)
             
+        calc_vaf(db_list) 
+        
         mut_type = 'germline'#
         sample_ids = list(db_list.keys())
         if not control_id in sample_ids:
@@ -885,15 +933,15 @@ def filter_germline_db(double_breaks):
             db_list['somatic'].append(db)
     return db_list
 
-def filter_fail_double_db(double_breaks, output_only_pass, keep_low_coverage):
+def filter_fail_double_db(double_breaks, output_only_pass, keep_low_coverage, vaf_thr):
     db_list = []
     if output_only_pass:
         for db in double_breaks:
-            if db.is_pass == 'PASS':
+            if db.is_pass == 'PASS' and db.vaf > vaf_thr:
                 db_list.append(db)
     elif not keep_low_coverage:
         for db in double_breaks:
-            if not db.is_pass == 'FAIL_LOWCOV_OTHER':
+            if not db.is_pass == 'FAIL_LOWCOV_OTHER' and db.vaf > vaf_thr:
                 db_list.append(db)
     else:
         db_list = double_breaks
@@ -1105,6 +1153,238 @@ def add_secondary_ins(double_breaks):
         ins_2.is_pass = ins.is_pass
         ins_2.ins_seq = ins.ins_seq
         double_breaks.append(ins_2)
+        
+def cluster_db(double_breaks2):
+    clusters = defaultdict(list)
+    subgraph_id_list = defaultdict(list)
+    for br in double_breaks2:
+        br.subgraph_id = []
+        if br.bp_1.is_insertion:
+            continue
+        clusters[br.to_string()].append(br)
+    conn_inversions(clusters, subgraph_id_list)
+    conn_duplications(clusters, subgraph_id_list)
+    conn_inter(clusters, subgraph_id_list)
+    add_subgraph_id(clusters, subgraph_id_list)
+
+def add_subgraph_id(clusters, subgraph_id_list):
+    subgraph_id = 0
+    new_subgr_list = defaultdict(list)
+    
+    for subgr in subgraph_id_list.values():
+        subgr_merge = []
+        for db in subgr:
+            subgr_merge += db.subgraph_id
+        for id_s in list(set(subgr_merge)):
+            new_subgr_list[subgraph_id] += subgraph_id_list[id_s]
+        new_subgr_list[subgraph_id] = list(set(new_subgr_list[subgraph_id]))
+        subgraph_id += 1
+        
+    pos_list = defaultdict(list)
+    for subgr_id, subgr_list in new_subgr_list.items():
+        pos = defaultdict(list)
+        for db in subgr_list:
+            pos[db.bp_1.ref_id].append(db.bp_1.position)
+            pos[db.bp_2.ref_id].append(db.bp_2.position)
+        for seq, pos1 in pos.items():
+            pos_list[seq].append((subgr_id, min(pos1),max(pos1)))
+            
+    for cl in clusters.values():
+        gr_flag = False
+        db = cl[0]
+        gr_list = pos_list[db.bp_1.ref_id]
+        
+        for gr in gr_list:
+            if not gr_flag and db.bp_1.position > gr[1] and db.bp_1.position < gr[2]:
+                gr_flag = True
+                for db2 in cl:
+                    db2.subgraph_id = gr[0]
+                    
+        if gr_flag:
+            continue
+        
+        gr_list = pos_list[db.bp_2.ref_id]            
+        for gr in gr_list:
+            if not gr_flag and db.bp_2.position > gr[1] and db.bp_2.position < gr[2]:
+                gr_flag = True
+                for db2 in cl:
+                    db2.subgraph_id = gr[0]
+        
+ 
+def conn_inversions(clusters,subgraph_id_list):
+    inv_list_pos = defaultdict(list)
+    inv_list_neg = defaultdict(list)
+    subgraph_id = 0
+    FOLD_BACK_THR = 5000
+    INV_THR = 1000
+    
+    for cl in clusters.values():
+        db = cl[0]
+        if db.direction_1 == db.direction_2 == 1:
+            inv_list_pos[db.bp_1.ref_id].append(cl)
+            if not db.bp_2.ref_id == db.bp_1.ref_id:
+                inv_list_pos[db.bp_2.ref_id].append(cl)
+        elif db.direction_1 == db.direction_2 == -1:
+            inv_list_neg[db.bp_1.ref_id].append(cl)
+            if not db.bp_2.ref_id == db.bp_1.ref_id:
+                inv_list_neg[db.bp_2.ref_id].append(cl)
+                
+    for seq, pos_lis in inv_list_pos.items():
+        neg_lis = inv_list_neg[seq]
+        pos_lis_loc = []
+        neg_lis_loc = []
+        pos_lis_len = []
+        neg_lis_len = []
+        for cl in pos_lis:
+            a1 = cl[0].bp_1.position if cl[0].bp_1.ref_id == seq else cl[0].bp_2.position
+            pos_lis_loc.append(a1)
+            pos_lis_len.append(cl[0].bp_2.position - cl[0].bp_1.position if cl[0].bp_1.ref_id == seq else -1)
+            
+        for cl in neg_lis:
+            a1 = cl[0].bp_1.position if cl[0].bp_1.ref_id == seq else cl[0].bp_2.position
+            neg_lis_loc.append(a1)
+            neg_lis_len.append(cl[0].bp_2.position - cl[0].bp_1.position if cl[0].bp_1.ref_id == seq else -1)
+            
+        if not pos_lis_loc or not neg_lis_loc:
+            continue
+        
+        pos_lis_loc = np.array(pos_lis_loc)
+        neg_lis_loc = np.array(neg_lis_loc)
+        pr_dist = abs(pos_lis_loc[:, None] - neg_lis_loc)
+        dist = pr_dist.min(axis=1)
+        mx = pr_dist.max() + 1
+        inv_pairs = []
+        for ind, inv_len in enumerate(pos_lis_len):
+            if 0 < inv_len < FOLD_BACK_THR and dist[ind] > FOLD_BACK_THR:
+                for db in pos_lis[ind]:
+                    db.sv_type = 'foldback'
+                    pr_dist[ind] = mx
+                    inv_pairs.append((ind,-1))
+                    
+        dist = pr_dist.min(axis=0)
+        for ind, inv_len in enumerate(neg_lis_len):
+            if 0 < inv_len < FOLD_BACK_THR and dist[ind] > FOLD_BACK_THR:
+                for db in neg_lis[ind]:
+                    db.sv_type = 'foldback'
+                    pr_dist[:, ind] = mx
+                    inv_pairs.append((-1,ind))
+                    
+        while len(inv_pairs) < min([len(pos_lis_loc) , len(neg_lis_loc)]):
+            indexes = pr_dist.argmin(axis=1)
+            dist = pr_dist.min(axis=1)
+            pair_list = list(enumerate(indexes))
+            inv_pairs.append(pair_list[0])
+            for pr in pair_list[1:]:
+                if not inv_pairs[-1][1] == pr[1]:
+                    inv_pairs.append(pr)
+                elif inv_pairs[-1][1] == pr[1] and dist[inv_pairs[-1][0]] > dist[pr[0]]:
+                    inv_pairs[-1] = pr
+            for pr in inv_pairs:
+                pr_dist[pr[0]][pr[1]] = mx
+                
+        for pr in inv_pairs:
+            if pr[0] == -1 or pr[0] == -1:
+                continue
+            clp = pos_lis[pr[0]]
+            cln = neg_lis[pr[1]]
+            sv_type = None
+            if abs(clp[0].bp_1.position - cln[0].bp_2.position) + abs(clp[0].bp_2.position - cln[0].bp_1.position) < INV_THR:
+                sv_type = 'complete_inv'
+            for db in clp + cln:
+                db.subgraph_id.append(subgraph_id)
+                db.sv_type = sv_type
+                subgraph_id_list[subgraph_id].append(db)
+            subgraph_id += 1
+            
+def conn_duplications(clusters, subgraph_id_list):        
+    
+    DUP_COV_THR = 0.3
+    DUP_LEN_THR = 2000000
+    subgraph_id = list(subgraph_id_list.keys())[-1]+1 if len(subgraph_id_list.keys()) > 0 else 0
+    for ind, cl in enumerate(clusters.values()):
+        db = cl[0]
+        subgraph_ls = []
+        is_dup = False
+        del_len = 0
+        if not db.bp_1.ref_id == db.bp_2.ref_id or db.is_dup or db.bp_2.is_insertion:
+            continue
+        
+        if db.direction_1 == -1 and db.direction_2 == 1:
+            dup_len = db.bp_2.position - db.bp_1.position
+            if dup_len > DUP_LEN_THR:
+                continue
+            
+            subgraph_ls.append(cl)
+            for cl2 in list(clusters.values())[ind+1:]:
+                db2 = cl2[0]
+                if not db2.bp_1.ref_id == db.bp_1.ref_id:
+                    break
+                if db2.bp_1.ref_id == db2.bp_2.ref_id and db2.bp_1.position > db.bp_1.position:
+                    if not subgraph_ls:
+                        is_dup = True
+                    break
+                if db2.bp_1.ref_id == db2.bp_2.ref_id and db.direction_1 == 1 and db.direction_2 == -1:
+                    subgraph_ls.append(cl2)
+                    del_len += min([db2.bp_2.position,db.bp_2.position]) - db2.bp_1.position
+                else:
+                    subgraph_ls.append(cl2) 
+                    
+            subgraph_ls.append(cl)
+            subgraph_id +=1
+            if not del_len:
+                is_dup = True 
+            elif del_len / dup_len < DUP_COV_THR:
+                is_dup = True
+            for db in cl:
+                db.is_dup = is_dup
+            if not is_dup:
+                db.sv_type = 'Intra_chr_ins'
+            for cl2 in subgraph_ls:
+                for db2 in cl2:
+                    db2.subgraph_id.append(subgraph_id)
+                    subgraph_id_list[subgraph_id].append(db2)
+        
+            
+def conn_inter(clusters, subgraph_id_list):
+    subgraph_id = list(subgraph_id_list.keys())[-1]+1 if len(subgraph_id_list.keys()) > 0 else 0
+    intra_chr_cl = defaultdict(list)
+    DEL_THR = 1000000
+    
+    for cl in clusters.values():
+        db = cl[0]
+        if db.bp_1.ref_id == db.bp_2.ref_id:
+            continue
+        intra_chr_cl[(db.bp_1.ref_id, db.bp_2.ref_id)].append(cl)
+        
+    for key, intra_chr in intra_chr_cl.items():
+        if len(intra_chr) < 2:
+            continue
+        
+        ind_list = []
+        for ind, cl in enumerate(intra_chr):
+            if ind in ind_list:
+                continue
+            
+            db = cl[0]
+            dir1, dir2 = -1 * db.direction_1, -1 * db.direction_2
+            for ind2, cl2 in enumerate(intra_chr[ind+1:]):
+                db2 = cl2[0]
+                if db2.direction_1 == dir1 and db2.direction_2 == dir2:
+                    dist = max([abs(db.bp_1.position - db2.bp_1.position), abs(db.bp_2.position - db2.bp_2.position)]) 
+                    if dist > DEL_THR:
+                        continue
+                    ind_list.append(ind2)
+                    
+                    for db in cl:
+                        db.subgraph_id.append(subgraph_id)
+                        subgraph_id_list[subgraph_id].append(db)
+                        db.sv_type = 'Inter_chr_ins'
+                        
+                    for db2 in cl2:
+                        db2.subgraph_id.append(subgraph_id)
+                        subgraph_id_list[subgraph_id].append(db2)
+                        db2.sv_type = 'Inter_chr_ins'
+                    subgraph_id +=1
 
 def write_alignments(allsegments, outpath):
     aln_dump_stream = open(outpath, "w")
@@ -1140,6 +1420,7 @@ def output_breaks(double_breaks, genome_tags, phasing, out_stream):
             header += '_'.join([tag, 'spanning_1,'])
             header += '_'.join([tag, 'spanning_2,'])
             t += 1
+            
     summary_csv = defaultdict(list)
     for br in double_breaks:
         if not summary_csv[br.to_string()]:
@@ -1149,6 +1430,7 @@ def output_breaks(double_breaks, genome_tags, phasing, out_stream):
         else:
             idd=(br.genome_id, br.haplotype_1)
             summary_csv[br.to_string()][loc[idd]] = (br.is_pass, br.supp, br.bp_1.spanning_reads[idd], br.bp_2.spanning_reads[idd])
+            
     out_stream.write(header + "\n")
     for key,values in summary_csv.items():
         bp_array=[]
@@ -1189,29 +1471,23 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, genome_
     match_long_ins(ins_clusters, double_breaks, args.min_sv_size)
     
     compute_bp_coverage(double_breaks, coverage_histograms, genome_ids)
-    double_breaks = double_breaks_filter(double_breaks, args.bp_min_support, genome_ids)
+    double_breaks = double_breaks_filter(double_breaks, args.bp_min_support, genome_ids, list(control_id)[0])
     double_breaks.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position, b.direction_1))
     
     compute_bp_coverage(ins_clusters, coverage_histograms, genome_ids)
-    ins_clusters = insertion_filter(ins_clusters, args.bp_min_support, genome_ids)
+    ins_clusters = insertion_filter(ins_clusters, args.bp_min_support, genome_ids, list(control_id)[0])
     ins_clusters.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position))
    
     double_breaks +=  ins_clusters
-    if not args.only_germline:
-        annotate_mut_type(double_breaks, list(control_id)[0])
     
     if args.inbetween_ins:
-        double_breaks = add_inbetween_ins(double_breaks)
         add_breakends(double_breaks, clipped_clusters, args.bp_min_support)
+        
+    annotate_mut_type(double_breaks, list(control_id)[0])
         
     logger.info('Writing breakpoints')
     output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
     
-    double_breaks = filter_fail_double_db(double_breaks, args.output_only_pass, args.keep_low_coverage)
-    
-    
+    double_breaks = filter_fail_double_db(double_breaks, args.output_only_pass, args.keep_low_coverage, args.vaf_thr)
     
     return double_breaks 
-
-
-    

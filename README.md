@@ -16,6 +16,7 @@ Requirements:
 * numpy
 * pydot
 * graphviz
+* pysam
 
 The easiest way to install dependencies is through conda.
 
@@ -69,8 +70,6 @@ Providing phased bam files and phasing vcf is optional but recommended.
 * `--vntr-bed` path to bed file for tandem repeat regions (must be ordered)
 
 * `--phasing-vcf` path to vcf file used for phasing (must for the haplotype specific SV calling)
-
-* `--max-read-error` maximum base alignment error for read [0.005]. Setting to `0.05` is recommended for ONT R9 data.
   
 * `--min-support` minimum number of reads supporting a breakpoint [3]
   
@@ -109,6 +108,7 @@ Detailed information for all breakpoints detected in any of the bam files provid
 * `--min_sv_size` minimum SV size to be reported [50]
 
 * `--write-germline` to generate germline vcfs and to add germline connection to breakpoint graph
+
 
 ---
 ### Contact
