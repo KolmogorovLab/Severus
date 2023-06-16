@@ -356,7 +356,7 @@ def get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads):
     return db_list
 
 #TODO BAM/HAPLOTYPE SPECIFIC FILTER
-def double_breaks_filter(double_breaks, min_reads, genome_ids, control_id):
+def double_breaks_filter(double_breaks, min_reads, genome_ids):
 
     PASS_2_FAIL_RAT = 0.5
     CONN_2_PASS = 0.5
@@ -430,8 +430,6 @@ def double_breaks_filter(double_breaks, min_reads, genome_ids, control_id):
                     span_bp2[gen_id] += cl[0].bp_2.spanning_reads[(gen_id, i)]
                 
             for (genome_id, haplotype), count in cl[0].bp_1.spanning_reads.items():
-                if genome_id == control_id:
-                    continue
                 count = count if not haplotype == 0 else span_bp1[genome_id] 
                 if genome_id in gen_ids and count < COV_THR:
                     for db in cl:
@@ -565,7 +563,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
     return ins_clusters
 
 
-def insertion_filter(ins_clusters, min_reads, genome_ids, control_id):
+def insertion_filter(ins_clusters, min_reads, genome_ids):
     PASS_2_FAIL_RAT = 0.9
     COV_THR = 2
     NUM_HAPLOTYPES = 3
@@ -611,8 +609,6 @@ def insertion_filter(ins_clusters, min_reads, genome_ids, control_id):
                 for i in range(NUM_HAPLOTYPES):
                     span_bp1[gen_id] += cl[0].bp_1.spanning_reads[(gen_id, i)]
             for (genome_id, haplotype), count in cl[0].bp_1.spanning_reads.items():
-                if genome_id == control_id:
-                    continue
                 count = count if not haplotype == 0 else span_bp1[genome_id]
                 if genome_id in gen_ids and count < COV_THR:
                     for ins in cl:
@@ -900,6 +896,18 @@ def calc_vaf(db_list):
             db.DR = DR
             db.DV = DV
             db.vaf = vaf
+
+def add_mut_type(db_list, control_id):
+    mut_type = 'germline'#
+    sample_ids = list(db_list.keys())
+    if not control_id in sample_ids:
+        mut_type = 'somatic'
+    for db1 in db_list.values():
+        pass_list = [db.is_pass for db in db1]
+        if 'FAIL_LOWCOV_OTHER' in pass_list and not 'PASS' in pass_list:
+            mut_type = 'germline'
+        for db in db1:
+            db.mut_type = mut_type
         
     
 def annotate_mut_type(double_breaks, control_id):
@@ -913,17 +921,10 @@ def annotate_mut_type(double_breaks, control_id):
             db_list[db.genome_id].append(db)
             
         calc_vaf(db_list) 
+        if control_id:
+            add_mut_type(db_list, control_id)
         
-        mut_type = 'germline'#
-        sample_ids = list(db_list.keys())
-        if not control_id in sample_ids:
-            mut_type = 'somatic'
-        for db1 in db_list.values():
-            pass_list = [db.is_pass for db in db1]
-            if 'FAIL_LOWCOV_OTHER' in pass_list and not 'PASS' in pass_list:
-                mut_type = 'germline'
-            for db in db1:
-                db.mut_type = mut_type
+        
 
 def filter_germline_db(double_breaks):
     db_list = defaultdict(list) 
@@ -1471,19 +1472,20 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, genome_
     match_long_ins(ins_clusters, double_breaks, args.min_sv_size)
     
     compute_bp_coverage(double_breaks, coverage_histograms, genome_ids)
-    double_breaks = double_breaks_filter(double_breaks, args.bp_min_support, genome_ids, list(control_id)[0])
+    double_breaks = double_breaks_filter(double_breaks, args.bp_min_support, genome_ids)
     double_breaks.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position, b.direction_1))
     
     compute_bp_coverage(ins_clusters, coverage_histograms, genome_ids)
-    ins_clusters = insertion_filter(ins_clusters, args.bp_min_support, genome_ids, list(control_id)[0])
+    ins_clusters = insertion_filter(ins_clusters, args.bp_min_support, genome_ids)
     ins_clusters.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position))
    
     double_breaks +=  ins_clusters
     
     if args.inbetween_ins:
         add_breakends(double_breaks, clipped_clusters, args.bp_min_support)
-        
-    annotate_mut_type(double_breaks, list(control_id)[0])
+    
+    cont_id  = list(control_id)[0] if control_id else '' 
+    annotate_mut_type(double_breaks, cont_id)
         
     logger.info('Writing breakpoints')
     output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))

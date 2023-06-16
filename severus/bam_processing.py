@@ -292,7 +292,7 @@ def write_readqual(segments_by_read, outpath):
 COV_WINDOW_MM  = 500
 def get_background_mm_rate(seg, mismatch_histograms):
     hist_start = seg.ref_start // COV_WINDOW_MM
-    hist_end = seg.ref_end // COV_WINDOW_MM
+    hist_end = min([seg.ref_end // COV_WINDOW_MM, len(mismatch_histograms[seg.ref_id])])
     mm_list = mismatch_histograms[seg.ref_id][hist_start : hist_end + 1]
     mm_list_nz = [mm for mm in mm_list if mm > 0]
     if mm_list_nz:
