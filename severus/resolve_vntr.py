@@ -4,6 +4,7 @@ import bisect
 from collections import  defaultdict
 import logging
 import os
+import numpy as np 
 
 from severus.bam_processing import ReadSegment, add_read_qual, write_readqual
 
@@ -74,7 +75,7 @@ def filter_vntr_only_segments(split_segs, vntr_list):
                     return True
 
 ##TODO: Improve seg_len calculation        
-def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, split_seg_vntr, min_sv_size, ins_seq):
+def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_pos, split_seg_vntr, min_sv_size, ins_seq):
     seg_span=[]
     is_end = False
     seg_len = abs(segments[0].read_start - segments[-1].read_end)
@@ -106,14 +107,14 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, split
             if bp_len < -1 * min_sv_size:
                 return [s1] + clipped_segs
             elif bp_len > min_sv_size:
-                new_seg = ReadSegment(0, 0, bp_len, vntr_strt, vntr_strt, s1.read_id,
+                new_seg = ReadSegment(0, 0, bp_len, vntr_strt, vntr_strt, bp_pos, bp_pos, s1.read_id,
                                       s1.ref_id, s1.strand, s1.read_length,0, s1.haplotype,
                                       s1.mapq, s1.genome_id, 0, False, 0)
                 new_seg.is_clipped = True
                 return [s1, new_seg]
         else:
             if bp_len > min_sv_size:
-                new_seg = ReadSegment(s1.read_length-bp_len, 0, bp_len, vntr_strt, vntr_strt, s1.read_id,
+                new_seg = ReadSegment(s1.read_length-bp_len, 0, bp_len, vntr_strt, vntr_strt, bp_pos, bp_pos, s1.read_id,
                                       s1.ref_id, s1.strand, s1.read_length,bp_len, s1.haplotype,
                                       s1.mapq, s1.genome_id, 0, True, 0)
                 if bp_len < len(ins_seq):
@@ -160,7 +161,7 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, split
             dist = vntr_strt - s1.ref_start
             ins_start = s1.read_start + dist
             ins_end = ins_start + bp_len
-            s2_new = ReadSegment(s1.align_start, ins_start, ins_end, vntr_strt, vntr_strt, s1.read_id,
+            s2_new = ReadSegment(s1.align_start, ins_start, ins_end, vntr_strt, vntr_strt, bp_pos, bp_pos, s1.read_id,
                                  s1.ref_id, s1.strand, s1.read_length, bp_len, s1.haplotype,
                                  s1.mapq, s1.genome_id, 0, True, 0)
             if bp_len < len(ins_seq):
@@ -214,7 +215,7 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
             
     if filter_vntr_only_segments(split_segs, vntr_list):
         return new_read
-    
+
     for ins in ins_segs:
         ins_vntr = resolve_vntr_ins(ins, vntr_list)
         if not ins_vntr:
@@ -243,29 +244,39 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
             new_read.append(s2)
         
     for key, bp_in_vntr in seg_in_vntr.items():
+        
         segments = []
         bp_len = 0
         ins_seq = ''
+        bp_strt = []
+        strand = bp_in_vntr[0][0].strand
         for bp in bp_in_vntr:
+            if not bp[0].strand == strand:
+                continue
             bp_len += bp[2]
             if not bp[0].is_insertion:
                 segments.append(bp[0])
                 segments.append(bp[1])
             else:
                 ins_seq += bp[0].ins_seq
+                bp_strt.append(bp[0].ref_end)
                 
+        bp_pos = key[1]
+        if bp_strt:
+            bp_pos = int(np.median(bp_strt))
+            
         if not segments:
             s1 = bp[0]
-            new_read.append(ReadSegment(s1.align_start, s1.read_start + 1, s1.read_start + bp_len, key[1], key[1], s1.read_id,
+            new_read.append(ReadSegment(s1.align_start, s1.read_start + 1, s1.read_start + bp_len, key[1], key[1], bp_pos, bp_pos, s1.read_id,
                                         s1.ref_id, s1.strand, s1.read_length,bp_len, s1.haplotype, s1.mapq,
                                         s1.genome_id, 0, True, 0))
             new_read[-1].ins_seq = ins_seq
-            if not check_spanning(new_read, key):
+            if not check_spanning(read, key):
                 new_read[-1].is_clipped = True
                 new_read[-1].is_insertion = False
         else:
             segments.sort(key = lambda s:s.ref_start)
-            new_segments = calc_new_segments(segments, clipped_segs, key[1], key[2],bp_len, split_seg_vntr, min_sv_size, ins_seq)
+            new_segments = calc_new_segments(segments, clipped_segs, key[1], key[2],bp_len, bp_pos, split_seg_vntr, min_sv_size, ins_seq)
             seg_to_remove += list(set(segments) - set(new_segments))
                 
             if new_segments:
@@ -331,7 +342,7 @@ def intrachr_to_ins(dedup_segments):
                 ins_pos = s1.ref_end
             s1.ref_end = bp_order[1][2].ref_end
             bp_len = abs(ins_st - ins_end)
-            new_read.append(ReadSegment(s1.align_start, ins_st, ins_end, ins_pos, ins_pos, s1.read_id,
+            new_read.append(ReadSegment(s1.align_start, ins_st, ins_end, ins_pos, ins_pos, ins_pos, ins_pos, s1.read_id,
                                         s1.ref_id, s1.strand, s1.read_length, bp_len, s1.haplotype,
                                         s1.mapq, s1.genome_id, 0, True, 0))
             new_read[-1].ins_seq = "{0}:{1}-{2}".format(chr_list[i + 1], dedup_segments[i+1].ref_start, dedup_segments[i+1].ref_end)

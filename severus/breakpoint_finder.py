@@ -28,14 +28,16 @@ MAX_UNALIGNED_LEN = 500
 COV_WINDOW = 500
 
 class ReadConnection(object):
-    __slots__ = ("ref_id_1", "pos_1", "sign_1", "ref_id_2", "pos_2", "sign_2","haplotype_1", "haplotype_2", "read_id", 
+    __slots__ = ("ref_id_1", "pos_1", "pos_1_ori", "sign_1", "ref_id_2", "pos_2", "pos_2_ori", "sign_2", "haplotype_1", "haplotype_2", "read_id", 
                  "genome_id", 'bp_list', 'is_pass1', 'is_pass2', 'mapq_1', 'mapq_2', 'is_dup', 'has_ins')
-    def __init__(self, ref_id_1, pos_1, sign_1, ref_id_2, pos_2, sign_2, haplotype_1, 
+    def __init__(self, ref_id_1, pos_1, pos_1_ori , sign_1, ref_id_2, pos_2, pos_2_ori, sign_2, haplotype_1, 
                  haplotype_2, read_id, genome_id, is_pass1, is_pass2, mapq_1, mapq_2, is_dup, has_ins):
         self.ref_id_1 = ref_id_1
         self.ref_id_2 = ref_id_2
         self.pos_1 = pos_1
         self.pos_2 = pos_2
+        self.pos_1_ori = pos_1_ori
+        self.pos_2_ori = pos_2_ori
         self.sign_1 = sign_1
         self.sign_2 = sign_2
         self.haplotype_1 = haplotype_1
@@ -55,6 +57,8 @@ class ReadConnection(object):
         return self.sign_2 * self.pos_2
     def get_pos(self, bp_dir):
         return self.pos_1 if bp_dir == 'right' else self.pos_2
+    def get_pos_ori(self, bp_dir):
+        return self.pos_1_ori if bp_dir == 'right' else self.pos_2_ori
     def get_qual(self, bp_dir):
         return self.mapq_1 if bp_dir == 'right' else self.mapq_2
     def is_pass(self, bp_dir):
@@ -63,7 +67,7 @@ class ReadConnection(object):
         return self.sign_1 if bp_dir == 'right' else self.sign_2
 
 class Breakpoint(object):
-    __slots__ = ("ref_id", "position","dir_1", "spanning_reads", "connections", 
+    __slots__ = ("ref_id", "position","dir_1", "spanning_reads", "connections", 'prec',
                  "read_ids", "pos2", 'id', "is_insertion", "insertion_size", "qual", 'contig_id', 'loose_end_id')
     def __init__(self, ref_id, ref_position, dir_1, qual):
         self.ref_id = ref_id
@@ -79,6 +83,7 @@ class Breakpoint(object):
         self.qual = qual
         self.contig_id = False
         self.loose_end_id = False
+        self.prec = 1
 
     def fancy_name(self):
         if not self.is_insertion or self.contig_id:
@@ -104,7 +109,7 @@ class Breakpoint(object):
 class DoubleBreak(object):
     __slots__ = ("bp_1", "direction_1", "bp_2", "direction_2", "genome_id","haplotype_1",'haplotype_2',"supp",'supp_read_ids',
                  'length','genotype','edgestyle', 'is_pass', 'ins_seq', 'mut_type', 'is_dup', 'has_ins','subgraph_id', 'sv_type',
-                 'DR', 'DV', 'hvaf', 'vaf')
+                 'DR', 'DV', 'hvaf', 'vaf', 'prec')
     def __init__(self, bp_1, direction_1, bp_2, direction_2, genome_id, haplotype_1, haplotype_2, 
                  supp, supp_read_ids, length, genotype, edgestyle):
         self.bp_1 = bp_1
@@ -130,6 +135,7 @@ class DoubleBreak(object):
         self.DV = 0
         self.hvaf = 0.0
         self.vaf = 0.0
+        self.prec = 1
     def to_string(self):
         strand_1 = "+" if self.direction_1 > 0 else "-"
         strand_2 = "+" if self.direction_2 > 0 else "-"
@@ -191,11 +197,13 @@ def get_breakpoints(split_reads, ref_lengths, args):
         ref_bp, sign = None, None
         if direction == "right":
             ref_bp = seg.ref_end if seg.strand == 1 else seg.ref_start
+            ref_bp_ori = seg.ref_end_ori if seg.strand == 1 else seg.ref_start_ori
             sign = 1 if seg.strand == 1 else -1
         elif direction == "left":
             ref_bp = seg.ref_start if seg.strand == 1 else seg.ref_end
+            ref_bp_ori = seg.ref_start_ori if seg.strand == 1 else seg.ref_end_ori
             sign = -1 if seg.strand == 1 else 1
-        return ref_bp, sign
+        return ref_bp, ref_bp_ori, sign
     
     def _add_double(s1, s2):
         has_ins = 0
@@ -203,13 +211,13 @@ def get_breakpoints(split_reads, ref_lengths, args):
         if dist > sv_size:
             has_ins = dist
         
-        ref_bp_1, sign_1 = _signed_breakpoint(s1, "right")
-        ref_bp_2, sign_2 = _signed_breakpoint(s2, "left")
+        ref_bp_1, ref_bp_1_ori, sign_1 = _signed_breakpoint(s1, "right")
+        ref_bp_2, ref_bp_2_ori, sign_2 = _signed_breakpoint(s2, "left")
         is_dup = False
         if ref_bp_1 > ref_bp_2:
             if sign_1 == 1 and sign_2 == -1 and s1.ref_start <= s2.ref_start <= s1.ref_end <= s2.ref_end:
                 is_dup = True
-            rc = ReadConnection(s2.ref_id, ref_bp_2, sign_2, s1.ref_id, ref_bp_1, sign_1,
+            rc = ReadConnection(s2.ref_id, ref_bp_2, ref_bp_2_ori, sign_2, s1.ref_id, ref_bp_1, ref_bp_1_ori, sign_1,
                                 s2.haplotype, s1.haplotype, s1.read_id, s1.genome_id, s2.is_pass, 
                                 s1.is_pass, s2.mapq, s1.mapq, is_dup, has_ins)
             seq_breakpoints_r[s2.ref_id].append(rc)
@@ -217,7 +225,7 @@ def get_breakpoints(split_reads, ref_lengths, args):
         else:
             if sign_1 == -1 and sign_2 == 1 and s2.ref_start <= s1.ref_start <= s2.ref_end <= s1.ref_end:
                 is_dup = True
-            rc = ReadConnection(s1.ref_id, ref_bp_1, sign_1, s2.ref_id, ref_bp_2, sign_2,
+            rc = ReadConnection(s1.ref_id, ref_bp_1, ref_bp_1_ori, sign_1, s2.ref_id, ref_bp_2, ref_bp_2_ori, sign_2,
                                 s1.haplotype, s2.haplotype, s1.read_id, s1.genome_id, s1.is_pass, 
                                 s2.is_pass, s1.mapq, s1.mapq, is_dup, has_ins)
             seq_breakpoints_r[s1.ref_id].append(rc)
@@ -263,7 +271,7 @@ def cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads, bp
     
     bp_pos.sort(key=lambda bp: (bp.dir_1(bp_dir), bp.get_pos(bp_dir)))
     for rc in bp_pos:
-        if cur_cluster and rc.get_pos(bp_dir) - cur_cluster[-1].get_pos(bp_dir)> clust_len: 
+        if cur_cluster and rc.get_pos(bp_dir) - cur_cluster[-1].get_pos(bp_dir) > clust_len: 
             clusters.append(cur_cluster)
             cur_cluster = [rc]
         else:
@@ -286,17 +294,21 @@ def cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads, bp
             by_genome_id[read[1]] += 1
             
         if max(by_genome_id.values()) >= min_reads:
-            position_arr = [x.get_pos(bp_dir) for x in cl if x.is_pass(bp_dir) == 'PASS']
+            position_arr = [x.get_pos_ori(bp_dir) for x in cl if x.is_pass(bp_dir) == 'PASS']
             qual_arr = [x.get_qual(bp_dir) for x in cl if x.is_pass(bp_dir) == 'PASS']
             if not position_arr:
                 continue
             position = int(np.median(position_arr))
+            prec = 1
+            if max(position_arr) - min(position_arr) > 2 * clust_len:
+                prec = 0
             qual = int(np.median(qual_arr))
             sign  = x.sign_1 if bp_dir == 'right' else x.sign_2
             if position >= min_ref_flank and position <= ref_lengths[seq] - min_ref_flank:
                 bp = Breakpoint(seq, position, sign, qual)
                 bp.connections = connections
                 bp.read_ids = read_ids
+                bp.prec = prec
                 bp_list.append(bp)
                 
     return bp_list
@@ -341,8 +353,8 @@ def get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads):
             else:
                 genotype = 'het'
                 
-            supp = len(unique_reads_pass[keys])
-            support_reads = unique_reads_pass[keys]
+            supp = len(unique_reads[keys])
+            support_reads = unique_reads[keys]
             
             if bp_1.ref_id == bp_2.ref_id:
                 length_bp = abs(bp_1.position - bp_2.position)
@@ -350,8 +362,11 @@ def get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads):
                     continue
             else:
                 length_bp = 0
-                
+            prec = 1
+            if not bp_1.prec or not bp_2.prec:
+                prec = 0
             db_list.append(DoubleBreak(bp_1, bp_1.dir_1, bp_2, bp_2.dir_1,genome_id, haplotype_1, haplotype_2, supp, support_reads, length_bp, genotype , 'dashed'))
+            db_list[-1].prec = prec
             
     return db_list
 
@@ -471,6 +486,7 @@ def add_inbetween_ins(double_breaks):
 def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
 
     CLUST_LEN = 1000
+    CV_THR = 0.25
     sv_len_diff = args.bp_cluster_size
     min_reads = args.bp_min_support
     min_ref_flank = args.min_ref_flank 
@@ -507,55 +523,74 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
                 
         if cur_cluster:
             clusters.append(cur_cluster)
-        
+    
         for cl in clusters:
             unique_reads_pass = defaultdict(set)
+            unique_reads = defaultdict(set)
+            prec = 1
             for x in cl:
+                unique_reads[(x.genome_id, x.haplotype)].add(x)
                 if x.is_pass == 'PASS':
-                    unique_reads_pass[(x.genome_id, x.haplotype)].add(x)
-            
-            by_genome_id_pass = defaultdict(int)
-            happ_support_1 = defaultdict(list)
-            
-            for key, values in unique_reads_pass.items():
-                by_genome_id_pass[key[0]] = len(set([red.read_id for red in unique_reads_pass[key]]))
-                happ_support_1[key[0]].append(key[1])
+                    unique_reads_pass[(x.genome_id, x.haplotype)].add(x)#
                     
-            if by_genome_id_pass.values() and max(by_genome_id_pass.values()) >= MIN_FULL_READ_SUPP:
-                position = int(np.median([x.ref_end for x in cl if x.is_pass == 'PASS']))
-                mapq = int(np.median([x.mapq for x in cl if x.is_pass == 'PASS']))
-                ins_length = int(np.median([x.segment_length for x in cl]))
-                ins_seq_loc = [i for i , x in enumerate(cl) if x.ins_seq and ':' not in x.ins_seq]
-                if not ins_seq_loc:
-                    ins_seq_loc = [i for i , x in enumerate(cl) if x.ins_seq]
-                ins_seq = cl[int(np.median(ins_seq_loc))].ins_seq
-                if ins_length < sv_size:
-                    continue
-                if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank:
-                    cl = add_clipped_end(position, clipped_clusters_pos, clipped_clusters_seq, by_genome_id_pass,
-                                                             happ_support_1, unique_reads_pass)
-                    if cl:
-                        clipped_to_remove.append(cl)
-                    if not by_genome_id_pass.values() or not max(by_genome_id_pass.values()) >= min_reads:
-                        continue
-                        
-                    for key, unique_reads in unique_reads_pass.items():
-                        bp_1 = Breakpoint(seq, position, -1, mapq)
-                        bp_1.read_ids = [x.read_id for x in unique_reads]
-                        bp_1.connections = unique_reads
-                        bp_3 = Breakpoint(seq, position, 1, mapq)
-                        bp_3.is_insertion = True
-                        bp_3.insertion_size = ins_length
-                        supp = len(unique_reads)
-                        supp_reads = unique_reads
-                        genome_id = key[0]
-                        if sum(happ_support_1[genome_id]) == NUM_HAPLOTYPES:
-                            genotype = 'hom'
-                        else:
-                            genotype = 'het'
-                        db_1 = DoubleBreak(bp_1, -1, bp_3, 1, genome_id, key[1], key[1], supp, supp_reads, ins_length, genotype, 'dashed')
-                        db_1.ins_seq = ins_seq
-                        ins_clusters.append(db_1)
+            by_genome_id_pass = defaultdict(int)
+            happ_support_1 = defaultdict(list)#
+            
+            for key, values in unique_reads.items():
+                if unique_reads_pass[key]:
+                    by_genome_id_pass[key[0]] = len(set([red.read_id for red in unique_reads_pass[key]]))
+                    happ_support_1[key[0]].append(key[1])#
+                    
+            if not by_genome_id_pass.values() or max(by_genome_id_pass.values()) < MIN_FULL_READ_SUPP:
+                continue
+            
+            pos_list = [x.ref_end_ori for x in cl if x.is_pass == 'PASS']
+            s_len = [x.segment_length for x in cl if x.is_pass == 'PASS']
+            if np.median(s_len) * (len(s_len) + 1) < pos_list[-1] - pos_list[0]:
+                continue
+            
+            if max(pos_list) - min(pos_list) > 2 * sv_size:
+                prec = 0
+            elif np.std(s_len) / np.mean(s_len) > CV_THR:
+                prec = 0
+                
+            position = int(np.median(pos_list))
+            mapq = int(np.median([x.mapq for x in cl if x.is_pass == 'PASS']))
+            ins_length = int(np.median(s_len))
+            ins_seq_loc = [i for i , x in enumerate(cl) if x.ins_seq and ':' not in x.ins_seq]
+            if not ins_seq_loc:
+                ins_seq_loc = [i for i , x in enumerate(cl) if x.ins_seq]
+                
+            ins_seq = cl[int(np.median(ins_seq_loc))].ins_seq
+            if ins_length < sv_size:
+                continue
+            
+            if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank:
+                cl = add_clipped_end(position, clipped_clusters_pos, clipped_clusters_seq, by_genome_id_pass,
+                                                         happ_support_1, unique_reads_pass)
+                if cl:
+                    clipped_to_remove.append(cl)
+                if not by_genome_id_pass.values() or not max(by_genome_id_pass.values()) >= min_reads:
+                    continue#
+                for key, unique_reads in unique_reads.items():
+                    unique_reads = unique_reads_pass[key]
+                    bp_1 = Breakpoint(seq, position, -1, mapq)
+                    bp_1.read_ids = [x.read_id for x in unique_reads]
+                    bp_1.connections = unique_reads
+                    bp_3 = Breakpoint(seq, position, 1, mapq)
+                    bp_3.is_insertion = True
+                    bp_3.insertion_size = ins_length
+                    supp = len(unique_reads)
+                    supp_reads = unique_reads
+                    genome_id = key[0]
+                    if sum(happ_support_1[genome_id]) == NUM_HAPLOTYPES:
+                        genotype = 'hom'
+                    else:
+                        genotype = 'het'
+                    db_1 = DoubleBreak(bp_1, -1, bp_3, 1, genome_id, key[1], key[1], supp, supp_reads, ins_length, genotype, 'dashed')
+                    db_1.prec = prec
+                    db_1.ins_seq = ins_seq
+                    ins_clusters.append(db_1)
         if clipped_to_remove:              
             for clipped in list(set(clipped_to_remove)):
                 clipped_clusters[seq].remove(clipped)
@@ -646,7 +681,7 @@ def cluster_clipped_ends(clipped_reads, clust_len, min_ref_flank, ref_lengths):
             clusters.append(cur_cluster)
             
         for cl in clusters:
-            position = int(np.median([x.ref_end for x in cl]))
+            position = int(np.median([x.ref_end_ori for x in cl]))
             if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank:
                 bp = Breakpoint(seq, position, cl[0].strand, QUAL)
                 bp.insertion_size = int(np.median([x.segment_length for x in cl]))
@@ -1108,8 +1143,10 @@ def resolve_overlaps(split_reads, min_ovlp_len, min_mapq):
                 seg.segment_length = seg.read_end - seg.read_start
                 if seg.strand == 1:
                     seg.ref_start = seg.ref_start + left_ovlp
+                    seg.ref_start_ori = seg.ref_start
                 else:
                     seg.ref_start = seg.ref_end - left_ovlp
+                    seg.ref_start_ori = seg.ref_start
                 
         return seg_to_remove
 

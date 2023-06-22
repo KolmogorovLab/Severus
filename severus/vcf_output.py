@@ -12,8 +12,8 @@ import math
 
 
 class vcf_format(object):
-    __slots__ = ('chrom', 'pos', 'haplotype', 'ID', 'sv_type','alt', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2', 'DR', 'DV', 'mut_type', 'hVaf', 'ins_seq', 'gen_type', 'cluster_id', 'ins_len', 'detailed_type')
-    def __init__(self, chrom, pos, haplotype, ID, sv_type, alt, sv_len, qual, Filter, chr2, pos2, DR, DV, mut_type, hVaf, gen_type, cluster_id, ins_len, detailed_type):
+    __slots__ = ('chrom', 'pos', 'haplotype', 'ID', 'sv_type','alt', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2', 'DR', 'DV', 'mut_type', 'hVaf', 'ins_seq', 'gen_type', 'cluster_id', 'ins_len', 'detailed_type', 'prec')
+    def __init__(self, chrom, pos, haplotype, ID, sv_type, alt, sv_len, qual, Filter, chr2, pos2, DR, DV, mut_type, hVaf, gen_type, cluster_id, ins_len, detailed_type, prec):
         self.chrom = chrom
         self.pos = pos
         self.haplotype = haplotype
@@ -34,6 +34,7 @@ class vcf_format(object):
         self.cluster_id = cluster_id
         self.ins_len = ins_len
         self.detailed_type = detailed_type
+        self.prec = prec
     def vaf(self):
         return self.DV / (self.DV + self.DR) if self.DV > 0 else 0
     def hVAF(self):
@@ -61,8 +62,10 @@ class vcf_format(object):
         g_list.sort()
         GQ = int(g_list[2])
         return GT, GQ
+    def precision(self):
+        return 'PRECISE' if self.prec else 'IMPRECISE' 
     def info(self):
-        return f"SVTYPE={self.sv_type};SVLEN={self.sv_len};CHR2={self.chr2};END={self.pos2};DETAILED_TYPE={self.detailed_type};INSLEN={self.ins_len};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()};CLUSTERID=severus_{self.cluster_id}"
+        return f"{self.precision()};SVTYPE={self.sv_type};SVLEN={self.sv_len};CHR2={self.chr2};END={self.pos2};DETAILED_TYPE={self.detailed_type};INSLEN={self.ins_len};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()};CLUSTERID=severus_{self.cluster_id}"
     def sample(self):
         GT, GQ= self.call_genotype()
         return f"{GT}:{GQ}:{self.vaf():.2f}:{self.DR}:{self.DV}"
@@ -146,18 +149,18 @@ def db_2_vcf(double_breaks, id_to_cc, no_ins):
                 else:
                     alt = 'N]' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + '['
                 vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, alt, db.length, int(np.median(qual_list)), 
-                                                         sv_pass, db.bp_2.ref_id, db.bp_2.position, db.DR, db.DV, db.mut_type, hVaf, gen_type, cluster_id,db.has_ins,db.sv_type))#
+                                                         sv_pass, db.bp_2.ref_id, db.bp_2.position, db.DR, db.DV, db.mut_type, hVaf, gen_type, cluster_id,db.has_ins,db.sv_type, db.prec))#
                 if db.bp_1.dir_1 == 1:
                     alt = '[' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + '[N'
                 else:
                     alt = 'N]' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + '['
                     
                 vcf_list[db.genome_id].append(vcf_format(db.bp_2.ref_id, db.bp_2.position, db.haplotype_1, ID, sv_type, alt, db.length, int(np.median(qual_list)), 
-                                                         sv_pass, db.bp_1.ref_id, db.bp_1.position, db.DR, db.DV, db.mut_type, hVaf, gen_type, cluster_id,db.has_ins,db.sv_type))#
+                                                         sv_pass, db.bp_1.ref_id, db.bp_1.position, db.DR, db.DV, db.mut_type, hVaf, gen_type, cluster_id,db.has_ins,db.sv_type, db.prec))#
             else:
             
                 vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, sv_type, db.length, int(np.median(qual_list)), 
-                                                     sv_pass, db.bp_2.ref_id, db.bp_2.position, db.DR, db.DV, db.mut_type, hVaf, gen_type, cluster_id,db.has_ins,db.sv_type))#
+                                                     sv_pass, db.bp_2.ref_id, db.bp_2.position, db.DR, db.DV, db.mut_type, hVaf, gen_type, cluster_id,db.has_ins,db.sv_type, db.prec))#
             
             if sv_type == 'INS':
                 if not no_ins:

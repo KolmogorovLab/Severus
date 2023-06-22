@@ -8,10 +8,10 @@ import logging
 logger = logging.getLogger()
 
 class ReadSegment(object):
-    __slots__ = ("align_start", "read_start", "read_end", "ref_start", "ref_end", "read_id", "ref_id",
+    __slots__ = ("align_start", "read_start", "read_end", "ref_start", "ref_end","ref_start_ori", "ref_end_ori", "read_id", "ref_id",
                  "strand", "read_length",'segment_length', "haplotype", "mapq", "genome_id",
                  'mismatch_rate', 'is_pass', "is_insertion", "is_clipped", 'is_end', 'bg_mm_rate', 'error_rate', 'ins_seq', 'sequence')
-    def __init__(self, align_start, read_start, read_end, ref_start, ref_end, read_id, ref_id,
+    def __init__(self, align_start, read_start, read_end, ref_start, ref_end,ref_start_ori, ref_end_ori, read_id, ref_id,
                  strand, read_length,segment_length, haplotype, mapq, genome_id,
                  mismatch_rate, is_insertion, error_rate):
         self.align_start = align_start
@@ -19,6 +19,8 @@ class ReadSegment(object):
         self.read_end = read_end
         self.ref_start = ref_start
         self.ref_end = ref_end
+        self.ref_start_ori = ref_start_ori
+        self.ref_end_ori = ref_end_ori
         self.read_id = read_id
         self.ref_id = ref_id
         self.strand = strand
@@ -75,6 +77,7 @@ def get_segment(read, genome_id,sv_size):
     strand = -1 if read.is_reverse else 1
     sequence = read.query_sequence
     hc = 0
+    r_len = 0 if strand == 1 else read_length
     if read.has_tag('HP'):
         haplotype = read.get_tag('HP')
     else:
@@ -86,7 +89,7 @@ def get_segment(read, genome_id,sv_size):
         if op in CIGAR_CLIP:
             if first_clip:
                 read_start = op_len
-                align_start = op_len
+                align_start = abs(r_len - op_len)
             hc = op_len if op == 5 else 0 
         first_clip = False
         if op in CIGAR_MATCH:
@@ -102,7 +105,7 @@ def get_segment(read, genome_id,sv_size):
                     del_start, del_end = read_length - read_end, read_length - read_start
                 else:
                     del_start, del_end = read_start , read_end
-                read_segments.append(ReadSegment(align_start, del_start, del_end, ref_start, ref_end, read.query_name,
+                read_segments.append(ReadSegment(align_start, del_start, del_end, ref_start, ref_end, ref_start, ref_end, read.query_name,
                                                  read.reference_name, strand, read_length,read_aligned, 
                                                  haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate))
                 read_start = read_end+1
@@ -117,8 +120,8 @@ def get_segment(read, genome_id,sv_size):
                 ins_start = read_start + read_aligned
                 read_aligned += op_len
                 ins_pos= ref_start + ref_aligned
-                ins_end = read_start +read_aligned
-                read_segments.append(ReadSegment(align_start,ins_start, ins_end, ins_pos, ins_pos, read.query_name,
+                ins_end = read_start + read_aligned
+                read_segments.append(ReadSegment(align_start,ins_start, ins_end, ins_pos, ins_pos, ins_pos, ins_pos, read.query_name,
                                                  read.reference_name, strand, read_length,op_len, haplotype, 
                                                  read.mapping_quality, genome_id, mm_rate, True, error_rate))
                 ins_seq = sequence[ins_start - hc: ins_end - hc]
@@ -128,7 +131,7 @@ def get_segment(read, genome_id,sv_size):
         read_end = read_start + read_aligned
         if read.is_reverse:
             read_start, read_end = read_length - read_end, read_length - read_start
-        read_segments.append(ReadSegment(align_start, read_start, read_end, ref_start, ref_end, read.query_name,
+        read_segments.append(ReadSegment(align_start, read_start, read_end, ref_start, ref_end, ref_start, ref_end, read.query_name,
                                          read.reference_name, strand, read_length,read_aligned, haplotype, 
                                          read.mapping_quality, genome_id, mm_rate, False, error_rate))
     return read_segments 
@@ -148,13 +151,13 @@ def extract_clipped_end(segments_by_read):
         s2.is_end = True
         if s1.read_start > MAX_CLIPPED_LENGTH:
             pos = s1.ref_start if s1.strand == 1 else s1.ref_end
-            read.append(ReadSegment(0, 0, s1.read_start, pos, pos, s1.read_id,
+            read.append(ReadSegment(0, 0, s1.read_start, pos, pos, pos, pos, s1.read_id,
                                     s1.ref_id, 1, s1.read_length,0, s1.haplotype, s1.mapq, s1.genome_id, 0, False, 0))
             read[-1].is_clipped = True
         end_clip_length = s2.read_length - s2.read_end
         if end_clip_length > MAX_CLIPPED_LENGTH:
             pos = s2.ref_end if s2.strand == 1 else s2.ref_start
-            read.append(ReadSegment(s2.read_end, s2.read_end, s2.read_length, pos, pos, s2.read_id,
+            read.append(ReadSegment(s2.read_end, s2.read_end, s2.read_length, pos, pos, pos, pos, s2.read_id,
                                     s2.ref_id, -1, s2.read_length, 0, s2.haplotype, s2.mapq, s2.genome_id, 0, False, 0))
             read[-1].is_clipped = True
         read.sort(key=lambda s: s.read_start)
@@ -261,10 +264,11 @@ def label_reads(read, min_mapq, mm_hist_bg, high_mm_region, max_error_rate, min_
         if seg.mismatch_rate >= seg.bg_mm_rate:
             seg.is_pass += '_HIGH_MM_rate'
             
-    aligned_len = sum([seg.read_end - seg.read_start for seg in read if not seg.is_clipped and not seg.is_pass])
+    aligned_len = sum([seg.read_end - seg.read_start for seg in read if not seg.is_clipped])
     aligned_ratio = aligned_len/read[0].read_length 
     
-    if aligned_len < min_aligned_length or aligned_ratio < MIN_ALIGNED_RATE:
+    #if aligned_len < min_aligned_length or aligned_ratio < MIN_ALIGNED_RATE:
+    if aligned_ratio < MIN_ALIGNED_RATE:
         for seg in read:
             seg.is_pass += '_LOW_ALIGNED_LEN'#
             
