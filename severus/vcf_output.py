@@ -91,8 +91,6 @@ def get_sv_type(db):
         return 'BND'
     if db.direction_1 == db.direction_2:
         return 'INV'
-    if db.bp_1.dir_1 < 0:
-        return 'INS'
     if db.bp_1.dir_1 > 0:
         return 'DEL'
 
@@ -144,18 +142,22 @@ def db_2_vcf(double_breaks, id_to_cc, no_ins):
             if not qual_list:
                 qual_list = [0]
             if sv_type == "BND" and not db.bp_2.loose_end_id:
-                if db.bp_2.dir_1 == 1:
-                    alt = '[' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + '[N'
+                if db.bp_2.dir_1 == 1 and db.bp_1.dir_1 == 1:
+                    alt1 = 'N]' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + ']'
+                    alt2 = 'N]' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + ']'
+                elif db.bp_2.dir_1 == -1 and db.bp_1.dir_1 == -1:
+                    alt1 = '[' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + '[N'
+                    alt2 = '[' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + '[N'
+                elif db.bp_2.dir_1 == -1 and db.bp_1.dir_1 == 1:
+                    alt1 = ']' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + ']N'
+                    alt2 = 'N[' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + '['
                 else:
-                    alt = 'N]' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + '['
-                vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, alt, db.length, int(np.median(qual_list)), 
+                    alt1 = 'N[' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + '['
+                    alt2 = ']' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + ']N'
+                
+                vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, alt1, db.length, int(np.median(qual_list)), 
                                                          sv_pass, db.bp_2.ref_id, db.bp_2.position, db.DR, db.DV, db.mut_type, hVaf, gen_type, cluster_id,db.has_ins,db.sv_type, db.prec))#
-                if db.bp_1.dir_1 == 1:
-                    alt = '[' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + '[N'
-                else:
-                    alt = 'N]' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + '['
-                    
-                vcf_list[db.genome_id].append(vcf_format(db.bp_2.ref_id, db.bp_2.position, db.haplotype_1, ID, sv_type, alt, db.length, int(np.median(qual_list)), 
+                vcf_list[db.genome_id].append(vcf_format(db.bp_2.ref_id, db.bp_2.position, db.haplotype_1, ID, sv_type, alt2, db.length, int(np.median(qual_list)), 
                                                          sv_pass, db.bp_1.ref_id, db.bp_1.position, db.DR, db.DV, db.mut_type, hVaf, gen_type, cluster_id,db.has_ins,db.sv_type, db.prec))#
             else:
             

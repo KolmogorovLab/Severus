@@ -64,6 +64,7 @@ def main():
     MIN_SV_SIZE = 50
     MIN_SV_THR = 15
     VAF_THR = 0.1
+    CONTROL_VAF = 0.2
     
 
     SAMTOOLS_BIN = "samtools"
@@ -111,13 +112,15 @@ def main():
                         help=f"maximum length of genomic segment to form connected components [{MAX_GENOMIC_LEN}]")
     parser.add_argument("--phasing-vcf", dest="phase_vcf", metavar="path", help="vcf file used for phasing [None]")
     parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
+    parser.add_argument("--filter-small-svs", dest='filter_small_svs', action = "store_true", help = 'filters small svs < 5000')
+    parser.add_argument("--TIN-ratio", dest='control_vaf', default = CONTROL_VAF, help = 'Tumor in normal ratio[{CONTROL_VAF}]')
     parser.add_argument("--output-only-pass", dest='output_only_pass', action = "store_true")
     parser.add_argument("--keep-low-coverage", dest='keep_low_coverage', action = "store_true")
     parser.add_argument("--write-collapsed-dup", dest='write_segdup', action = "store_true")
-    parser.add_argument("--only-somatic", dest='only_somatic', action = "store_true")
     parser.add_argument("--no-ins", dest='no_ins', action = "store_true")
     parser.add_argument("--inbetween-ins", dest='inbetween_ins', action = "store_true")
-    parser.add_argument("--filter-small-svs", dest='filter_small_svs', action = "store_true")
+    parser.add_argument("--only-somatic", dest='only_somatic', action = "store_true")
+    
     
     args = parser.parse_args()
     
