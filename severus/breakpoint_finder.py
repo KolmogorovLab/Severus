@@ -496,6 +496,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
     ins_clusters = []
     
     for seq, ins_pos in ins_list.items():
+        
         clipped_to_remove = []
         clusters = []
         cur_cluster = []
@@ -538,7 +539,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
             
             for key, values in unique_reads.items():
                 if unique_reads_pass[key]:
-                    by_genome_id_pass[key[0]] = len(set([red.read_id for red in unique_reads_pass[key]]))
+                    by_genome_id_pass[key[0]] += len(set([red.read_id for red in unique_reads_pass[key]]))
                     happ_support_1[key[0]].append(key[1])#
                     
             if not by_genome_id_pass.values() or max(by_genome_id_pass.values()) < MIN_FULL_READ_SUPP:
@@ -656,7 +657,7 @@ def insertion_filter(ins_clusters, min_reads, genome_ids):
 
 def get_clipped_reads(segments_by_read):
     clipped_reads = defaultdict(list)
-    for read in segments_by_read.values():
+    for read in segments_by_read:
         for seg in read:
             if seg.is_clipped and seg.is_pass == 'PASS':
                 clipped_reads[seg.ref_id].append(seg)
@@ -906,9 +907,9 @@ def calc_vaf(db_list):
             span_bp1 += db.bp_1.spanning_reads[(db.genome_id, i)]
             span_bp2 += db.bp_2.spanning_reads[(db.genome_id, i)]
         DV = 0
-        DR = int(np.mean([span_bp1, span_bp2]))
+        DR = int(np.mean([span_bp1, span_bp2])) if not db.bp_2.is_insertion else span_bp1
         for db in db1:
-            DR1 = int(np.median([db.bp_1.spanning_reads[(db.genome_id, db.haplotype_1)], db.bp_2.spanning_reads[(db.genome_id, db.haplotype_2)]]))
+            DR1 = int(np.median([db.bp_1.spanning_reads[(db.genome_id, db.haplotype_1)], db.bp_2.spanning_reads[(db.genome_id, db.haplotype_2)]])) if not db.bp_2.is_insertion else db.bp_1.spanning_reads[(db.genome_id, db.haplotype_1)]
             DV1 = db.supp
             db.hvaf =  DV1 / (DV1 + DR1) if DV1 > 0 else 0
             DV += DV1
@@ -921,7 +922,7 @@ def calc_vaf(db_list):
 def add_mut_type(db_list, control_id, control_vaf):
     mut_type = 'germline'#
     sample_ids = list(db_list.keys())
-    if not control_id in sample_ids or db_list[control_id][0].vaf < control_vaf:
+    if not sample_ids == [control_id] and (not control_id in sample_ids or db_list[control_id][0].vaf < control_vaf):
         mut_type = 'somatic'
     for db1 in db_list.values():
         pass_list = [db.is_pass for db in db1]
@@ -944,7 +945,6 @@ def annotate_mut_type(double_breaks, control_id, control_vaf):
         calc_vaf(db_list) 
         if control_id:
             add_mut_type(db_list, control_id, control_vaf)
-        
         
 
 def filter_germline_db(double_breaks):
@@ -1069,7 +1069,7 @@ def get_genomic_segments(double_breaks, coverage_histograms, thread_pool, hb_vcf
 
 def get_insertionreads(segments_by_read):
     ins_list_all = defaultdict(list)
-    for read in segments_by_read.values():
+    for read in segments_by_read:
         for seg in read:
             if seg.is_insertion:
                 ins_list_all[seg.ref_id].append(seg)
@@ -1077,13 +1077,13 @@ def get_insertionreads(segments_by_read):
 
 def get_splitreads(segments_by_read):
     split_reads = []
-    for read in segments_by_read.values():
+    for read in segments_by_read:
         split = [seg for seg in read if not seg.is_insertion and not seg.is_clipped]
         if len(split)>1:
             split_reads.append(split)
     return split_reads
 
-def resolve_overlaps(split_reads, min_ovlp_len, min_mapq):
+def resolve_overlaps(segments_by_read, min_ovlp_len, min_mapq):
     """
     Some supplementary alignments may be overlapping (e.g. in case of inversions with flanking repeat).
     This function checks if the overlap has ok structe, trims and outputs non-overlapping alignments
@@ -1118,7 +1118,7 @@ def resolve_overlaps(split_reads, min_ovlp_len, min_mapq):
         #else:
         #    seg2 = seglist_2 if seglist_2[0].strand == 1 else seglist_1
         
-        seg2 = seglist_2 if seglist_2[0].strand == 1 else seglist_1
+        seg2 = seglist_1 if seglist_2[0].strand == 1 else seglist_2
         
         for seg in seg2:
             seg.align_start += left_ovlp
@@ -1134,8 +1134,10 @@ def resolve_overlaps(split_reads, min_ovlp_len, min_mapq):
                 
         return seg_to_remove
 
-    for read_segments in split_reads:
-    
+    for read in segments_by_read:
+        read_segments = [seg for seg in read if not seg.is_insertion and not seg.is_clipped]
+        if len(read_segments) < 2:
+            continue
         segs_to_remove =[]
         cur_cluster = []
         clusters = []
@@ -1169,20 +1171,7 @@ def resolve_overlaps(split_reads, min_ovlp_len, min_mapq):
                 segs_to_remove += seg_to_remove
                 
         for seg in list(set(segs_to_remove)):
-            read_segments.remove(seg)
-            
-        if len(read_segments) < 2:
-            split_reads.remove(read_segments)
-
-def add_secondary_ins(double_breaks):
-    for ins in double_breaks:
-        if not ins.bp_2.is_insertion:
-            continue
-        bp_2 = Breakpoint(ins.bp_1.ref_id, ins.bp_1.position,1, ins.bp_1.qual)
-        ins_2 = DoubleBreak(ins.bp_2, 1, bp_2, 1, ins.genome_id, ins.haplotype_1, ins.haplotype_2, ins.supp, ins.supp_read_ids, ins.length, ins.genotype, 'dashed')
-        ins_2.is_pass = ins.is_pass
-        ins_2.ins_seq = ins.ins_seq
-        double_breaks.append(ins_2)
+            read.remove(seg)
         
 def cluster_db(double_breaks2):
     clusters = defaultdict(list)
@@ -1418,7 +1407,7 @@ def conn_inter(clusters, subgraph_id_list):
 
 def write_alignments(allsegments, outpath):
     aln_dump_stream = open(outpath, "w")
-    for read in allsegments.values():
+    for read in allsegments:
         for seg in read:
             if seg.is_insertion or seg.is_clipped:
                 continue
@@ -1479,11 +1468,13 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, genome_
         outpath_alignments = os.path.join(args.out_dir, "read_alignments")
         write_alignments(segments_by_read, outpath_alignments)
         
+    
+    if args.resolve_overlaps:
+        logger.info('Resolving overlaps')
+        resolve_overlaps(segments_by_read,  args.sv_size, args.min_mapping_quality)
+        
     logger.info('Extracting split alignments')
     split_reads = get_splitreads(segments_by_read)
-    logger.info('Resolving overlaps')
-    resolve_overlaps(split_reads,  args.sv_size, args.min_mapping_quality)
-    
     ins_list_all = get_insertionreads(segments_by_read)
     
     logger.info('Extracting clipped reads')

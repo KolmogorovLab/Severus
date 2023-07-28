@@ -72,6 +72,8 @@ Providing phased bam files and phasing vcf is optional but recommended.
 * `--phasing-vcf` path to vcf file used for phasing (must for the haplotype specific SV calling)
   
 * `--min-support` minimum number of reads supporting a breakpoint [3]
+
+* `--TIN-ratio` tumor in normal ratio [0.01]
   
 ## Outputs
 

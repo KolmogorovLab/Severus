@@ -64,7 +64,7 @@ def main():
     MIN_SV_SIZE = 50
     MIN_SV_THR = 15
     VAF_THR = 0.1
-    CONTROL_VAF = 0.2
+    CONTROL_VAF = 0.01
     
 
     SAMTOOLS_BIN = "samtools"
@@ -113,13 +113,14 @@ def main():
     parser.add_argument("--phasing-vcf", dest="phase_vcf", metavar="path", help="vcf file used for phasing [None]")
     parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
     parser.add_argument("--filter-small-svs", dest='filter_small_svs', action = "store_true", help = 'filters small svs < 5000')
-    parser.add_argument("--TIN-ratio", dest='control_vaf', default = CONTROL_VAF, help = 'Tumor in normal ratio[{CONTROL_VAF}]')
+    parser.add_argument("--TIN-ratio", dest='control_vaf', metavar="float", type=float, default = CONTROL_VAF, help = 'Tumor in normal ratio[{CONTROL_VAF}]')
     parser.add_argument("--output-only-pass", dest='output_only_pass', action = "store_true")
     parser.add_argument("--keep-low-coverage", dest='keep_low_coverage', action = "store_true")
     parser.add_argument("--write-collapsed-dup", dest='write_segdup', action = "store_true")
     parser.add_argument("--no-ins", dest='no_ins', action = "store_true")
     parser.add_argument("--inbetween-ins", dest='inbetween_ins', action = "store_true")
     parser.add_argument("--only-somatic", dest='only_somatic', action = "store_true")
+    parser.add_argument("--omit-resolve-overlaps", dest='resolve_overlaps', action = "store_false")
     
     
     args = parser.parse_args()
@@ -166,7 +167,7 @@ def main():
         args.write_segdups_out = open(os.path.join(args.out_dir,"SEVERUS_collaped_dup.bed"), "w")
     args.outpath_readqual = os.path.join(args.out_dir, "read_qual.txt")
     
-    segments_by_read = defaultdict(list)
+    segments_by_read = []
     genome_ids=[]
     n90 = [MIN_ALIGNED_LENGTH]
     for bam_file in all_bams:
@@ -176,7 +177,7 @@ def main():
         segments_by_read_bam = get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
                                                       args.min_mapping_quality, args.sv_size)
         n90.append(get_read_statistics(segments_by_read_bam))
-        segments_by_read.update(segments_by_read_bam)
+        segments_by_read += segments_by_read_bam
     
     args.min_aligned_length = min(n90)
     logger.info('Computing read quality') 

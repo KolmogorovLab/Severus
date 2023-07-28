@@ -77,6 +77,7 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_po
     
     seg_span_start=[]
     seg_span_end=[]
+    is_pass = []
     
     if not ins_seq:
         ins_seq = "{0}:{1}-{2}".format(segments[0].ref_id, vntr_strt, vntr_end)
@@ -93,6 +94,7 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_po
     if not seg_span_start or not seg_span_end:     
         for seg in segments:
             seg.is_pass = 'vntr_only'
+            is_pass = 'vntr_only'
             
     s1 = seg_span_start[0] if seg_span_start else segments[0] 
     s2 = seg_span_end[0] if seg_span_end else segments[-1] 
@@ -130,7 +132,7 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_po
             s2_new = ReadSegment(s1.align_start, ins_start, ins_end, vntr_strt, vntr_strt, bp_pos, bp_pos, s1.read_id,
                                  s1.ref_id, s1.strand, s1.read_length, bp_len, s1.haplotype,
                                  s1.mapq, s1.genome_id, s1.mismatch_rate, True, s1.error_rate)
-            
+            s2_new.is_pass = is_pass
             if bp_len < len(ins_seq):
                 s2_new.ins_seq = ins_seq[:bp_len]
             else:
@@ -234,7 +236,6 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
             new_read.append(s2)
         
     for key, bp_in_vntr in seg_in_vntr.items():
-    
         segments = []
         bp_len = 0
         ins_seq = ''
@@ -283,7 +284,7 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
 
 def remove_dedup_segments(segments_by_read):
     
-    for read_id, read in segments_by_read.items():
+    for i, read in enumerate(segments_by_read):
         dedup_segments_ins = []
         dedup_segments = []
         read.sort(key = lambda s:s.read_start)
@@ -292,20 +293,20 @@ def remove_dedup_segments(segments_by_read):
                 dedup_segments_ins.append(seg)
             elif not dedup_segments or dedup_segments[-1].read_start != seg.read_start:
                 dedup_segments.append(seg)
-        segments_by_read[read_id] = dedup_segments + dedup_segments_ins
+        segments_by_read[i] = dedup_segments + dedup_segments_ins
         
             
 def resolve_vntr(segments_by_read, vntr_file, min_sv_size):
     vntr_list = read_vntr_file(vntr_file)
     empty_keys = []
-    for read_id, read in segments_by_read.items():
+    for i, read in enumerate(segments_by_read):
         new_read = resolve_read_vntr(read, vntr_list, min_sv_size)
         if new_read:
-            segments_by_read[read_id] = new_read
+            segments_by_read[i] = new_read
         else:
-            empty_keys.append(read_id)
+            empty_keys.append(i)
 
-    for key in empty_keys:
+    for key in sorted(empty_keys, reverse=True):
         del segments_by_read[key]
 
 
@@ -315,6 +316,5 @@ def update_segments_by_read(segments_by_read, ref_lengths, args):
     if args.vntr_file:
         resolve_vntr(segments_by_read, args.vntr_file, args.sv_size)
     logger.info("Annotating reads")
-    logger.info(f"bg_mm = {bg_mm}")
     add_read_qual(segments_by_read, ref_lengths, bg_mm, args)
     
