@@ -36,8 +36,7 @@ dot -Tsvg -O severus_out/breakpoint_graph.dot
 dot -Tsvg -O severus_out/breakpoint_graph.gv
 
 ```
-In the somatic mode default outputs are somatic vcf and somatic breakpoint graph. To generate germline sv calls as well add `--germline`. Providing phased bam files and phasing 
-vcf is optional but recommended. For somatic SV calling single control file is supported. 
+Providing phased bam files and phasing vcf is optional but recommended. For somatic SV calling single control file is supported. 
 
 ### Germline SV calling
 
@@ -70,6 +69,8 @@ Providing phased bam files and phasing vcf is optional but recommended.
 * `--vntr-bed` path to bed file for tandem repeat regions (must be ordered)
 
 * `--phasing-vcf` path to vcf file used for phasing (must for the haplotype specific SV calling)
+
+* `--threads` number of threads [8]
   
 * `--min-support` minimum number of reads supporting a breakpoint [3]
 
@@ -80,10 +81,7 @@ Providing phased bam files and phasing vcf is optional but recommended.
 ### breakpoint_graph.gv  
 
 The primary output is the breakpoint graph, like on the example above. Solid edges correspond to the fragments of the reference genome, (L: length C: coverage)
-and dashed colored edges correspond to non-reference connections from reads (R: number of support reads). Each breakpoint is defined by its coordinate
-and sign. Plus sign corresponds to connection to the left of breakpoint (reference coordinates), and minus - to the right. 
-
-If control is provided the default output contains only somatic SV calls. To add germline connections as well add `--germline`.
+and dashed colored edges correspond to non-reference connections from reads (R: number of support reads). Each breakpoint is defined by its coordinate.
 
 ```
 # To convert gv format to svg
@@ -92,7 +90,6 @@ dot -Tsvg -O severus_out/breakpoint_graph.gv
 
 ### VCF file
 
-If control is provided the default output contains only somatic SV calls. To generate germline sv calls as well add `--germline`.
 If phased bam and phasing vcf is provided haplotype specific SV calls are reported as `0|1` or `1|0`.
 
 ### breakpoints_double.csv
@@ -103,18 +100,20 @@ Detailed information for all breakpoints detected in any of the bam files provid
 
 * `--min-mapq` minimum mapping quality for aligned segment [10]
 
-* `--reference-adjacencies` draw reference adjacencies (as dashed black edges)
+* `--max-genomic-len` maximum length of genomic segment to form connected components [50000]
 
-* `--max-genomic-len` maximum length of genomic segment to form connected components [100000]
+* `--min-sv-size` minimum SV size to be reported [50]
 
-* `--min_sv_size` minimum SV size to be reported [50]
+* `--min-reference-flank` minimum distance between breakpoint and sequence ends [10000]
 
-* `--write-germline` to generate germline vcfs and to add germline connection to breakpoint graph
+* `--write-alignments` write read alignments to file
 
+* `--filter-small-svs` filters SVs smaller than 5000b for improved graphs
 
 ---
 ### Contact
 For advising, bug reporting and requiring help, please contact aysegokce.keskus@nih.gov
+
 
 
 

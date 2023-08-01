@@ -298,16 +298,12 @@ def remove_dedup_segments(segments_by_read):
             
 def resolve_vntr(segments_by_read, vntr_file, min_sv_size):
     vntr_list = read_vntr_file(vntr_file)
-    empty_keys = []
     for i, read in enumerate(segments_by_read):
         new_read = resolve_read_vntr(read, vntr_list, min_sv_size)
         if new_read:
             segments_by_read[i] = new_read
         else:
-            empty_keys.append(i)
-
-    for key in sorted(empty_keys, reverse=True):
-        del segments_by_read[key]
+            segments_by_read[i] = []
 
 
 def update_segments_by_read(segments_by_read, ref_lengths, args):

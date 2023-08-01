@@ -290,6 +290,8 @@ def add_read_qual(segments_by_read, ref_lengths, bg_mm,args):
     if write_segdups_out:
         extract_segdups(mm_hist_high, write_segdups_out) ###
     for i, alignments in enumerate(segments_by_read):
+        if not alignments:
+            continue
         segments_by_read[i] = label_reads(alignments, min_mapq, bg_mm, mm_hist_high, max_error_rate, min_aligned_length)
 
     write_readqual(segments_by_read, args.outpath_readqual)
