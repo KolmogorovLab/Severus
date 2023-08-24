@@ -77,7 +77,7 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_po
     
     seg_span_start=[]
     seg_span_end=[]
-    is_pass = []
+    is_pass = ''
     
     if not ins_seq:
         ins_seq = "{0}:{1}-{2}".format(segments[0].ref_id, vntr_strt, vntr_end)

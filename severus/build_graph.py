@@ -6,7 +6,7 @@ from collections import defaultdict
 from itertools import combinations
 import logging
 
-from severus.breakpoint_finder import get_genomic_segments, cluster_db, add_inbetween_ins
+from severus.breakpoint_finder import get_genomic_segments, cluster_db, add_inbetween_ins, output_breaks
 from severus.vcf_output import write_to_vcf
 
 logger = logging.getLogger()
@@ -44,19 +44,21 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
         return node_ids[node_str]
     
     #helper function to add a new or update an existing genomic edge
-    def _update_genomic(left_node, left_coords, left_terminal, right_node, right_coords, right_terminal, genome_id, coverage):
+    def _update_genomic(left_node, left_coord, left_terminal, right_node, right_coord, right_terminal, genome_id, coverage, haplotype):
         if not g.has_node(left_node):
-            g.add_node(left_node, _coordinate=left_coords[:2], _loose_end = False, _terminal=left_terminal, _insertion=None, _contig=None, _dir = left_coord[2], _cluster_id = None)
+            g.add_node(left_node, _coordinate=left_coord[:2], _loose_end = False, _terminal=left_terminal, _insertion=None, _contig=None, _dir = left_coord[2], _cluster_id = None)
         if not g.has_node(right_node):
-            g.add_node(right_node, _coordinate=right_coords[:2], _loose_end = False, _terminal=right_terminal, _insertion=None,_contig=None, _dir = right_coords[2], _cluster_id = None)
-            
+            g.add_node(right_node, _coordinate=right_coord[:2], _loose_end = False, _terminal=right_terminal, _insertion=None,_contig=None, _dir = right_coord[2], _cluster_id = None)
+        
         if g.has_edge(left_node, right_node, key=genome_id) and g[left_node][right_node][genome_id]['_type'] == 'genomic':
             g[left_node][right_node][genome_id]["_support"] += coverage
-            g[left_node][right_node][genome_id]["_genotype"] = "hom"
-            
+            g[left_node][right_node][genome_id]["_haplotype"] += str(haplotype)
+            if not haplotype == 0:
+                g[left_node][right_node][genome_id]["_genotype"] = "hom"
+       
         elif not g.has_edge(left_node, right_node, key=genome_id):
             g.add_edge(left_node, right_node, key=genome_id,
-                       _support=coverage, _genotype="het", _type="genomic")
+                       _support=coverage, _genotype="het", _type="genomic", _haplotype = str(haplotype))
             
     ### Adding adjacency edges
     for double_bp in double_breaks:
@@ -64,9 +66,9 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
         right_kmer = node_to_id(double_bp.bp_2.unique_name())
         
         if not g.has_node(left_kmer):
-            g.add_node(left_kmer, _coordinate=double_bp.bp_1.coord_tuple()[:2], _loose_end = False, _terminal=False, _insertion=double_bp.bp_1.insertion_size,_contig = double_bp.bp_1.contig_id,_dir = double_bp.direction_1, _cluster_id = double_bp.subgraph_id)
+            g.add_node(left_kmer, _coordinate=double_bp.bp_1.coord_tuple()[:2], _loose_end = False, _terminal=False, _insertion=double_bp.bp_1.insertion_size,_contig = double_bp.bp_1.contig_id,_dir = double_bp.bp_1.dir_1, _cluster_id = double_bp.subgraph_id)
         if not g.has_node(right_kmer):
-            g.add_node(right_kmer, _coordinate=double_bp.bp_2.coord_tuple()[:2], _loose_end = double_bp.bp_2.loose_end_id, _terminal=False, _insertion=double_bp.bp_2.insertion_size, _contig = double_bp.bp_2.contig_id,_dir = double_bp.direction_2, _cluster_id = double_bp.subgraph_id)
+            g.add_node(right_kmer, _coordinate=double_bp.bp_2.coord_tuple()[:2], _loose_end = double_bp.bp_2.loose_end_id, _terminal=False, _insertion=double_bp.bp_2.insertion_size, _contig = double_bp.bp_2.contig_id,_dir = double_bp.bp_2.dir_1, _cluster_id = double_bp.subgraph_id)
         
         if not g.has_edge(left_kmer, right_kmer, key=double_bp.genome_id):
             g.add_edge(left_kmer, right_kmer, key=double_bp.genome_id, _support=double_bp.supp,
@@ -91,35 +93,18 @@ def build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, refe
         if seg.length_bp < max_genomic_len or same_clust:
             left_terminal = seg.pos1 in hb_points[seg.ref_id]
             if left_terminal:
-                left_node = node_to_id(f"hb_left_{seg_num}")
+                left_node = node_to_id(f"hb_left_{left_label}")
             right_terminal = seg.pos2 in hb_points[seg.ref_id]
             if right_terminal:
-                right_node = node_to_id(f"hb_right_{seg_num}")
-            _update_genomic(left_node, left_coord, left_terminal, right_node, right_coord, right_terminal, seg.genome_id, seg.coverage)
+                right_node = node_to_id(f"hb_right_{right_label}")
+            _update_genomic(left_node, left_coord, left_terminal, right_node, right_coord, right_terminal, seg.genome_id, seg.coverage, seg.haplotype)
             
         else:
-            split_1, split_2 = node_to_id(f"split_1_{seg_num}"), node_to_id(f"split_2_{seg_num}")
-            _update_genomic(left_node, left_coord, False, split_1, right_coord, True, seg.genome_id, seg.coverage)
-            _update_genomic(split_2, left_coord, True, right_node, right_coord, False, seg.genome_id, seg.coverage)
-    
-    to_merge = []
-    for cc in nx.connected_components(g):
-        for u, v in combinations(cc, 2):
-            if g.nodes[u]["_coordinate"] == g.nodes[v]["_coordinate"] and \
-                g.nodes[u]["_insertion"] is None and g.nodes[v]["_insertion"] is None:
-                    to_merge.append((u, v)) 
-
-    for (u, v) in to_merge:
-        if g.has_node(u) and g.has_node(v):
-            for (_v, other_n, key, data) in g.edges(v, keys=True, data=True):
-                if not g.has_edge(u, other_n, key=key):
-                    g.add_edge(u, other_n, key=key)
-                    g[u][other_n][key].update(data)
-            if not g.nodes[v]['_terminal']:
-                g.nodes[u]['_terminal'] = False
-            g.remove_node(v)
-    ###
-
+            split_1, split_2 = node_to_id(f"split_1_{left_label}"), node_to_id(f"split_2_{right_label}")
+            _update_genomic(left_node, left_coord, False, split_1, right_coord, True, seg.genome_id, seg.coverage, seg.haplotype)
+            _update_genomic(split_2, left_coord, True, right_node, right_coord, False, seg.genome_id, seg.coverage, seg.haplotype)
+        
+        
     return g
 
 
@@ -352,12 +337,12 @@ def build_breakpoint_graph(double_breaks, genomicsegments, hb_points, max_genomi
     graph = build_graph(double_breaks, genomicsegments, hb_points, max_genomic_len, reference_adjacencies, filter_small_svs)
     adj_clusters = cluster_adjacencies(graph, target_genomes, control_genomes)
     return graph, adj_clusters
-
             
             
 def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, control_genomes, ref_lengths, args):
-    
-    for key, double_breaks in db_list.items():
+    keys = ['germline', 'somatic']
+    for key in keys:
+        double_breaks = db_list[key]
         if key == 'germline' and args.only_somatic:
             continue
         
@@ -374,14 +359,13 @@ def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, con
         
         logger.info("\tComputing segment coverage")
         genomic_segments, hb_points = get_genomic_segments(double_breaks, coverage_histograms, thread_pool, args.phase_vcf)
+        genomic_segments.sort(key = lambda seg:seg.haplotype, reverse = True )
         
-        if args.inbetween_ins:
+        if args.inbetween_ins and key == 'germline':
             double_breaks2 = add_inbetween_ins(double_breaks)
         else:
             double_breaks2 = double_breaks
         
-        if key == 'germline':   
-            cluster_db(double_breaks2)
         logger.info("\tPreparing graph")
         graph, adj_clusters = build_breakpoint_graph(double_breaks2, genomic_segments, hb_points, args.max_genomic_len,
                                                                     args.reference_adjacencies, target_genomes, control_genomes, args.filter_small_svs)
