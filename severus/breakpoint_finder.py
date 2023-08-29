@@ -472,11 +472,11 @@ def double_breaks_filter(double_breaks, min_reads, control_id):
             if 0 in haplotype2 and sum(haplotype2) > 0:
                 if to_keep:
                     hp = [i for i, hp1 in enumerate(haplotype2) if hp1 and i in to_keep]
+                    hp = hp[0] if hp else 0
                 else:
-                    to_keep = [i for i, hp1 in enumerate(haplotype1) if hp1]
+                    to_keep = [i for i, hp1 in enumerate(haplotype2) if hp1]
+                    hp = to_keep[0]
                 if hp:
-                    to_keep += hp
-                    hp = hp[0]
                     supp = [db.supp for db in dbs if db.haplotype_2 == 0 and not db.haplotype_1 == 0]
                     span_bp1 = dbs[0].bp_2.spanning_reads[(genome_id, 0)]
                     dbs[hp].supp += sum(supp)
