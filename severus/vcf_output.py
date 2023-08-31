@@ -93,7 +93,9 @@ def get_sv_type(db):
         return 'INV'
     if db.bp_1.dir_1 > 0:
         return 'DEL'
-
+    else:
+        return 'BND'
+ 
 def db_2_vcf(double_breaks, id_to_cc, no_ins):
     t = 0
     vcf_list = defaultdict(list)

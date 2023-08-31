@@ -29,9 +29,9 @@ COV_WINDOW = 500
 
 class ReadConnection(object):
     __slots__ = ("ref_id_1", "pos_1", "pos_1_ori", "sign_1", "ref_id_2", "pos_2", "pos_2_ori", "sign_2", "haplotype_1", "haplotype_2", "read_id", 
-                 "genome_id", 'bp_list', 'is_pass1', 'is_pass2', 'mapq_1', 'mapq_2', 'is_dup', 'has_ins')
+                 "genome_id", 'bp_list', 'is_pass1', 'is_pass2', 'mapq_1', 'mapq_2', 'is_dup', 'has_ins', 'seg_len')
     def __init__(self, ref_id_1, pos_1, pos_1_ori , sign_1, ref_id_2, pos_2, pos_2_ori, sign_2, haplotype_1, 
-                 haplotype_2, read_id, genome_id, is_pass1, is_pass2, mapq_1, mapq_2, is_dup, has_ins):
+                 haplotype_2, read_id, genome_id, is_pass1, is_pass2, mapq_1, mapq_2, is_dup, has_ins, seg_len):
         self.ref_id_1 = ref_id_1
         self.ref_id_2 = ref_id_2
         self.pos_1 = pos_1
@@ -51,6 +51,7 @@ class ReadConnection(object):
         self.mapq_2 = mapq_2
         self.is_dup = is_dup
         self.has_ins = has_ins
+        self.seg_len = seg_len
     def signed_coord_1(self):
         return self.sign_1 * self.pos_1
     def signed_coord_2(self):
@@ -220,7 +221,7 @@ def get_breakpoints(split_reads, ref_lengths, args):
                 is_dup = True
             rc = ReadConnection(s2.ref_id, ref_bp_2, ref_bp_2_ori, sign_2, s1.ref_id, ref_bp_1, ref_bp_1_ori, sign_1,
                                 s2.haplotype, s1.haplotype, s1.read_id, s1.genome_id, s2.is_pass, 
-                                s1.is_pass, s2.mapq, s1.mapq, is_dup, has_ins)
+                                s1.is_pass, s2.mapq, s1.mapq, is_dup, has_ins,(s1.segment_length, s2.segment_length))
             seq_breakpoints_r[s2.ref_id].append(rc)
             seq_breakpoints_l[s1.ref_id].append(rc)
         else:
@@ -228,7 +229,7 @@ def get_breakpoints(split_reads, ref_lengths, args):
                 is_dup = True
             rc = ReadConnection(s1.ref_id, ref_bp_1, ref_bp_1_ori, sign_1, s2.ref_id, ref_bp_2, ref_bp_2_ori, sign_2,
                                 s1.haplotype, s2.haplotype, s1.read_id, s1.genome_id, s1.is_pass, 
-                                s2.is_pass, s1.mapq, s1.mapq, is_dup, has_ins)
+                                s2.is_pass, s1.mapq, s1.mapq, is_dup, has_ins, (s2.segment_length, s1.segment_length))
             seq_breakpoints_r[s1.ref_id].append(rc)
             seq_breakpoints_l[s2.ref_id].append(rc)
         
@@ -393,6 +394,9 @@ def double_breaks_filter(double_breaks, min_reads, control_id):
     
     for cl in clusters.values():
         db = cl[0]
+        if not db.is_pass == 'PASS':
+            continue
+        
         conn_1 = [cn for cn in db.bp_1.connections]
         conn_2 = [cn for cn in db.bp_2.connections]#
         
@@ -448,7 +452,7 @@ def double_breaks_filter(double_breaks, min_reads, control_id):
                     span_bp1 += cl[0].bp_1.spanning_reads[(control_id, i)]
                 for i in haplotype2:    
                     span_bp2 += cl[0].bp_2.spanning_reads[(control_id, i)]
-                if span_bp1 < COV_THR or span_bp2 < COV_THR:
+                if span_bp1 < COV_THR and span_bp2 < COV_THR:
                     for db1 in cl:
                         db1.is_pass = 'FAIL_LOWCOV_NORMAL'
     db_list = []
@@ -637,6 +641,8 @@ def insertion_filter(ins_list, min_reads, control_id):
         clusters[br.to_string()].append(br)
     
     for cl in clusters.values():
+        if not cl[0].is_pass == 'PASS':
+            continue
         conn_1 = [cn for ins in cl for cn in ins.bp_1.connections]
         conn_count_1 = Counter([cn.is_pass for cn in conn_1])
         
@@ -798,20 +804,23 @@ def add_breakends(double_breaks, clipped_clusters, min_reads):
                         double_breaks.append(DoubleBreak(bp_1, -1, new_bp, 1, genome_id, key[1], key[1], supp, supp_reads, bp_1.insertion_size, genotype, 'dashed'))
                         double_breaks[-1].sv_type = 'loose_end'
 
-def tra_to_ins(ins_list_pos, ins_list, bp, dir_bp, dbs, ins_clusters, double_breaks, min_sv_size):
+def tra_to_ins(ins_list_pos, ins_list, bp1, bp2, dir_bp, dbs, ins_clusters, double_breaks, min_sv_size):
     
     INS_WIN = 2000 
     NUM_HAPLOTYPE = 3
+    total_supp_thr = 2
     
-    ins_1 = ins_list_pos[bp.ref_id]
-    strt = bisect.bisect_left(ins_1, bp.position - INS_WIN)
-    end = bisect.bisect_left(ins_1, bp.position + INS_WIN)
-    ins_to_remove = []
+    ins_1 = ins_list_pos[bp1.ref_id]
+    strt = bisect.bisect_left(ins_1, bp1.position - INS_WIN)
+    end = bisect.bisect_left(ins_1, bp1.position + INS_WIN)
+    flag = False
+    
+    med_seg_len = int( np.quantile([cn.seg_len for cn in bp2.connections],0.90))
     
     if strt == end:
         return []
     
-    ins_db = ins_list[bp.ref_id]
+    ins_db = ins_list[bp1.ref_id]
     clusters = defaultdict(list)
     for ins in ins_db[strt:end]:
         clusters[ins.to_string()].append(ins)
@@ -820,42 +829,45 @@ def tra_to_ins(ins_list_pos, ins_list, bp, dir_bp, dbs, ins_clusters, double_bre
         gen_id_1 = defaultdict(list)
         hp_list = defaultdict(list)
         ins = ins_cl[0]
-        if (ins.length + min_sv_size) < abs(ins.bp_1.position - bp.position):
+        total_supp = 0
+        if (ins.length + min_sv_size) < abs(ins.bp_1.position - bp1.position) or (ins.length + min_sv_size) < med_seg_len:
             continue
         
-        if dbs[0].bp_1.ref_id == dbs[0].bp_2.ref_id:
-            svtype = 'Intra_chr_ins'
-        else:
-            svtype = 'Inter_chr_ins'
+        flag = True
+        svtype = f"INS:{bp2.ref_id}:{bp2.position}"
             
         for ins in ins_cl:
+            gen_id_1[(ins.genome_id, ins.haplotype_1)].append(ins)
             hp_list[ins.genome_id].append(ins.haplotype_1)
+            ins.sv_type = svtype
         
         for db in dbs:
-            gen_id_1[(db.genome_id, db.haplotype_1)].append(db)
             hp_list[db.genome_id].append(db.haplotype_1)
-            db.sv_type = svtype
-            
-        for ins in ins_cl:
-            ins_to_remove.append(ins)
-            genotype = 'hom' if sum(set(hp_list[ins.genome_id])) == NUM_HAPLOTYPE else 'het'
-            if gen_id_1[(ins.genome_id, ins.haplotype_1)]:
-                db = gen_id_1[(ins.genome_id, ins.haplotype_1)][0]
-                n_sup = len(set([red.read_id for red in ins.supp_read_ids]) - set(db.supp_read_ids))
-                db.supp += n_sup
-                db.genotype = genotype
+        
+        for db in dbs:
+            genotype = 'hom' if sum(set(hp_list[db.genome_id])) == NUM_HAPLOTYPE else 'het'
+            if gen_id_1[(db.genome_id, db.haplotype_1)]:
+                ins = gen_id_1[(db.genome_id, db.haplotype_1)][0]
+                n_sup = len(set(db.supp_read_ids) - set([red.read_id for red in ins.supp_read_ids]))
+                ins.supp += n_sup
+                total_supp += n_sup
+                ins.genotype = genotype
             else:
-                double_breaks.append(DoubleBreak(db.bp_1, db.direction_1, db.bp_2, db.direction_2 ,ins.genome_id, ins.haplotype_1, ins.haplotype_1, ins.supp, ins.supp_read_ids, ins.length, genotype , 'dashed'))
-                double_breaks[-1].sv_type = svtype
+                ins_clusters.append(DoubleBreak(ins.bp_1, ins.direction_1, ins.bp_2, ins.direction_2, db.genome_id, db.haplotype_1,  db.haplotype_1, db.supp, db.supp_read_ids, ins.length, genotype , 'dashed'))
+                ins_clusters[-1].sv_type = svtype
+                
+        if total_supp > total_supp_thr:
+            for db in dbs:
+                db.is_pass = 'FAIL_INSMAPPING'
             
-    return ins_to_remove
+            
+    return flag
                     
         
 def dup_to_ins(ins_list_pos, ins_list, dbs, min_sv_size, ins_clusters, double_breaks):
     
     NUM_HAPLOTYPE = 3
     db = dbs[0]
-    ins_to_remove = []
     INS_LEN_THR = 1.2
     
     ins_1 = ins_list_pos[db.bp_1.ref_id]
@@ -885,7 +897,7 @@ def dup_to_ins(ins_list_pos, ins_list, dbs, min_sv_size, ins_clusters, double_br
             hp_list[db.genome_id].append(db.haplotype_1)
             
         for ins in ins_cl:
-            ins_to_remove.append(ins)
+            ins.is_pass = 'FAIL_INSMAPPING'
             genotype = 'hom' if sum(set(hp_list[ins.genome_id])) == NUM_HAPLOTYPE else 'het'
             if gen_id_1[(ins.genome_id, ins.haplotype_1)]:
                 db = gen_id_1[(ins.genome_id, ins.haplotype_1)][0]
@@ -896,7 +908,6 @@ def dup_to_ins(ins_list_pos, ins_list, dbs, min_sv_size, ins_clusters, double_br
                 double_breaks.append(DoubleBreak(db.bp_1, db.direction_1, db.bp_2, db.direction_2 ,ins.genome_id, ins.haplotype_1, ins.haplotype_1, ins.supp, ins.supp_read_ids, ins.length, genotype , 'dashed'))
                 double_breaks[-1].is_dup = True
             
-    return ins_to_remove
  
           
 def match_long_ins(ins_clusters, double_breaks, min_sv_size):
@@ -904,7 +915,6 @@ def match_long_ins(ins_clusters, double_breaks, min_sv_size):
     DEL_THR = 10000
     ins_list = defaultdict(list)
     ins_list_pos = defaultdict(list)
-    ins_to_remove = []
     for ins in ins_clusters:
         ins_list_pos[ins.bp_1.ref_id].append(ins.bp_1.position)
         ins_list[ins.bp_1.ref_id].append(ins)
@@ -920,17 +930,11 @@ def match_long_ins(ins_clusters, double_breaks, min_sv_size):
         if db.bp_1.ref_id == db.bp_2.ref_id and db.direction_1 > 0 and db.direction_2 < 0 and db.bp_2.position - db.bp_1.position < DEL_THR:
             continue
         if db.is_dup:
-            ins_to_remove += dup_to_ins(ins_list_pos, ins_list, dbs, min_sv_size, ins_clusters, double_breaks)
+            dup_to_ins(ins_list_pos, ins_list, dbs, min_sv_size, ins_clusters, double_breaks)
         else:
-            ins_to_remove_tra = tra_to_ins(ins_list_pos, ins_list, db.bp_1, db.direction_1, dbs, ins_clusters, double_breaks, min_sv_size)
+            ins_to_remove_tra = tra_to_ins(ins_list_pos, ins_list, db.bp_1, db.bp_2, db.direction_1, dbs, ins_clusters, double_breaks, min_sv_size)
             if not ins_to_remove_tra:
-                ins_to_remove += tra_to_ins(ins_list_pos, ins_list, db.bp_2, db.direction_2, dbs, ins_clusters, double_breaks, min_sv_size)
-            else:
-                ins_to_remove += ins_to_remove_tra
-                
-    if ins_to_remove:
-        for ins in list(set(ins_to_remove)):
-            ins_clusters.remove(ins) 
+                tra_to_ins(ins_list_pos, ins_list, db.bp_2, db.bp_1, db.direction_2, dbs, ins_clusters, double_breaks, min_sv_size)
 
 def calc_vaf(db_list):
     NUM_HAPLOTYPES = 3
@@ -1221,7 +1225,7 @@ def cluster_db(double_breaks2, coverage_histograms):
             continue
         clusters[br.to_string()].append(br)
     conn_inversions(clusters, subgraph_id_list, coverage_histograms)
-    conn_duplications(clusters, subgraph_id_list)
+    conn_duplications(clusters, subgraph_id_list, coverage_histograms)
     conn_inter(clusters, subgraph_id_list)
     add_subgraph_id(clusters, subgraph_id_list)
 
@@ -1312,8 +1316,10 @@ def conn_inversions(clusters,subgraph_id_list, coverage_histograms):
             db = cl[0]
             pos1 = db.bp_1.position // 500
             pos2 = db.bp_2.position // 500
-            cov1 = coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos1-1:pos1+2]
-            cov2 = coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)][pos2+2]
+            max_pos = len(coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)])
+            max_pos1 = len(coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)])
+            cov1 = coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos1-1:min(pos1+2,max_pos1)]
+            cov2 = coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)][min(pos2+2,max_pos)]
             thr = int(db.supp * FOLD_BACK_THR)
             if cov1[0] > cov2 + 2*thr and  cov1[2] > cov2 + thr:
                 inv_pairs.append((ind,-1))
@@ -1327,8 +1333,10 @@ def conn_inversions(clusters,subgraph_id_list, coverage_histograms):
             db = cl[0]
             pos1 = db.bp_1.position // 500
             pos2 = db.bp_2.position // 500
-            cov1 = coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos1-1:pos1+2]
-            cov2 = coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)][pos2+2]
+            max_pos = len(coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)])
+            max_pos1 = len(coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)])
+            cov1 = coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos1-1:min(pos1+2,max_pos1)]
+            cov2 = coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)][min(pos2+2,max_pos)]
             thr = int(db.supp * FOLD_BACK_THR)
             if cov2 > cov1[0] + 2*thr and  cov1[2] > cov1[0] + thr:
                 pr_dist[:, ind] = mx
@@ -1374,54 +1382,34 @@ def conn_inversions(clusters,subgraph_id_list, coverage_histograms):
             
             
             
-def conn_duplications(clusters, subgraph_id_list):        
+def conn_duplications(clusters, subgraph_id_list, coverage_histograms):        
     
-    DUP_COV_THR = 0.3
-    DUP_LEN_THR = 2000000
+    DUP_COV_THR = 0.5
+    COV_WINDOW = 500
     subgraph_id = list(subgraph_id_list.keys())[-1]+1 if len(subgraph_id_list.keys()) > 0 else 0
     for ind, cl in enumerate(clusters.values()):
         db = cl[0]
         subgraph_ls = []
         is_dup = False
-        del_len = 0
         if not db.bp_1.ref_id == db.bp_2.ref_id or db.is_dup or db.bp_2.is_insertion:
             continue
         
         if db.direction_1 == -1 and db.direction_2 == 1:
-            dup_len = db.bp_2.position - db.bp_1.position
-            if dup_len > DUP_LEN_THR:
-                continue
+            pos1 = db.bp_1.position // COV_WINDOW
+            pos2 = db.bp_2.position // COV_WINDOW
             
-            subgraph_ls.append(cl)
-            for cl2 in list(clusters.values())[ind+1:]:
-                db2 = cl2[0]
-                if not db2.bp_1.ref_id == db.bp_1.ref_id:
-                    break
-                if db2.bp_1.ref_id == db2.bp_2.ref_id and db2.bp_1.position > db.bp_1.position:
-                    if not subgraph_ls:
-                        is_dup = True
-                    break
-                if db2.bp_1.ref_id == db2.bp_2.ref_id and db.direction_1 == 1 and db.direction_2 == -1:
-                    subgraph_ls.append(cl2)
-                    del_len += min([db2.bp_2.position,db.bp_2.position]) - db2.bp_1.position
-                else:
-                    subgraph_ls.append(cl2) 
-                    
-            subgraph_ls.append(cl)
-            subgraph_id +=1
-            if not del_len:
-                is_dup = True 
-            elif del_len / dup_len < DUP_COV_THR:
+            max_pos = len(coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)])
+            cov1 = coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][max(pos1-5,0):pos1]
+            cov1 += coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)][pos2:min(pos2+5,max_pos)]
+            cov1 = int(np.median(cov1))
+            cov3 = int(np.median(coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos1:pos2+1]))
+            
+            if cov3 > cov1 + db.supp * DUP_COV_THR:
                 is_dup = True
-            svtype = '' if is_dup else 'Intra_chr_ins'
+            svtype = 'tandem_duplication' if is_dup else 'Intra_chr_ins'
             for db in cl:
                 db.is_dup = is_dup
                 db.sv_type = svtype
-            for cl2 in subgraph_ls:
-                for db2 in cl2:
-                    db2.subgraph_id.append(subgraph_id)
-                    subgraph_id_list[subgraph_id].append(db2)
-        
             
 def conn_inter(clusters, subgraph_id_list):
     subgraph_id = list(subgraph_id_list.keys())[-1]+1 if len(subgraph_id_list.keys()) > 0 else 0

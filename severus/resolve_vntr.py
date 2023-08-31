@@ -196,7 +196,6 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
     split_seg_vntr = []
     s2 = []
     seg_to_remove = []
-    
     for s in read:
         if s.is_insertion:
             ins_segs.append(s)
@@ -225,6 +224,7 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
                 continue
             if not s1.strand == s2.strand: ###Check again
                 new_read.append(s1)
+                split_seg_vntr =[]
                 continue
             split_seg_vntr = resolve_vntr_split(s1, s2, vntr_list)
             if split_seg_vntr:
