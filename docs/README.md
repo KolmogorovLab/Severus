@@ -1,12 +1,12 @@
 # Severus
 
-<p align="center">
-  <img src="severus_first.png" alt="Severus overview"/>
-</p>
-
 Severus is a somatic structural variation (SV) caller for long reads (both PacBio and ONT). It is designed for matching tumor/normal analysis,
 supports multiple tumor samples and produces accurate and complete somatic and germline calls. Severus is taking
 advantage of long-read phasing and uses the breakpoint graph framework to model complex chromosomal rearrangemnets.
+
+<p align="center">
+  <img src="severus_first.png" alt="Severus overview"/>
+</p>
 
 ## Contents
 
@@ -149,13 +149,27 @@ dot -Tsvg -O severus_out/breakpoint_graph.gv
   <img src="severus_workflow1.jpg" alt="Severus workflow"/>
 </p>
 
-The key steps of the Severus algorithm include:
+Somatic SVs in cancer are typically more complex, compared to germline SVs. For example, breakage-fusion-bridge (BFB) amplifications 
+are characterized by multiple foldback inversions and oscillating copy numbers. Current long-read SV algorithms were designed 
+for relatively simple germline variation, and do not automatically detect complex multi-break rearrangements in cancer.
+In addition, these approaches can only work with a single sample at a time.
 
-* Severus automatically detects mismapped reads from the collapsed duplication regions, which is a major source of false positive calls and provides it as an output with `--write-collapsed-dup`.
+We designed Severus to solve the challenges of somatic SV detection.
+First, Severus is taking advantage of phased long-read alignments, therefore all somatic variants are attributed to a germline haplotype. 
+Second, Severus takes advantage of VNTR annotations of the reference genome to represent SVs inside VNTRs in a uniform way, 
+which facilitates better tumor/normal matching. Third, Severus automatically detects mismapped reads from the collapsed duplication regions, 
+which is a major source of false positive calls. Fourth, Severus builds a haplotype-specific breakpoint graph that is used to cluster multi-break 
+rearrangements and represent the derived chromosomal structure.
 
-* Severus uses VNTR annotations of the reference genome (which could be generated de novo) to represent SVs inside VNTRs in a uniform way, which facilitates better tumor/normal matching. For more information, [see](#svs-inside-vntrs)
+Severus works with single, two (e.g. tumor/normal) and multiple samples (e.g. multi-site or time series). 
+Each sample is provided as phased bam alignment. Severus starts by preprocessing alignments inside VNTRs and masking reads
+with locally increased error rates, which typically correspond to mismapped reads from collapsed segmental duplications. 
+Then, Severus extracts breakpoints from long reads with split alignments. Each breakpoint is defined by (i) coordinate, (ii) direction and (iii) haplotype. 
+Then, the breakpoint graph is constructed by connecting breakpoint nodes in compatible directions and haplotypes, which define genomic segments. 
 
-* Severus takes advantage of improved phasing with long read sequencing. It detects haplotype aware breakpoints, and generates haplotype specific breakpoint graphs which improves complex event clustering. For more information, [see](#breakpoint-graphs)
+Naturally, the resulting genomic segments may be overlapping, which correspond to copy number increases. 
+We then mask simple SV (standalone insertions and deletions), and perform graph clustering that reveals multi-break rearrangements.
+
 
 ## Benchmarking Severus and other SV callers
 
@@ -192,7 +206,7 @@ We compared the performance of existing somatic SV callers [nanomonSV](https://g
 | SAVANA | 51 | 17 | 18 | 0.75 | 0.74 |
 
 
-### Preparing phased and haplotagged alignments
+## Preparing phased and haplotagged alignments
 
 We recommend running Severus with phased and haplotagged tumor and normal alignments. Below is an example
 workkflow that can be used to produce them, assuming that reads are already aligned using minimap2.
@@ -288,7 +302,7 @@ whatshap haplotag --reference ref.fa phased_vcf.vcf tumor.bam -o tumor.haplotagg
 
 ```
 
-### Generating VNTR annotation
+## Generating VNTR annotation
 
 Alignments to highly repetitive regions are often ambigous and often leads false positives. Severus clusters SVs inside a single VNTR region to uniform the SV representation for each read.
 
@@ -307,7 +321,7 @@ findTandemRepeats --merge <REF>.fa <REF>.trf.bed
 
 ```
 
-### Additional fields in the vcf
+## Additional fields in the vcf
 
 Severus outputs several unique fileds in INFO column.
 
@@ -328,7 +342,7 @@ Severus outputs several unique fileds in INFO column.
 * `CLUSTERID` : subgraph ID from breakpoint graph.  
    
 
-### Breakpoint Graphs
+## Breakpoint Graphs
 
 <p align="center">
   <img src="graph.png" alt="Breakpoint graph"/>
@@ -336,24 +350,24 @@ Severus outputs several unique fileds in INFO column.
 
 The primary output of Severus is the breakpoint graph generated separately for somatic and germline SVs and the accompanying breakpoint_clusters.csv file. 
 After identifying breakpoint pairs (or a single breakpoint and insertion sequence in unmapped insertions), it adds the adjacency edges (dashed edges) between them. 
-The second step is to add genomic segments as it connects breakpoints to the nearest breakpoints based on genomic coordinate and direction i) that both breakpoints are in the same phase block and haplotype and (iii) the length is less than MAX_GENOMIC_DIST (50000 by default). Genomic segments are labeled as chromosome:start-end C: Coverage, L: length of the genomic segment. 
+The second step is to add genomic segments as it connects breakpoints to the nearest breakpoints based on genomic coordinate and direction i) 
+that both breakpoints are in the same phase block and haplotype and (iii) the length is less than MAX_GENOMIC_DIST (50000 by default). 
+Genomic segments are labeled as chromosome:start-end C: Coverage, L: length of the genomic segment. 
 
-Phase block switch points are defined as the midpoint between the last SNP of the phase block and the first SNP of the consecutive phase block. Phase block switch points are depicted as gray points and connected to genomic edges through gray dashed edges. 
+Phase block switch points are defined as the midpoint between the last SNP of the phase block and the first SNP of the consecutive phase block. 
+Phase block switch points are depicted as gray points and connected to genomic edges through gray dashed edges. 
  
-Adjacencies are represented with double edges and single edges supported by both haplotypes and single haplotypes (or unphased reads). In case of an adjacency supported by phased and unphased reads, the unphased reads are added to the haplotype with the highest number of support reads. The edges are labeled with the number of support reads (R:XX).
+Adjacencies are represented with double edges and single edges supported by both haplotypes and single haplotypes (or unphased reads).
+In case of an adjacency supported by phased and unphased reads, the unphased reads are added to the haplotype with the highest number of support reads.
+The edges are labeled with the number of support reads (R:XX).
 
 Subgraph IDs shown at the top-left corner of each cluster are also output in vcfs in CLUSTER_ID filed in the INFO column.
 
 The breakpoints in each cluster and the number of support read are also summarized in breakpoint_cluster.csv. 
 
-In the example above, there is a deletion in one of the haplotypes (chr19: 9040865- 9041235), and there is an insertion of 73.3kb region in chr10 to chr19 in the other haplotype. 
+In the example above, there is a deletion in one of the haplotypes (chr19: 9040865- 9041235),
+and there is an insertion of 73.3kb region in chr10 to chr19 in the other haplotype. 
 
 ---
 ### Contact
 For advising, bug reporting and requiring help, please contact aysegokce.keskus@nih.gov
-
-
-
-
-
-
