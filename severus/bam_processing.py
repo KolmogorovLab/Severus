@@ -250,7 +250,7 @@ def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
     return list(segments_by_read.values())
 
 COV_WINDOW = 500
-def update_coverage_hist(genome_ids, ref_lengths, segments_by_read):
+def update_coverage_hist(genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes, loh_out):
     NUM_HAPLOTYPES = 3
     coverage_histograms = {}
 
@@ -276,6 +276,9 @@ def update_coverage_hist(genome_ids, ref_lengths, segments_by_read):
 
         hp1_cov, hp2_cov, hp0_cov = np.median(by_hp[1]), np.median(by_hp[2]), np.median(by_hp[0])
         logger.info(f"\tMedian coverage by PASS reads for {genome_id} (H1 / H2 / H0): {hp1_cov} / {hp2_cov} / {hp0_cov}")
+        
+        if loh_out:
+            extract_LOH(coverage_histograms, ref_lengths, control_genomes, target_genomes, loh_out)
 
     return coverage_histograms
 
@@ -386,6 +389,40 @@ def background_mm_hist(segments_by_read, bg_mm, ref_lengths):
     return mm_hist_high
 
 
+def extract_LOH(coverage_histograms, ref_lengths, control_genomes, target_genomes, write_loh_out):
+    MIN_COV = 3
+    MIN_DIFF = 2000
+    MIN_LOH = 10000
+    LOH_dict = defaultdict(list)
+    control_genome = list(control_genomes)[0]
+    for ref_id in ref_lengths.keys():
+        for target_genome in list(target_genomes):
+            for i, (hp1, hp2) in enumerate(zip(coverage_histograms[(target_genome, 1, ref_id)], coverage_histograms[(target_genome, 2, ref_id)])):
+                if not coverage_histograms[(control_genome, 1, ref_id)][i] > MIN_COV and coverage_histograms[(control_genome, 2, ref_id)][i] > MIN_COV:
+                    continue
+                if (hp1 <= MIN_COV and hp2 > MIN_COV):
+                    LOH_dict[(target_genome, 1, ref_id)].append(i)
+                elif (hp1 > MIN_COV and hp2 <= MIN_COV) :
+                    LOH_dict[(target_genome, 2, ref_id)].append(i)
+    LOH_region = defaultdict(list)
+    for key, loh_reg in LOH_dict.items():
+        for ind in loh_reg:
+            if not LOH_region[key]:
+                LOH_region[key].append([ind * COV_WINDOW])
+                LOH_region[key].append([(ind + 1) * COV_WINDOW])
+            elif ind * COV_WINDOW - LOH_region[key][1][-1] <= MIN_DIFF:
+                LOH_region[key][1][-1]=(ind + 1) * COV_WINDOW
+            else:
+                LOH_region[key][0].append(ind * COV_WINDOW)
+                LOH_region[key][1].append((ind + 1) * COV_WINDOW)
+    
+    write_loh_out.write("#chr_id\tstart\tend\tgenome_ids\thaplotype\t\n")  
+    for key, loh_reg in LOH_region.items():
+        for (st,end) in zip(loh_reg[0], loh_reg[1]):
+            if end - st >= MIN_LOH:
+                write_loh_out.write('\t'.join([key[2], str(st), str(end), key[0], str(key[1])]) + '\n')
+            
+ 
 def extract_segdups(mm_hist_high, write_segdups_out):
     high_mm_region = defaultdict(list)
     for key, mm_high_chrom in mm_hist_high.items():

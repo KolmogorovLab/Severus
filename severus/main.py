@@ -119,7 +119,9 @@ def main():
     parser.add_argument("--no-ins", dest='no_ins', action = "store_true")
     parser.add_argument("--inbetween-ins", dest='inbetween_ins', action = "store_true")
     parser.add_argument("--only-somatic", dest='only_somatic', action = "store_true")
+    parser.add_argument("--output_LOH", dest='output_loh', action = "store_true")
     parser.add_argument("--omit-resolve-overlaps", dest='resolve_overlaps', action = "store_false")
+    parser.add_argument("--tra-to-ins", dest='tra_to_ins', action = "store_true")
     
     
     args = parser.parse_args()
@@ -163,7 +165,12 @@ def main():
     
     args.write_segdups_out =''
     if args.write_segdup:
-        args.write_segdups_out = open(os.path.join(args.out_dir,"SEVERUS_collaped_dup.bed"), "w")
+        args.write_segdups_out = open(os.path.join(args.out_dir,"severus_collaped_dup.bed"), "w")
+        
+    args.write_log_out = ''
+    if args.output_loh:
+        args.write_log_out = open(os.path.join(args.out_dir,"severus_LOH.bed"), "w")
+        
     args.outpath_readqual = os.path.join(args.out_dir, "read_qual.txt")
     
     segments_by_read = []
@@ -183,7 +190,7 @@ def main():
     update_segments_by_read(segments_by_read, ref_lengths, args)
     
     logger.info('Computing coverage histogram')
-    coverage_histograms = update_coverage_hist(genome_ids, ref_lengths, segments_by_read)
+    coverage_histograms = update_coverage_hist(genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes, args.write_log_out)
     double_breaks = call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, genome_ids, control_genomes, args)
     
     output_graphs(double_breaks, coverage_histograms, thread_pool, target_genomes, control_genomes, ref_lengths, args)
