@@ -118,6 +118,15 @@ We compared performance of Severus, [sniffles2](https://github.com/fritzsedlazec
 
 We compared the performance of existing somatic SV callers [nanomonSV](https://github.com/friend1ws/nanomonsv), [SAVANA](https://github.com/cortes-ciriano-lab/savana) and [sniffles2](https://github.com/fritzsedlazeck/Sniffles) in mosaic mode using COLO829 cell line data against multi-platform [Valle-Inclan et al. truthset](https://www.sciencedirect.com/science/article/pii/S2666979X22000726). 
 
+#### Pacbio HiFi
+
+|SV Caller| TP | FP | FN | Recall | F1 score |
+|---------|----|----|----|--------|----------|
+| Severus | 59 | 9 | 33 | 0.87 | 0.74 | 
+| nanomonsv| 47 | 21 | 27 | 0.69 | 0.66 |
+| sniffles2| 40 | 28 | 181 | 0.59 | 0.28 |
+| SAVANA | 48 | 20 | 24 | 0.70 | 0.69 |
+
 #### Oxford Nanopore
 
 |SV Caller| TP | FN | FP | Recall | F1 score |
@@ -127,14 +136,6 @@ We compared the performance of existing somatic SV callers [nanomonSV](https://g
 | sniffles2| 35 | 33 | 263 | 0.51 | 0.19 | 
 | SAVANA | 51 | 17 | 18 | 0.75 | 0.74 |
 
-#### Pacbio
-
-|SV Caller| TP | FP | FN | Recall | F1 score |
-|---------|----|----|----|--------|----------|
-| Severus | 59 | 9 | 33 | 0.87 | 0.74 | 
-| nanomonsv| 47 | 21 | 27 | 0.69 | 0.66 |
-| sniffles2| 40 | 28 | 181 | 0.59 | 0.28 |
-| SAVANA | 48 | 20 | 24 | 0.70 | 0.69 |
 
 ---
 ### Contact
