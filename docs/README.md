@@ -184,7 +184,7 @@ We compared the performance of existing somatic SV callers [nanomonSV](https://g
 ### Phasing tumor-normal pair
 
 <p align="center">
-  <img src="phasing.jpg" alt="Somatic Phasing"/>
+  <img src="phasing2.jpg" alt="Somatic Phasing"/>
 </p>
 
 If normal sample is available:
