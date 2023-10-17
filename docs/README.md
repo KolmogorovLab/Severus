@@ -9,6 +9,7 @@ Severus builds breakpoint graphs for one or multiple long-read cancer samples to
 
 
 ## Contents
+* [Overview of Severus](#overview-of-severus)
 * [Installation](#installation)
 * [Usage](#usage)
   + [Somatic SV calling](#somatic-sv-calling)
@@ -20,6 +21,21 @@ Severus builds breakpoint graphs for one or multiple long-read cancer samples to
   + [SVs inside VNTRs](#svs-inside-vntrs)
   + [Additional Fields in the vcf](#additional-fields-in-the-vcf)
   + [Breakpoint Graphs](#breakpoint-graphs)
+
+
+## Overview of Severus
+
+<p align="center">
+  <img src="severus_workflow1.jpg" alt="Severus workflow"/>
+</p>
+
+Severus offers a method to identify focal somatic rearrangements.
+
+* Severus automatically detects mismapped reads from the collapsed duplication regions, which is a major source of false positive calls and provides it as an output with `--write-collapsed-dup`.
+
+* Severus uses VNTR annotations of the reference genome (which could be generated de novo) to represent SVs inside VNTRs in a uniform way, which facilitates better tumor/normal matching. For more information, [see](#svs-inside-vntrs)
+
+* Severus takes advantage of improved phasing with long read sequencing. It detects haplotype aware breakpoints, and generates haplotype specific breakpoint graphs which improves complex event clustering. For more information, [see](#breakpoint-graphs)
 
 
 ## Installation
@@ -188,7 +204,89 @@ We compared the performance of existing somatic SV callers [nanomonSV](https://g
 
 If normal sample is available:
 * 1. SNP calling and phasing normal bam. See for [DeepVariant](https://github.com/google/deepvariant) and [margin](https://github.com/UCSC-nanopore-cgl/margin). 
+
+  + Using DeepVariant + Margin
+
+```
+# To install DeepVariant and margin using singularity
+
+ singularity pull docker://google/deepvariant:latest
+ docker pull kishwars/pepper_deepvariant:latest
+ 
+# To generate phased VCF for ONT R10 data using DeepVariant + Margin
+
+singularity run --nv -B /usr/lib/locale/:/usr/lib/locale/ deepvariant_latest.sif run_deepvariant \
+--model_type ONT_R104 
+--ref ref.fa \
+--reads normal.bam \
+--output_vcf normal_vcf.vcf \
+--num_shards 56
+
+docker run kishwars/pepper_deepvariant:latest \
+margin phase normal.bam ref.fa normal_vcf.vcf allParams.haplotag.ont-r104q20.json -t 56 -o output_dir
+
+# To generate phased VCF for PacBio HiFi data using DeepVariant + Margin
+
+singularity run --nv -B /usr/lib/locale/:/usr/lib/locale/ deepvariant_latest.sif run_deepvariant \
+--model_type PACBIO \
+--ref ref.fa \
+--reads normal.bam \
+--output_vcf normal_vcf.vcf \
+--num_shards 56
+
+docker run kishwars/pepper_deepvariant:latest \
+margin phase normal.bam ref.fa normal_vcf.vcf allParams.haplotag.pb-hifi.json -t 56 -o output_dir
+
+```
+
+  + Using Clair3
+
+For the complete list of the available models, [see](https://github.com/HKU-BAL/Clair3/tree/main#pre-trained-models). with `--enable_phasing` and `--longphase_for_phasing` [Clair3](https://github.com/HKU-BAL/Clair3) generates unphased and phased vcfs using [LongPhase](https://academic.oup.com/bioinformatics/article/38/7/1816/6519151). 
+
+```
+# To install Clair3
+
+ singularity pull docker://google/deepvariant:latest
+ docker pull kishwars/pepper_deepvariant:latest
+ 
+# To generate phased VCF using Clair3
+
+INPUT_DIR="[YOUR_INPUT_FOLDER]"       
+OUTPUT_DIR="[YOUR_OUTPUT_FOLDER]"      
+THREADS="[MAXIMUM_THREADS]"            
+MODEL_NAME="[YOUR_MODEL_NAME]"
+
+docker run -it \
+  -v ${INPUT_DIR}:${INPUT_DIR} \
+  -v ${OUTPUT_DIR}:${OUTPUT_DIR} \
+  hkubal/clair3:latest \
+  /opt/bin/run_clair3.sh \
+  --bam_fn=${INPUT_DIR}/input.bam \    
+  --ref_fn=${INPUT_DIR}/ref.fa \       
+  --threads=${THREADS} \               
+  --platform="ont" \                   
+  --model_path="/opt/models/${MODEL_NAME}" \
+  --output=${OUTPUT_DIR} \
+  --enable_phasing \
+  --longphase_for_phasing
+
+```
+
 * 2. Haplotagging normal and tumor bams using phased vcf from step1. See for [whatshap](https://whatshap.readthedocs.io/en/latest/index.html)
+
+```
+# To install WhatsHap using Conda
+
+ conda create -n whatshap-env whatshap 
+ conda activate whatshap-env
+ 
+# To haplotag Normal and Tumor
+
+whatshap haplotag --reference ref.fa phased_vcf.vcf normal.bam -o normal.haplotagged.bam --ignore-read-groups --tag-supplementary --skip-missing-contigs --output-threads=4
+
+whatshap haplotag --reference ref.fa phased_vcf.vcf tumor.bam -o tumor.haplotagged.bam --ignore-read-groups --tag-supplementary --skip-missing-contigs --output-threads=4
+
+```
 
 ### SVs inside VNTRs
 
