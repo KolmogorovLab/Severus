@@ -199,7 +199,17 @@ Alignments to highly repetitive regions are often ambigous and often leads false
   <img src="vntrs.png" alt="VNTR handling"/>
 </p>
 
-In the example above, alignment led two deletion inside a vntr. Severus combines two deletions and transform them into a single longer deletion.  
+In the example above, alignment led two deletion inside a vntr. Severus combines two deletions and transform them into a single longer deletion.
+
+VNTR annotation file for the most commonly used genomes are generated using [findTandemRepeats](https://github.com/PacificBiosciences/pbsv/tree/master/annotations) and provided in the [vntrs](../vntrs) folder .
+
+To generate VNTR annotation file for a new genome using [findTandemRepeats](https://github.com/PacificBiosciences/pbsv/tree/master/annotations):
+
+```
+findTandemRepeats --merge <REF>.fa <REF>.trf.bed
+
+```
+
 
 ### Additional fields in the vcf
 
