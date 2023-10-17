@@ -1,92 +1,71 @@
 # Severus
 
-Severus is a tool to call somatic and germline structural variations (SV) in single or multi sample long-read sequencing data. Severus tested for both Pacbio and Oxford Nanopore read data ([see results](## Why use Severus?)).  
-Severus builds breakpoint graphs for one or multiple long-read cancer samples to cliuster complex SVs.
-
 <p align="center">
   <img src="severus_first.png" alt="Severus overview"/>
 </p>
 
+Severus is a somatic structural variation (SV) caller for long reads (both PacBio and ONT). It is designed for matching tumor/normal analysis,
+supports multiple tumor samples and produces accurate and complete somatic and germline calls. Severus is taking
+advantage of long-read phasing and uses the breakpoint graph framework to model complex chromosomal rearrangemnets.
 
 ## Contents
-* [Overview of Severus](#overview-of-severus)
+
 * [Installation](#installation)
-* [Usage](#usage)
-  + [Somatic SV calling](#somatic-sv-calling)
-  + [Germline SV calling](#germline-sv-calling)
-  + [Input and Parameters](#inputs-and-parameters)
-  + [Output Files](#output-files)
-* [Additional Information](#additional-information)
-  + [Phasing Tumor Normal pair](#phasing-tumor-normal-pair)
-  + [SVs inside VNTRs](#svs-inside-vntrs)
-  + [Additional Fields in the vcf](#additional-fields-in-the-vcf)
-  + [Breakpoint Graphs](#breakpoint-graphs)
-
-
-## Overview of Severus
-
-<p align="center">
-  <img src="severus_workflow1.jpg" alt="Severus workflow"/>
-</p>
-
-Severus offers a method to identify focal somatic rearrangements.
-
-* Severus automatically detects mismapped reads from the collapsed duplication regions, which is a major source of false positive calls and provides it as an output with `--write-collapsed-dup`.
-
-* Severus uses VNTR annotations of the reference genome (which could be generated de novo) to represent SVs inside VNTRs in a uniform way, which facilitates better tumor/normal matching. For more information, [see](#svs-inside-vntrs)
-
-* Severus takes advantage of improved phasing with long read sequencing. It detects haplotype aware breakpoints, and generates haplotype specific breakpoint graphs which improves complex event clustering. For more information, [see](#breakpoint-graphs)
-
+* [Quick Usage](#quick-usage)
+* [Input and Parameters](#inputs-and-parameters)
+* [Output Files](#output-files)
+* [Overview of the Severus algorithm](#Overview-of-the-Severus-algorithm)
+* [Benchmarking Severus and other SV callers](#Benchmarking-Severus-and-other-SV-callers)
+* [Preparing phased and haplotagged alignments](#Preparing-phased-and-haplotagged-alignments)
+* [Generating VNTR annotation](#Generating-VNTR-annotation)
+* [Additional Fields in the vcf](#additional-fields-in-the-vcf)
+* [Breakpoint Graphs](#breakpoint-graphs)
 
 ## Installation
 
-Requirements:
-* Python3
-* networkx
-* numpy
-* pydot
-* graphviz
-* pysam
-
-The easiest way to install dependencies is through conda.
+The easiest way to install dependencies is through conda:
 
 ```
-conda env create --name <env> --file environment.yml
+git clone https://github.com/KolmogorovLab/Severus
+cd Severus
+conda env create --name severus --file environment.yml
 ```
 
-## Usage
-
-### Somatic SV calling
+Once installed, you will need to activate the conda environment prior running:
 
 ```
-# Single sample somatic SV calling
+conda activate severus
+./severus.py
+```
 
+## Quick Usage
+
+Single sample somatic SV calling
+
+```
 ./severus.py --target-bam phased_tumor.bam --control-bam phased_normal.bam --out-dir severus_out -t 16 --phasing-vcf phased.vcf --vntr-bed ./vntrs/human_GRCh38_no_alt_analysis_set.trf.bed
-dot -Tsvg -O severus_out/breakpoint_graph.dot
+```
 
-# Multisample somatic SV calling
+Multi-sample somatic SV calling
 
+```
 ./severus.py --target-bam phased_tumor1.bam phased_tumor2.bam --control-bam phased_normal.bam --out-dir severus_out -t 16 --phasing-vcf phased.vcf --vntr-bed ./vntrs/human_GRCh38_no_alt_analysis_set.trf.bed
-dot -Tsvg -O severus_out/breakpoint_graph.gv
-
-```
-Providing phased bam files and phasing vcf is optional but recommended. For somatic SV calling single control file is supported. 
-
-### Germline SV calling
-
-```
-# Single sample SV calling
-
-./severus.py --target-bam phased_tumor.bam --out-dir severus_out -t 16 --phasing-vcf phased.vcf --vntr-bed ./vntrs/human_GRCh38_no_alt_analysis_set.trf.bed
-dot -Tsvg -O severus_out/breakpoint_graph.gv
-
-# Multisample SV calling
-
-./severus.py --target-bam phased_tumor1.bam phased_tumor2.bam --out-dir severus_out -t 16 --phasing-vcf phased.vcf --vntr-bed ./vntrs/human_GRCh38_no_alt_analysis_set.trf.bed
-dot -Tsvg -O severus_out/breakpoint_graph.gv
 ```
 
-Providing phased bam files and phasing vcf is optional but recommended.
+Haplotagged (phased) alignment input is highly recommended, but not required. See below
+for the detailed instructions how to prepare haplotagged alignments. 
+If using haplotagged bam, the matching phased VCF file should be provided as `--phasing-vcf` option.
+
+`--vntr-bed` arguemnt is optional, but highly recommended. VNTR annotations for common references are available
+in the `vntrs` folder. See below how to generate annotations for a custom reference. 
+
+Without `--control-bam`, only germnline variants will be called.
+
+To visualize breakpoint graph, use:
+
+```
+dot -Tsvg -O severus_out/breakpoint_graph.dot
+```
 
 ## Inputs and Parameters
 
@@ -96,13 +75,15 @@ Providing phased bam files and phasing vcf is optional but recommended.
 
 * `--out-dir` path to output directory
 
-## All parameters
+### Highly recommended
 
 * `--control-bam` path to one or multiple control bam files (must be indexed)
 
 * `--vntr-bed` path to bed file for tandem repeat regions (must be ordered)
 
 * `--phasing-vcf` path to vcf file used for phasing (must for the haplotype specific SV calling)
+
+## Optional parameters
 
 * `--threads` number of threads [8]
   
@@ -141,26 +122,42 @@ Providing phased bam files and phasing vcf is optional but recommended.
 
 ## Output Files
 
-### breakpoint_graph.gv  
+### VCF file
 
-The primary output is the breakpoint graph, like on the example above. Solid edges correspond to the fragments of the reference genome, (L: length C: coverage)
-and dashed colored edges correspond to non-reference connections from reads (R: number of support reads). Each breakpoint is defined by its coordinate.
+For each target sample, Severus outputs a VCF file with somatic SV calls.
+If the input alignemnt is haplotagged, VCF will be phased. In addition,
+Severus outputs a set of all SVs (somatic + germline) for each input sample.
+VCF contains additional information about SVs, such as clustering of complex
+variants. Please see the detailed dsecription below.
+
+### breakpoint_graph.gv and breakpoints_double.csv
+
+Severus also outputs a breakpoint graph in graphvis format that describes the derived structure
+of tumor haplotypes. Solid edges correspond to the fragments of the reference genome, (L: length C: coverage)
+and dashed colored edges correspond to non-reference connections from reads (R: number of support reads). 
+See the detailed description of the graph format below. `breakpoints_double.csv` contains the
+same breakpoint information in the text format.
 
 ```
 # To convert gv format to svg
 dot -Tsvg -O severus_out/breakpoint_graph.gv
 ```
 
-### VCF file
+## Overview of the Severus algorithm
 
-If phased bam and phasing vcf is provided haplotype specific SV calls are reported as `0|1` or `1|0`.
+<p align="center">
+  <img src="severus_workflow1.jpg" alt="Severus workflow"/>
+</p>
 
-### breakpoints_double.csv
+The key steps of the Severus algorithm include:
 
-Detailed information for all breakpoints detected in any of the bam files provided.
+* Severus automatically detects mismapped reads from the collapsed duplication regions, which is a major source of false positive calls and provides it as an output with `--write-collapsed-dup`.
 
+* Severus uses VNTR annotations of the reference genome (which could be generated de novo) to represent SVs inside VNTRs in a uniform way, which facilitates better tumor/normal matching. For more information, [see](#svs-inside-vntrs)
 
-## Benchmarking Results
+* Severus takes advantage of improved phasing with long read sequencing. It detects haplotype aware breakpoints, and generates haplotype specific breakpoint graphs which improves complex event clustering. For more information, [see](#breakpoint-graphs)
+
+## Benchmarking Severus and other SV callers
 
 ### Germline benchmarking results using HG002
 
@@ -194,9 +191,12 @@ We compared the performance of existing somatic SV callers [nanomonSV](https://g
 | sniffles2| 35 | 33 | 263 | 0.51 | 0.19 | 
 | SAVANA | 51 | 17 | 18 | 0.75 | 0.74 |
 
-## Additional Information
 
-### Phasing tumor-normal pair
+### Preparing phased and haplotagged alignments
+
+We recommend running Severus with phased and haplotagged tumor and normal alignments. Below is an example
+workkflow that can be used to produce them, assuming that reads are already aligned using minimap2.
+If phasing is difficult or not possible (e.g. haploid genome), unphased alignment can be used as input.
 
 <p align="center">
   <img src="phasing2.jpg" alt="Somatic Phasing"/>
@@ -288,7 +288,7 @@ whatshap haplotag --reference ref.fa phased_vcf.vcf tumor.bam -o tumor.haplotagg
 
 ```
 
-### SVs inside VNTRs
+### Generating VNTR annotation
 
 Alignments to highly repetitive regions are often ambigous and often leads false positives. Severus clusters SVs inside a single VNTR region to uniform the SV representation for each read.
 
@@ -306,7 +306,6 @@ To generate VNTR annotation file for a new genome using [findTandemRepeats](http
 findTandemRepeats --merge <REF>.fa <REF>.trf.bed
 
 ```
-
 
 ### Additional fields in the vcf
 
