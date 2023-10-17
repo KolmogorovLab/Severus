@@ -1,6 +1,6 @@
 # Severus
 
-Severus is a tool to call somatic and germline structural variations (SV) in single or multi sample long-read sequencing data. Severus tested for both Pacbio and Oxford Nanopore read data ([see results](## Why use Severus?)).  
+Severus is a tool to call somatic and germline structural variations (SV) in single or multi sample long-read sequencing data. Severus tested for both Pacbio and Oxford Nanopore read data ([see results](#why-use-severus)).  
 Severus builds breakpoint graphs for one or multiple long-read cancer samples to cliuster complex SVs. For more information, [see](docs/README.md)
 
 <p align="center">
