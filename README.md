@@ -81,7 +81,7 @@ Providing phased bam files and phasing vcf is optional but recommended.
 
 * `--TIN-ratio` tumor in normal ratio [0.01]
 
-For all parameters, see [pamareter list](docs/README.md)
+For all parameters, see [parameter list](docs/README.md)
 ## Outputs
 
 ### breakpoint_graph.gv  

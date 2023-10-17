@@ -4,7 +4,7 @@ Severus is a tool to call somatic and germline structural variations (SV) in sin
 Severus builds breakpoint graphs for one or multiple long-read cancer samples to cliuster complex SVs.
 
 <p align="center">
-  <img src="docs/severus_overview.png" alt="Severus overview"/>
+  <img src="severus_first.png" alt="Severus overview"/>
 </p>
 
 
@@ -184,7 +184,7 @@ We compared the performance of existing somatic SV callers [nanomonSV](https://g
 ### Phasing tumor-normal pair
 
 <p align="center">
-  <img src="docs/phasing.jpg" alt="Somatic Phasing"/>
+  <img src="phasing.jpg" alt="Somatic Phasing"/>
 </p>
 
 If normal sample is available:
@@ -196,7 +196,7 @@ If normal sample is available:
 Alignments to highly repetitive regions are often ambigous and often leads false positives. Severus clusters SVs inside a single VNTR region to uniform the SV representation for each read.
 
 <p align="center">
-  <img src="docs/vntrs.png" alt="VNTR handling"/>
+  <img src="vntrs.png" alt="VNTR handling"/>
 </p>
 
 In the example above, alignment led two deletion inside a vntr. Severus combines two deletions and transform them into a single longer deletion.  
@@ -225,7 +225,7 @@ Severus outputs several unique fileds in INFO column.
 ### Breakpoint Graphs
 
 <p align="center">
-  <img src="docs/graph.png" alt="Breakpoint graph"/>
+  <img src="graph.png" alt="Breakpoint graph"/>
 </p>
 
 The primary output of Severus is the breakpoint graph generated separately for somatic and germline SVs and the accompanying breakpoint_clusters.csv file. 
