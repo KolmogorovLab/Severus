@@ -1,0 +1,15 @@
+name: strainy
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python>=3.8
+  - samtools>=1.14
+  - networkx>=2.6
+  - pygraphviz
+  - pydot
+  - matplotlib
+  - biopython
+  - numpy
+  - pysam
