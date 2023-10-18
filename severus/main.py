@@ -116,10 +116,10 @@ def main():
     parser.add_argument("--TIN-ratio", dest='control_vaf', metavar="float", type=float, default = CONTROL_VAF, help = 'Tumor in normal ratio[{CONTROL_VAF}]')
     parser.add_argument("--output-all", dest='output_all', action = "store_true")
     parser.add_argument("--write-collapsed-dup", dest='write_segdup', action = "store_true")
-    parser.add_argument("--no-ins", dest='no_ins', action = "store_true")
+    parser.add_argument("--no-ins-seq", dest='no_ins', action = "store_true")
     parser.add_argument("--inbetween-ins", dest='inbetween_ins', action = "store_true")
     parser.add_argument("--only-somatic", dest='only_somatic', action = "store_true")
-    parser.add_argument("--output_LOH", dest='output_loh', action = "store_true")
+    parser.add_argument("--output-LOH", dest='output_loh', action = "store_true")
     parser.add_argument("--omit-resolve-overlaps", dest='resolve_overlaps', action = "store_false")
     parser.add_argument("--tra-to-ins", dest='tra_to_ins', action = "store_true")
     
@@ -159,9 +159,6 @@ def main():
         ref_lengths = dict(zip(a.references, a.lengths))
 
     thread_pool = Pool(args.threads)
-    
-    if args.filter_small_svs:
-        args.max_genomic_len = 100000000
     
     args.write_segdups_out =''
     if args.write_segdup:

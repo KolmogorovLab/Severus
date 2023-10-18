@@ -590,9 +590,11 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
         for cl in clusters:
             unique_reads_pass = defaultdict(set)
             unique_reads = defaultdict(set)
+            unique_reads_read = defaultdict(set)
             prec = 1
             for x in cl:
                 unique_reads[(x.genome_id, x.haplotype)].add(x)
+                unique_reads_read[(x.genome_id, x.haplotype)].add(x.read_id)
                 if x.is_pass == 'PASS':
                     unique_reads_pass[(x.genome_id, x.haplotype)].add(x)#
                     
@@ -643,7 +645,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
                     bp_3 = Breakpoint(seq, position, 1, mapq)
                     bp_3.is_insertion = True
                     bp_3.insertion_size = ins_length
-                    supp = len(unique_reads)
+                    supp = len(unique_reads_read)
                     supp_reads = unique_reads
                     genome_id = key[0]
                     if sum(happ_support_1[genome_id]) == NUM_HAPLOTYPES:
@@ -1288,7 +1290,7 @@ def get_genomic_segments(double_breaks, coverage_histograms, hb_vcf, key_type, r
                     sw_point = (ref_name, neg_ls[ind2 +1])
                 db_segments[db].append((genome_name, ref_name, db.bp_1.position, neg_ls[ind2 +1], haplotype_name, sw_point))
             elif db.bp_1.dir_1 == -1:
-                ind = bisect.bisect_left(pos_ls,db.bp_1.position)
+                ind = bisect.bisect_right(pos_ls,db.bp_1.position)
                 if not db.is_dup and db.bp_1.position == pos_ls[ind]:
                     ind = ind +1
                 if pos_ls[ind] in sw_p:
@@ -1305,7 +1307,7 @@ def get_genomic_segments(double_breaks, coverage_histograms, hb_vcf, key_type, r
         for db in bp2:
             sw_point = ''
             if db.bp_2.dir_1 == -1:
-                ind = bisect.bisect_left(pos_ls,db.bp_2.position)
+                ind = bisect.bisect_right(pos_ls,db.bp_2.position)
                 if db.bp_2.position == pos_ls[ind]:
                     ind = ind +1
                 if pos_ls[ind] in sw_p:

@@ -28,7 +28,7 @@ def filter_small_sv(double_breaks):
         for db in list(set(db_to_remove)):
             double_breaks.remove(db) 
                     
-def build_graph(genomic_segments, phasing_segments, adj_segments, max_genomic_len, reference_adjacencies, filter_small_svs):
+def build_graph(genomic_segments, phasing_segments, adj_segments, max_genomic_len, reference_adjacencies):
     g = nx.MultiGraph()
 
     node_ids = {}
@@ -179,7 +179,7 @@ def output_clusters_graphvis(graph, connected_components, out_file):
                     properties.append(f"{prop}=\"{val}\"")
                 prop_str = ",".join(properties)
                 dir_1, dir_2 = value['_dir']
-                out_stream.write(f"{u}:{dir_1} -> {v}:{dir_2} [{prop_str}];\n")
+                out_stream.write(f"{u}:{dir_1} -> {v}:{dir_2} [{prop_str}, dir=none];\n")
                 
             out_stream.write("}\n\n")  
     
@@ -292,8 +292,8 @@ def cluster_adjacencies(graph, target_genomes, control_genomes):
 
 
 def build_breakpoint_graph(genomic_segments, phasing_segments, adj_segments, max_genomic_len, reference_adjacencies,
-                           target_genomes, control_genomes, filter_small_svs):
-    graph, db_to_cl = build_graph(genomic_segments, phasing_segments, adj_segments, max_genomic_len, reference_adjacencies, filter_small_svs)
+                           target_genomes, control_genomes):
+    graph, db_to_cl = build_graph(genomic_segments, phasing_segments, adj_segments, max_genomic_len, reference_adjacencies)
     adj_clusters = cluster_adjacencies(graph, target_genomes, control_genomes)
     return graph, adj_clusters, db_to_cl
             
@@ -327,7 +327,7 @@ def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, con
         
         logger.info("\tPreparing graph")
         graph, adj_clusters, db_to_cl = build_breakpoint_graph(genomic_segments, phasing_segments, adj_segments, args.max_genomic_len,
-                                                                    args.reference_adjacencies, target_genomes, control_genomes, args.filter_small_svs)
+                                                                    args.reference_adjacencies, target_genomes, control_genomes)
         output_clusters_graphvis(graph, adj_clusters, out_breakpoint_graph)
         output_clusters_csv(db_to_cl, double_breaks, adj_clusters, out_clustered_breakpoints)
         
