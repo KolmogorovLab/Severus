@@ -645,7 +645,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
                     bp_3 = Breakpoint(seq, position, 1, mapq)
                     bp_3.is_insertion = True
                     bp_3.insertion_size = ins_length
-                    supp = len(unique_reads_read)
+                    supp = len(unique_reads_read[key])
                     supp_reads = unique_reads
                     genome_id = key[0]
                     if sum(happ_support_1[genome_id]) == NUM_HAPLOTYPES:
