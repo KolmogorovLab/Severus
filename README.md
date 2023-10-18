@@ -77,17 +77,17 @@ dot -Tsvg -O severus_out/breakpoint_graph.dot
 
 ### Required
 
-* `--target-bam` path to one or multiple target bam files (must be indexed) 
+* `--target-bam` path to one or multiple target bam files (e.g. tumor, must be indexed) 
 
 * `--out-dir` path to output directory
 
 ### Highly recommended
 
-* `--control-bam` path to the control bam file (must be indexed)
+* `--control-bam` path to the control bam file (e.g. normal, must be indexed)
 
 * `--vntr-bed` path to bed file for tandem repeat regions (must be ordered)
 
-* `--phasing-vcf` path to vcf file used for phasing (must for the haplotype specific SV calling)
+* `--phasing-vcf` path to vcf file used for phasing (if using haplotype specific SV calling)
 
 ## Optional parameters
 
@@ -103,7 +103,7 @@ dot -Tsvg -O severus_out/breakpoint_graph.dot
 
 * `--min-sv-size` minimum SV size to be reported [50]
 
-* `--min-reference-flank` minimum distance between breakpoint and sequence ends [10000]
+* `--min-reference-flank` minimum distance between a breakpoint and reference ends [10000]
 
 * `--write-alignments` write read alignments to file
 
@@ -113,15 +113,15 @@ dot -Tsvg -O severus_out/breakpoint_graph.dot
 
 * `--write-collapsed-dup` outputs a bed file with identified collapsed duplication regions
 
-* `--no-ins-seq` omits insertion sequence in the vcf file
+* `--no-ins-seq` do not output insertion sequences to the vcf file
 
-* `--inbetween-ins` omits insertion sequence in the vcf file
+* `--inbetween-ins` report unmapped insertions around breakpoints
 
 * `--only-somatic` omits germline outputs in the somatic mode
 
 * `--output_LOH` outputs a bed file with predicted LOH regions
 
-* `--ins-to-tra` converts insertions to translocations if position is known
+* `--ins-to-tra` converts insertions to translocations if mapping is known
 
 
 ## Output Files
@@ -134,7 +134,7 @@ Severus outputs a set of all SVs (somatic + germline) for each input sample.
 VCF contains additional information about SVs, such as the clustering of complex
 variants. Please see the detailed description [below](#additional-fields-in-the-vcf).
 
-### breakpoint_graph.gv and breakpoints_double.csv
+### breakpoint_graph.gv
 
 Severus also outputs a breakpoint graph in graphvis format that describes the derived structure
 of tumor haplotypes. Solid edges correspond to the fragments of the reference genome (L: length C: coverage)
@@ -144,7 +144,7 @@ same breakpoint information in the text format.
 
 ### breakpoint_double.csv
 
-Complete list of breakpoint pairs detected in the samples provided for the advance use.
+Detailed info about the deteted breakpoints for all samples in text format, intended for an advanced user.
 
 ```
 # To convert gv format to svg
@@ -160,29 +160,41 @@ dot -Tsvg -O severus_out/breakpoint_graph.gv
 Somatic SVs in cancer are typically more complex compared to germline SVs. For example, breakage-fusion-bridge (BFB) amplifications 
 are characterized by multiple foldback inversions and oscillating copy numbers. Current long-read SV algorithms were designed 
 for relatively simple germline variation and do not automatically detect complex multi-break rearrangements in cancer.
-In addition, these approaches can only work with a single sample at a time.
+Severus is designed to provide a comprehensive view of somatic and germline SVs, and implements several algorithmic novelties.
+The algorithm has modes for `single`, `two (e.g., tumor/normal)`, and `multiple samples` (e.g., multi-site or time series). 
 
-We designed Severus to solve the challenges of somatic SV detection.
-First, Severus takes advantage of phased long-read alignments; therefore, all somatic variants are attributed to a germline haplotype. 
-Second, Severus takes advantage of VNTR annotations of the reference genome to represent SVs inside VNTRs in a uniform way, 
-which facilitates better tumor/normal matching. Third, Severus automatically detects mismapped reads from the collapsed duplication regions, 
-a significant source of false positive calls. Fourth, Severus builds a haplotype-specific breakpoint graph that is used to cluster multi-break 
-rearrangements and represent the derived chromosomal structure.
+**Haplotype-specific SVs**. A key advantage of long-read sequencing is the ability to phase variants into longer haplotypes, without the need of any additional data. 
+Both germline and somatic variants can be phased, however somatic variants must still be attributed to a single germline haplotype of origin. 
+If the normal sample is available, we perform SNP calling and phasing of the normal sample alignment, 
+and then haplotag both normal and tumor alignments. In the absence of a normal sample, phasing of tumor alignment data can be performed instead. 
 
-Severus works with `single`, `two (e.g., tumor/normal)`, and `multiple samples` (e.g., multi-site or time series). 
-Each sample is provided as a phased bam alignment. Severus starts by preprocessing alignments inside VNTRs and masking reads
-with locally increased error rates, which typically correspond to mismapped reads from collapsed segmental duplications. 
-Then, Severus extracts breakpoints from long reads with split alignments. Each breakpoint is defined by (i) coordinate, (ii) direction, and (iii) haplotype. 
-Then, the breakpoint graph is constructed by connecting breakpoint nodes in compatible directions and haplotypes, which define genomic segments. 
+**Mismapped repeats filtering**. Mismapped reads from wrong repeat copies may artificially inflate (or deplete) 
+the coverage of the region, and these reads may contain SV signatures, resulting in false-positive calls. 
+It is one of the major sources of false positive somatic SV calls, as mismapped read alignment is often unstable and may vary between tumor and normal samples. 
+Since the copies of evolutionary divergent repeats are not identical, a common signature of mismapped repeats is an increased sequence divergence. 
+Severus filters out mismaped repetitive reads with an increased subtitution rates.
 
-Naturally, the resulting genomic segments may be overlapping, which corresponds to copy number increases. 
-We then mask simple SV (standalone insertions and deletions) and perform graph clustering that reveals multi-break rearrangements.
+**VNTR synchronization**. Variation inside variable number tandem repeats (VNTRs) is another major source of error in SV analysis. This is because the alignment inside the VNTR regions is often ambiguous. 
+Since reads contain errors at random positions, this may affect the scores of the near-optimal alignments in different ways. For each read, Severus transforms the SV signatures 
+inside annotated VNTR regions into a uniform coordinate system. 
+
+**Breakpoint graph**. Each SV signature (extracted from an individual read) connects two non-adjacent breakpoints of the reference genome. 
+We will denote these regions as `start_pos` and `end_pos`. Each breakpoint has a direction, either `left` or `right`. Thus, an SV signature is defined by a pair of breakpoints: 
+`(start_pos, start_dir):(end_pos, end_dir)`. For example, a deletion at position `P` of size `L` corresponds to: `(P, left):(P + L, right)`. 
+
+Given a set of SV signatures, they are clustered based on their start and end breakpoints. For each accepted cluster that passes several quality thresholds, 
+we create two nodes on the breakpoint graph (for start and end breakpoints), and connect the nodes with an `adjacency` edge. We then add `genomic` edges
+that corrspond to target genome segments using long reads that span multiple consecutive SVs. Genomic edges are also formed for distant breakpoints that
+are not connected by long reads, but are in the same (germline) phase and consistent direction. 
+
+As a result, the connected components of the constructed breakpoint graph naturally represent clusters of SVs, for example chains of deletions or translocations. To capture
+more complex and potentially overlapping SVs - such as chromoplexy or breakage-fusion-bridge - we perform additional clustering specific to complex SV types.
 
 ## Benchmarking Severus and other SV callers
 
 ### Germline benchmarking results using HG002
 
-We compared performance of Severus, [sniffles2](https://github.com/fritzsedlazeck/Sniffles) and [cuteSV](https://github.com/tjiangHIT/cuteSV) in [HG002 GIAB SV benchmark set](https://www.nature.com/articles/s41587-020-0538-8).  
+We compared performance of Severus, [sniffles2](https://github.com/fritzsedlazeck/Sniffles) and [cuteSV](https://github.com/tjiangHIT/cuteSV) in [HG002 GIAB SV benchmark set](https://www.nature.com/articles/s41587-020-0538-8). Comparison was perfromed using `truvari`.
 
 |SV Caller| TP | FP | FN | Recall | F1 score |
 |---------|----|----|----|--------|----------|
@@ -192,7 +204,9 @@ We compared performance of Severus, [sniffles2](https://github.com/fritzsedlazec
 
 ### Somatic benchmarking results COLO829
 
-We compared the performance of existing somatic SV callers [nanomonSV](https://github.com/friend1ws/nanomonsv), [SAVANA](https://github.com/cortes-ciriano-lab/savana) and [sniffles2](https://github.com/fritzsedlazeck/Sniffles) in mosaic mode using COLO829 cell line data against multi-platform [Valle-Inclan et al. truthset](https://www.sciencedirect.com/science/article/pii/S2666979X22000726). 
+We compared the performance of existing somatic SV callers [nanomonSV](https://github.com/friend1ws/nanomonsv), [SAVANA](https://github.com/cortes-ciriano-lab/savana) and [sniffles2]
+(https://github.com/fritzsedlazeck/Sniffles) in mosaic mode using COLO829 cell line data against multi-platform [Valle-Inclan et al. truthset](https://www.sciencedirect.com/science/article/pii/S2666979X22000726). 
+Because `truvari` was primarily designed for indel comparison, we compared somatic SVs by matching individual breakpoints (defined by a pair of reference coordinates).
 
 #### Pacbio HiFi
 
