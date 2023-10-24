@@ -200,11 +200,11 @@ more complex and potentially overlapping SVs - such as chromoplexy or breakage-f
 
 We compared performance of Severus, [sniffles2](https://github.com/fritzsedlazeck/Sniffles) and [cuteSV](https://github.com/tjiangHIT/cuteSV) in [HG002 GIAB SV benchmark set](https://www.nature.com/articles/s41587-020-0538-8). Comparison was perfromed using `truvari`.
 
-|SV Caller| TP | FP | FN | Recall | F1 score |
-|---------|----|----|----|--------|----------|
-| Severus |9453| 345| 402| 0.965| 0.962|
-| sniffles2|9459| 336| 396| 0.966| 0.963|
-| cuteSV |9231| 676| 624| 0.937| 0.934|
+|SV Caller| TP | FN | FP | Precision | Recall | F1 score |
+|---------|----|----|----|-----------|--------|----------|
+| Severus |9453| 402| 345| 0.965| 0.959| 0.962|
+| sniffles2|9459| 396| 336| 0.960| 0.966| 0.963|
+| cuteSV |9231| 624| 676| 0.936| 0.931| 0.934|
 
 ### Somatic benchmarking results COLO829
 
@@ -213,12 +213,12 @@ Because `truvari` was primarily designed for indel comparison, we compared somat
 
 #### Pacbio HiFi
 
-|SV Caller| TP | FP | FN | Precision | Recall | F1 score |
+|SV Caller| TP | FN | FP | Precision | Recall | F1 score |
 |---------|----|----|----|-----------|--------|----------|
-| Severus | 59 | 9 | 33 | 0.64 | 0.87 | 0.74 |
-| nanomonsv| 52 | 16 | 55 | 0.49 | 0.76 | 0.59 |
-| sniffles2| 46 | 22 | 252 | 0.15 | 0.68 | 0.25 |
-| SAVANA | 55 | 13 | 88 | 0.38 | 0.8 | 0.52 |
+| Severus | 59 | 33 | 9 | 0.64 | 0.87 | 0.74 |
+| nanomonsv| 52 | 55 | 16 | 0.49 | 0.76 | 0.59 |
+| sniffles2| 46 | 252 | 22 | 0.15 | 0.68 | 0.25 |
+| SAVANA | 55 | 88 |  13 |0.38 | 0.8 | 0.52 |
 
 #### Oxford Nanopore
 
@@ -235,39 +235,39 @@ We compared the performance of the somatic SV callers using four Tumor/Normal ce
 
 #### H2009 - BL2009
 
-|SV Caller| TP | FN | FP | Precision | Recall | F1 score |
+|SV Caller| TP | FP | FN | Precision | Recall | F1 score |
 |---------|----|----|----|-----------|--------|----------|
-| Severus | 851 | 90 | 121 | 0.90 | 0.88 | 0.89 |
-| nanomonsv | 764 | 203 | 208 | 0.79 | 0.79 | 0.79 |
-| sniffles2 | 682 | 562 | 290 | 0.55 | 0.70 | 0.62 |
-| SAVANA | 744 | 284 | 228 | 0.72 | 0.77 | 0.74 |
+| Severus | 841 | 104 | 34 | 0.89 | 0.96 | 0.92 |
+| nanomonsv | 758 | 226 | 117 | 0.77 | 0.87 | 0.82 |
+| sniffles2 | 542 | 717 | 333 | 0.43 | 0.62 | 0.51 |
+| SAVANA | 711 | 329 | 164 | 0.68 | 0.81 | 0.74 |
 
 #### H1437 - BL1437
 
-|SV Caller| TP | FN | FP | Precision | Recall | F1 score |
+|SV Caller| TP | FP | FN | Precision | Recall | F1 score |
 |---------|----|----|----|-----------|--------|----------|
-| Severus | 217 | 49 | 13 | 0.82 | 0.94 | 0.88 |
-| nanomonsv | 175 | 73 | 55 | 0.71 | 0.76 | 0.73 |
-| sniffles2 | 147 | 406 | 83 | 0.27 | 0.64 | 0.38 |
-| SAVANA | 203 | 73 | 27 | 0.74 | 0.88 | 0.80 |
+| Severus | 200 | 72 | 13 | 0.74 | 0.94 | 0.82 |
+| nanomonsv | 172 | 92 | 41 | 0.65 | 0.81 | 0.72 |
+| sniffles2 | 111 | 442 | 102 | 0.20 | 0.52 | 0.29 |
+| SAVANA | 199 | 79 | 14 | 0.72 | 0.93 | 0.81 |
 
 #### HCC1937 - HCC1937BL
 
-|SV Caller| TP | FN | FP | Precision | Recall | F1 score |
+|SV Caller| TP | FP | FN | Precision | Recall | F1 score |
 |---------|----|----|----|-----------|--------|----------|
-| Severus | 635 | 107 | 64 | 0.86 | 0.91 | 0.88 |
-| nanomonsv | 550 | 183 | 149 | 0.75 | 0.79 | 0.77 |
-| sniffles2 | 448 | 610 | 251 | 0.42 | 0.64 | 0.51 |
-| SAVANA | 551 | 307 | 148 | 0.64 | 0.79 | 0.71 |
+| Severus | 597 | 169 | 47 | 0.78 | 0.93 | 0.85 |
+| nanomonsv | 503 | 278 | 141 | 0.64 | 0.78 | 0.71 |
+| sniffles2 | 320 | 754 | 324 | 0.30 | 0.50 | 0.37 |
+| SAVANA | 540 | 353 | 104 | 0.60 | 0.84 | 0.70 |
 
 #### HCC1954 - HCC1954BL
 
-|SV Caller| TP | FN | FP | Precision | Recall | F1 score |
+|SV Caller| TP | FP | FN | Precision | Recall | F1 score |
 |---------|----|----|----|-----------|--------|----------|
-| Severus | 819 | 75 | 66 | 0.92 | 0.93 | 0.92 |
-| nanomonsv | 719 | 133 | 166 | 0.84 | 0.81 | 0.83 |
-| sniffles2 | 268 | 536 | 617 | 0.33 | 0.30 | 0.32 |
-| SAVANA | 798 | 367 | 87 | 0.68 | 0.90 | 0.78 |
+| Severus | 819 | 100 | 51 | 0.89 | 0.94 | 0.92 |
+| nanomonsv | 703 | 167 | 167 | 0.81 | 0.81 | 0.81 |
+| sniffles2 | 245 | 566 | 625 | 0.30 | 0.28 | 0.29 |
+| SAVANA | 802 | 392 | 68 | 0.67 | 0.92 | 0.78 |
 
 
 ## Preparing phased and haplotagged alignments
