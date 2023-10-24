@@ -146,7 +146,7 @@ and highest recall on the ONT dataset, with SAVANA having highest precision.
 
 #### Pacbio HiFi
 
-|SV Caller  | TP | FN | FP | Precision | Recall   | F1 score |
+|SV Caller  | TP | FP | FN | Precision | Recall   | F1 score |
 |-----------|----|----|----|-----------|----------|----------|
 | Severus   | 59 | 33 | 9  | **0.64**  | **0.87** | **0.74** |
 | nanomonsv | 52 | 55 | 16 | 0.49      | 0.76     | 0.59     |
@@ -155,12 +155,12 @@ and highest recall on the ONT dataset, with SAVANA having highest precision.
 
 #### Oxford Nanopore
 
-|SV Caller | TP  | FN | FP  | Precision | Recall | F1 score |
-|----------|-----|----|-----|-----------|--------|----------|
-| Severus  | 53  | 15 | 33  | 0.61      |**0.78**| 0.69     |
-| nanomonsv| 44  | 24 | 46  | 0.49      | 0.65   | 0.56     |
-| sniffles2| 35  | 33 | 263 | 0.12      | 0.51   | 0.19     |
-| SAVANA   | 51  | 17 | 18  | **0.74**  | 0.75   | **0.74** |
+|SV Caller | TP  | FP  | FN | Precision | Recall | F1 score |
+|----------|-----|-----|----|-----------|--------|----------|
+| Severus  | 53  | 33  | 15 |  0.61     |**0.78**| 0.69     |
+| nanomonsv| 44  | 46  | 24 |  0.49     | 0.65   | 0.56     |
+| sniffles2| 35  | 263 | 33 |  0.12     | 0.51   | 0.19     |
+| SAVANA   | 51  | 18  | 17 | **0.74**  | 0.75   | **0.74** |
 
 ### Somatic Benchmarking results: Tumor/Normal Cell line pairs
 
