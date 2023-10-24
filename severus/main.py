@@ -74,10 +74,10 @@ def main():
 
     parser.add_argument("--target-bam", dest="target_bam",
                         metavar="path", required=True, default=None, nargs="+",
-                        help="path to one or multiple target bam files (must be indexed)")
+                        help="path to one or multiple target bam files (e.g. tumor, must be indexed)")
     parser.add_argument("--control-bam", dest="control_bam",
                         metavar="path", required=False, default=None, nargs="+",
-                        help="path to one or multiple control bam files (must be indexed)")
+                        help="path to the control bam file (e.g. normal, must be indexed)")
     parser.add_argument("--out-dir", dest="out_dir",
                         default=None, required=True,
                         metavar="path", help="Output directory")
@@ -88,7 +88,7 @@ def main():
                         help=f"minimum reads supporting double breakpoint [{MIN_BREAKPOINT_READS}]")
     parser.add_argument("--min-reference-flank", dest="min_ref_flank",
                         default=MIN_REF_FLANK, metavar="int", type=int,
-                        help=f"minimum distance between breakpoint and sequence ends [{MIN_REF_FLANK}]")
+                        help=f"minimum distance between a breakpoint and reference ends [{MIN_REF_FLANK}]")
     parser.add_argument("--bp-cluster-size", dest="bp_cluster_size",
                         default=BP_CLUSTER_SIZE, metavar="int", type=int,
                         help=f"maximum distance in bp cluster [{BP_CLUSTER_SIZE}]")
@@ -110,18 +110,18 @@ def main():
     parser.add_argument("--max-genomic-len", dest="max_genomic_len",
                         default=MAX_GENOMIC_LEN, metavar="int", type=int,
                         help=f"maximum length of genomic segment to form connected components [{MAX_GENOMIC_LEN}]")
-    parser.add_argument("--phasing-vcf", dest="phase_vcf", metavar="path", help="vcf file used for phasing [None]")
+    parser.add_argument("--phasing-vcf", dest="phase_vcf", metavar="path", help="path to vcf file used for phasing (if using haplotype specific SV calling)[None]")
     parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
     parser.add_argument("--filter-small-svs", dest='filter_small_svs', action = "store_true", help = 'filters small svs < 5000')
     parser.add_argument("--TIN-ratio", dest='control_vaf', metavar="float", type=float, default = CONTROL_VAF, help = 'Tumor in normal ratio[{CONTROL_VAF}]')
-    parser.add_argument("--output-all", dest='output_all', action = "store_true")
-    parser.add_argument("--write-collapsed-dup", dest='write_segdup', action = "store_true")
-    parser.add_argument("--no-ins-seq", dest='no_ins', action = "store_true")
-    parser.add_argument("--inbetween-ins", dest='inbetween_ins', action = "store_true")
-    parser.add_argument("--only-somatic", dest='only_somatic', action = "store_true")
-    parser.add_argument("--output-LOH", dest='output_loh', action = "store_true")
+    parser.add_argument("--output-all", dest='output_all', action = "store_true", help = 'outputs FAIL SVs in addition to PASS SVs')
+    parser.add_argument("--write-collapsed-dup", dest='write_segdup', action = "store_true", help = 'outputs a bed file with identified collapsed duplication regions')
+    parser.add_argument("--no-ins-seq", dest='no_ins', action = "store_true", help = 'do not output insertion sequences to the vcf file')
+    parser.add_argument("--inbetween-ins", dest='inbetween_ins', action = "store_true", help = 'report unmapped insertions around breakpoints')
+    parser.add_argument("--only-somatic", dest='only_somatic', action = "store_true", help = 'omits germline outputs in the somatic mode')
+    parser.add_argument("--output-LOH", dest='output_loh', action = "store_true", help = 'outputs a bed file with predicted LOH regions')
     parser.add_argument("--omit-resolve-overlaps", dest='resolve_overlaps', action = "store_false")
-    parser.add_argument("--tra-to-ins", dest='tra_to_ins', action = "store_true")
+    parser.add_argument("--tra-to-ins", dest='tra_to_ins', action = "store_true", help = 'converts insertions to translocations if mapping is known')
     
     
     args = parser.parse_args()

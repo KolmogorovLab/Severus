@@ -1720,22 +1720,24 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, genome_
     extract_clipped_end(segments_by_read)
     clipped_reads = get_clipped_reads(segments_by_read)
     clipped_clusters = cluster_clipped_ends(clipped_reads, args.bp_cluster_size,args.min_ref_flank, ref_lengths)
+    
     logger.info('Clustering unmapped insertions')
     ins_clusters = extract_insertions(ins_list_all, clipped_clusters, ref_lengths, args)
+    
     logger.info('Starting breakpoint detection')
     double_breaks = get_breakpoints(split_reads, ref_lengths, args)
+    
     logger.info('Starting match_long_ins')
     match_long_ins(ins_clusters, double_breaks, args.min_sv_size, args.tra_to_ins)
+    
     logger.info('Starting compute_bp_coverage')
     compute_bp_coverage(double_breaks, coverage_histograms, genome_ids)
+    compute_bp_coverage(ins_clusters, coverage_histograms, genome_ids)
     
     logger.info('Filtering breakpoints')
     double_breaks = double_breaks_filter(double_breaks, args.bp_min_support, cont_id)
     double_breaks.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position, b.direction_1))
     
-    logger.info('Starting compute_bp_coverage')
-    compute_bp_coverage(ins_clusters, coverage_histograms, genome_ids)
-    logger.info('Filtering breakpoints')
     ins_clusters = insertion_filter(ins_clusters, args.bp_min_support, cont_id)
     ins_clusters.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position))
    

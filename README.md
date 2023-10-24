@@ -1,3 +1,7 @@
+<p align="left">
+  <img src="docs/severus_logo.png" alt="Severus logo" style="width:150px;"/>
+</p>
+
 # Severus
 
 Severus is a somatic structural variation (SV) caller for long reads (both PacBio and ONT). It is designed for matching tumor/normal analysis,
@@ -210,21 +214,61 @@ Because `truvari` was primarily designed for indel comparison, we compared somat
 
 #### Pacbio HiFi
 
-|SV Caller| TP | FP | FN | Recall | F1 score |
-|---------|----|----|----|--------|----------|
-| Severus | 59 | 9 | 33 | 0.87 | 0.74 | 
-| nanomonsv| 47 | 21 | 27 | 0.69 | 0.66 |
-| sniffles2| 40 | 28 | 181 | 0.59 | 0.28 |
-| SAVANA | 48 | 20 | 24 | 0.70 | 0.69 |
+|SV Caller| TP | FP | FN | Precision | Recall | F1 score |
+|---------|----|----|----|-----------|--------|----------|
+| Severus | 59 | 9 | 33 | 0.64 | 0.87 | 0.74 |
+| nanomonsv| 52 | 16 | 55 | 0.49 | 0.76 | 0.59 |
+| sniffles2| 46 | 22 | 252 | 0.15 | 0.68 | 0.25 |
+| SAVANA | 55 | 13 | 88 | 0.38 | 0.8 | 0.52 |
 
 #### Oxford Nanopore
 
-|SV Caller| TP | FN | FP | Recall | F1 score |
-|---------|----|----|----|--------|----------|
-| Severus | 53 | 15 | 35 | 0.78   | 0.68 | 
-| nanomonsv| 44 | 24 | 46 | 0.65 | 0.56 |
-| sniffles2| 35 | 33 | 263 | 0.51 | 0.19 | 
-| SAVANA | 51 | 17 | 18 | 0.75 | 0.74 |
+|SV Caller| TP | FN | FP | Precision | Recall | F1 score |
+|---------|----|----|----|-----------|--------|----------|
+| Severus | 53 | 15 | 33 | 0.61 | 0.78 | 0.69 |
+| nanomonsv| 44 | 24 | 46 | 0.49 | 0.65 | 0.56 |
+| sniffles2| 35 | 33 | 263 | 0.12 | 0.51 | 0.19 |
+| SAVANA | 51 | 17 | 18 | 0.74 | 0.75 | 0.74 |
+
+### Somatic Benchmarking results: Tumor/Normal Cell line pairs
+
+We compared the performance of the somatic SV callers using four Tumor/Normal cell line pairs. SVs supported by at least two callers were considered as true calls. Severus outperformed all other callers in terms of recall and precision.
+
+#### H2009 - BL2009
+
+|SV Caller| TP | FN | FP | Precision | Recall | F1 score |
+|---------|----|----|----|-----------|--------|----------|
+| Severus | 851 | 90 | 121 | 0.90 | 0.88 | 0.89 |
+| nanomonsv | 764 | 203 | 208 | 0.79 | 0.79 | 0.79 |
+| sniffles2 | 682 | 562 | 290 | 0.55 | 0.70 | 0.62 |
+| SAVANA | 744 | 284 | 228 | 0.72 | 0.77 | 0.74 |
+
+#### H1437 - BL1437
+
+|SV Caller| TP | FN | FP | Precision | Recall | F1 score |
+|---------|----|----|----|-----------|--------|----------|
+| Severus | 217 | 49 | 13 | 0.82 | 0.94 | 0.88 |
+| nanomonsv | 175 | 73 | 55 | 0.71 | 0.76 | 0.73 |
+| sniffles2 | 147 | 406 | 83 | 0.27 | 0.64 | 0.38 |
+| SAVANA | 203 | 73 | 27 | 0.74 | 0.88 | 0.80 |
+
+#### HCC1937 - HCC1937BL
+
+|SV Caller| TP | FN | FP | Precision | Recall | F1 score |
+|---------|----|----|----|-----------|--------|----------|
+| Severus | 635 | 107 | 64 | 0.86 | 0.91 | 0.88 |
+| nanomonsv | 550 | 183 | 149 | 0.75 | 0.79 | 0.77 |
+| sniffles2 | 448 | 610 | 251 | 0.42 | 0.64 | 0.51 |
+| SAVANA | 551 | 307 | 148 | 0.64 | 0.79 | 0.71 |
+
+#### HCC1954 - HCC1954BL
+
+|SV Caller| TP | FN | FP | Precision | Recall | F1 score |
+|---------|----|----|----|-----------|--------|----------|
+| Severus | 819 | 75 | 66 | 0.92 | 0.93 | 0.92 |
+| nanomonsv | 719 | 133 | 166 | 0.84 | 0.81 | 0.83 |
+| sniffles2 | 268 | 536 | 617 | 0.33 | 0.30 | 0.32 |
+| SAVANA | 798 | 367 | 87 | 0.68 | 0.90 | 0.78 |
 
 
 ## Preparing phased and haplotagged alignments

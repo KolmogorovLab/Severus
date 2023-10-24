@@ -86,11 +86,9 @@ class vcf_format(object):
     def info(self):
         if (self.gen_type =='1|0' or self.gen_type =='0|1') and self.phaseset_id:
             phase_id = str(self.phaseset_id[0]) if self.phaseset_id[0] == self.phaseset_id[1] else '{0}|{1}'.format(self.phaseset_id[0], self.phaseset_id[1])
-            return f"{self.precision()};SVTYPE={self.sv_type};SVLEN={self.sv_len};CHR2={self.chr2};END={self.pos2};{self.strands_vcf()}DETAILED_TYPE={self.detailed_type};\
-                INSLEN={self.ins_len};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()};PHASESET_ID={phase_id};CLUSTERID=severus_{self.cluster_id}"
+            return f"{self.precision()};SVTYPE={self.sv_type};SVLEN={self.sv_len};CHR2={self.chr2};END={self.pos2};{self.strands_vcf()}DETAILED_TYPE={self.detailed_type};INSLEN={self.ins_len};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()};PHASESET_ID={phase_id};CLUSTERID=severus_{self.cluster_id}"
         else:
-            return f"{self.precision()};SVTYPE={self.sv_type};SVLEN={self.sv_len};CHR2={self.chr2};END={self.pos2};{self.strands_vcf()}DETAILED_TYPE={self.detailed_type};\
-                INSLEN={self.ins_len};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()};CLUSTERID=severus_{self.cluster_id}"
+            return f"{self.precision()};SVTYPE={self.sv_type};SVLEN={self.sv_len};CHR2={self.chr2};END={self.pos2};{self.strands_vcf()}DETAILED_TYPE={self.detailed_type};INSLEN={self.ins_len};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()};CLUSTERID=severus_{self.cluster_id}"
             
     def sample(self):
         GT, GQ= self.call_genotype()
