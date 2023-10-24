@@ -123,76 +123,87 @@ dot -Tsvg -O severus_out/somatic_SVs/breakpoint_graph.dot
 
 ### Germline benchmarking results using HG002
 
-We compared performance of Severus, [sniffles2](https://github.com/fritzsedlazeck/Sniffles) and [cuteSV](https://github.com/tjiangHIT/cuteSV) in [HG002 GIAB SV benchmark set](https://www.nature.com/articles/s41587-020-0538-8). Comparison was perfromed using `truvari`.
+First, we verified performance of Severus on a germline SV benchmark. 
+We compared Severus, [sniffles2](https://github.com/fritzsedlazeck/Sniffles) and [cuteSV](https://github.com/tjiangHIT/cuteSV) using 
+[HG002 GIAB SV benchmark set](https://www.nature.com/articles/s41587-020-0538-8). Comparison was perfromed using `truvari`.
+The benchamrking was done against the grch38 reference, for consistency with the benchmarks below (confident regions were lifted over).
+Severus and Sniffles2 performed similarly, with CuteSV running a bit behind.
 
-|SV Caller| TP | FN | FP | Precision | Recall | F1 score |
-|---------|----|----|----|-----------|--------|----------|
-| Severus |9453| 402| 345| 0.965| 0.959| 0.962|
-| sniffles2|9459| 396| 336| 0.960| 0.966| 0.963|
-| cuteSV |9231| 624| 676| 0.936| 0.931| 0.934|
+|SV Caller | TP | FN | FP  | Precision | Recall | F1 score |
+|----------|----|----|-----|-----------|--------|----------|
+| Severus  |9453| 402| 345 | 0.965     | 0.959  | 0.962    |
+| sniffles2|9459| 396| 336 | 0.960     | 0.966  | 0.963    |
+| cuteSV   |9231| 624| 676 | 0.936     | 0.931  | 0.934    |
 
 ### Somatic benchmarking results COLO829
 
-We compared the performance of existing somatic SV callers [nanomonSV](https://github.com/friend1ws/nanomonsv), [SAVANA](https://github.com/cortes-ciriano-lab/savana) and [sniffles2](https://github.com/fritzsedlazeck/Sniffles) in mosaic mode using COLO829 cell line data against multi-platform [Valle-Inclan et al. truthset](https://www.sciencedirect.com/science/article/pii/S2666979X22000726). 
-Because `truvari` was primarily designed for indel comparison, we compared somatic SVs by matching individual breakpoints (defined by a pair of reference coordinates).
+We compared the performance of existing somatic SV callers [nanomonSV](https://github.com/friend1ws/nanomonsv), [SAVANA](https://github.com/cortes-ciriano-lab/savana) 
+and [sniffles2](https://github.com/fritzsedlazeck/Sniffles) in mosaic mode using COLO829 cell line data against multi-platform 
+[Valle-Inclan et al. truthset](https://www.sciencedirect.com/science/article/pii/S2666979X22000726).  
+Because `truvari` was primarily designed for indel comparison, we compared somatic SVs by 
+matching individual breakpoints (defined by a pair of reference coordinates). Severus had the highest recall and precision on the HiFi dataset,
+and highest recall on the ONT dataset, with SAVANA having highest precision.
 
 #### Pacbio HiFi
 
-|SV Caller| TP | FN | FP | Precision | Recall | F1 score |
-|---------|----|----|----|-----------|--------|----------|
-| Severus | 59 | 33 | 9 | 0.64 | 0.87 | 0.74 |
-| nanomonsv| 52 | 55 | 16 | 0.49 | 0.76 | 0.59 |
-| sniffles2| 46 | 252 | 22 | 0.15 | 0.68 | 0.25 |
-| SAVANA | 55 | 88 |  13 |0.38 | 0.8 | 0.52 |
+|SV Caller  | TP | FN | FP | Precision | Recall   | F1 score |
+|-----------|----|----|----|-----------|----------|----------|
+| Severus   | 59 | 33 | 9  | **0.64**  | **0.87** | **0.74** |
+| nanomonsv | 52 | 55 | 16 | 0.49      | 0.76     | 0.59     |
+| sniffles2 | 46 | 252| 22 | 0.15      | 0.68     | 0.25     |
+| SAVANA    | 55 | 88 | 13 | 0.38      | 0.8      | 0.52     |
 
 #### Oxford Nanopore
 
-|SV Caller| TP | FN | FP | Precision | Recall | F1 score |
-|---------|----|----|----|-----------|--------|----------|
-| Severus | 53 | 15 | 33 | 0.61 | 0.78 | 0.69 |
-| nanomonsv| 44 | 24 | 46 | 0.49 | 0.65 | 0.56 |
-| sniffles2| 35 | 33 | 263 | 0.12 | 0.51 | 0.19 |
-| SAVANA | 51 | 17 | 18 | 0.74 | 0.75 | 0.74 |
+|SV Caller | TP  | FN | FP  | Precision | Recall | F1 score |
+|----------|-----|----|-----|-----------|--------|----------|
+| Severus  | 53  | 15 | 33  | 0.61      |**0.78**| 0.69     |
+| nanomonsv| 44  | 24 | 46  | 0.49      | 0.65   | 0.56     |
+| sniffles2| 35  | 33 | 263 | 0.12      | 0.51   | 0.19     |
+| SAVANA   | 51  | 17 | 18  | **0.74**  | 0.75   | **0.74** |
 
 ### Somatic Benchmarking results: Tumor/Normal Cell line pairs
 
-We compared the performance of the somatic SV callers using four Tumor/Normal cell line pairs. SVs supported by at least two callers were considered as true calls. Severus outperformed all other callers in terms of recall and precision.
+We compared the performance of the somatic SV callers using 4 tumor/normal cell line pairs. Since no ground truth
+SV calls are available, we created an ensemble set of SVs supported by 2+ long-read methods for each dataset.
+This assumes that singleton calls are false-positives, and calls supported by multiple tools are more reliable.
+Severus consistently had the highest recall and precision against the ensemble SV sets.
 
-#### H2009 - BL2009
+#### H2009/BL2009
 
-|SV Caller| TP | FP | FN | Precision | Recall | F1 score |
-|---------|----|----|----|-----------|--------|----------|
-| Severus | 841 | 104 | 34 | 0.89 | 0.96 | 0.92 |
-| nanomonsv | 758 | 226 | 117 | 0.77 | 0.87 | 0.82 |
-| sniffles2 | 542 | 717 | 333 | 0.43 | 0.62 | 0.51 |
-| SAVANA | 711 | 329 | 164 | 0.68 | 0.81 | 0.74 |
+|SV Caller  | TP  | FP  | FN  | Precision | Recall | F1 score |
+|-----------|-----|-----|-----|-----------|--------|----------|
+| Severus   | 841 | 104 | 34  | **0.89**  |**0.96**| **0.92** |
+| nanomonsv | 758 | 226 | 117 | 0.77      | 0.87   | 0.82     |
+| sniffles2 | 542 | 717 | 333 | 0.43      | 0.62   | 0.51     |
+| SAVANA    | 711 | 329 | 164 | 0.68      | 0.81   | 0.74     |
 
-#### H1437 - BL1437
+#### H1437/BL1437
 
-|SV Caller| TP | FP | FN | Precision | Recall | F1 score |
-|---------|----|----|----|-----------|--------|----------|
-| Severus | 200 | 72 | 13 | 0.74 | 0.94 | 0.82 |
-| nanomonsv | 172 | 92 | 41 | 0.65 | 0.81 | 0.72 |
-| sniffles2 | 111 | 442 | 102 | 0.20 | 0.52 | 0.29 |
-| SAVANA | 199 | 79 | 14 | 0.72 | 0.93 | 0.81 |
+|SV Caller  | TP  | FP | FN  | Precision | Recall | F1 score |
+|-----------|-----|----|-----|-----------|--------|----------|
+| Severus   | 200 | 72 | 13  |**0.74**   |**0.94**| **0.82** |
+| nanomonsv | 172 | 92 | 41  | 0.65      | 0.81   | 0.72     |
+| sniffles2 | 111 | 442| 102 | 0.20      | 0.52   | 0.29     |
+| SAVANA    | 199 | 79 | 14  | 0.72      | 0.93   | 0.81     |
 
-#### HCC1937 - HCC1937BL
+#### HCC1937/HCC1937BL
 
-|SV Caller| TP | FP | FN | Precision | Recall | F1 score |
-|---------|----|----|----|-----------|--------|----------|
-| Severus | 597 | 169 | 47 | 0.78 | 0.93 | 0.85 |
-| nanomonsv | 503 | 278 | 141 | 0.64 | 0.78 | 0.71 |
-| sniffles2 | 320 | 754 | 324 | 0.30 | 0.50 | 0.37 |
-| SAVANA | 540 | 353 | 104 | 0.60 | 0.84 | 0.70 |
+|SV Caller  | TP  | FP  | FN  | Precision | Recall | F1 score |
+|-----------|-----|-----|-----|-----------|--------|----------|
+| Severus   | 597 | 169 | 47  | **0.78**  |**0.93**| **0.85** |
+| nanomonsv | 503 | 278 | 141 | 0.64      | 0.78   | 0.71     |
+| sniffles2 | 320 | 754 | 324 | 0.30      | 0.50   | 0.37     |
+| SAVANA    | 540 | 353 | 104 | 0.60      | 0.84   | 0.70     |
 
-#### HCC1954 - HCC1954BL
+#### HCC1954/HCC1954BL
 
-|SV Caller| TP | FP | FN | Precision | Recall | F1 score |
-|---------|----|----|----|-----------|--------|----------|
-| Severus | 819 | 100 | 51 | 0.89 | 0.94 | 0.92 |
-| nanomonsv | 703 | 167 | 167 | 0.81 | 0.81 | 0.81 |
-| sniffles2 | 245 | 566 | 625 | 0.30 | 0.28 | 0.29 |
-| SAVANA | 802 | 392 | 68 | 0.67 | 0.92 | 0.78 |
+|SV Caller  | TP  | FP  | FN  | Precision | Recall | F1 score |
+|-----------|-----|-----|-----|-----------|--------|----------|
+| Severus   | 819 | 100 | 51  | **0.89**  |**0.94**| **0.92** |
+| nanomonsv | 703 | 167 | 167 | 0.81      | 0.81   | 0.81     |
+| sniffles2 | 245 | 566 | 625 | 0.30      | 0.28   | 0.29     |
+| SAVANA    | 802 | 392 | 68  | 0.67      | 0.92   | 0.78     |
 
 
 ## Output Files
@@ -266,7 +277,7 @@ more complex and potentially overlapping SVs - such as chromoplexy or breakage-f
 ## Preparing phased and haplotagged alignments
 
 <p align="left">
-  <img src="docs/phasing2.jpg" alt="Somatic Phasing"/ style="width:60%">
+  <img src="docs/phasing2.jpg" alt="Somatic Phasing"/ style="width:70%">
 </p>
 
 We recommend running Severus with phased and haplotagged tumor and normal alignments. Below is an example
@@ -362,7 +373,7 @@ whatshap haplotag --reference ref.fa phased_vcf.vcf tumor.bam -o tumor.haplotagg
 ## Generating VNTR annotation
 
 <p align="left">
-  <img src="docs/vntrs.png" alt="VNTR handling" style="width:60%">
+  <img src="docs/vntrs.png" alt="VNTR handling" style="width:70%">
 </p>
 
 Alignments to highly repetitive regions are often ambigous and leads false positives. Severus clusters SVs inside a single VNTR region to uniform the SV representation for each read.
@@ -425,6 +436,24 @@ The breakpoints in each cluster and the number of support reads are also summari
 In the example above, there is a deletion in one of the haplotypes (chr19: 9040865- 9041235),
 and there is an insertion of a 73.3kb region in chr10 to chr19 in the other haplotype.
 
+License
+-------
+
+Severus is distributed under a BSD license. See the [LICENSE file](LICENSE) for details.
+
+
+Credits
+-------
+
+Severus is developed in Kolmogorov Lab at the National Cancer Institute.
+
+Key contributors:
+
+* Ayse Keskus
+* Asher Bryant
+* Mikhail Kolmogorov
+
 ---
 ### Contact
-For advising, bug reporting and requiring help, please contact aysegokce.keskus@nih.gov
+For advising, bug reporting and requiring help, please submit an [issue](https://github.com/KolmogorovLab/Severus/issues).
+You can also contact the developer: aysegokce.keskus@nih.gov
