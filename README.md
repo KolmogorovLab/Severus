@@ -208,8 +208,7 @@ We compared performance of Severus, [sniffles2](https://github.com/fritzsedlazec
 
 ### Somatic benchmarking results COLO829
 
-We compared the performance of existing somatic SV callers [nanomonSV](https://github.com/friend1ws/nanomonsv), [SAVANA](https://github.com/cortes-ciriano-lab/savana) and [sniffles2]
-(https://github.com/fritzsedlazeck/Sniffles) in mosaic mode using COLO829 cell line data against multi-platform [Valle-Inclan et al. truthset](https://www.sciencedirect.com/science/article/pii/S2666979X22000726). 
+We compared the performance of existing somatic SV callers [nanomonSV](https://github.com/friend1ws/nanomonsv), [SAVANA](https://github.com/cortes-ciriano-lab/savana) and [sniffles2](https://github.com/fritzsedlazeck/Sniffles) in mosaic mode using COLO829 cell line data against multi-platform [Valle-Inclan et al. truthset](https://www.sciencedirect.com/science/article/pii/S2666979X22000726). 
 Because `truvari` was primarily designed for indel comparison, we compared somatic SVs by matching individual breakpoints (defined by a pair of reference coordinates).
 
 #### Pacbio HiFi
