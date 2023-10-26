@@ -1,4 +1,4 @@
-name: strainy
+name: severus
 channels:
   - conda-forge
   - bioconda
