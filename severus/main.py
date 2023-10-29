@@ -21,7 +21,7 @@ from severus.build_graph import output_graphs
 from severus.bam_processing import get_all_reads_parallel, update_coverage_hist, get_read_statistics
 from severus.breakpoint_finder import call_breakpoints
 from severus.resolve_vntr import update_segments_by_read
-
+from severus.__version__ import __version__
 
 
 logger = logging.getLogger()
@@ -50,6 +50,10 @@ def _enable_logging(log_file, debug, overwrite):
     logger.addHandler(file_handler)
 
 
+def _version():
+    return __version__
+
+
 def main():
     # default tunable parameters
     MAX_READ_ERROR = 0.005
@@ -72,6 +76,7 @@ def main():
     parser = argparse.ArgumentParser \
         (description="Find breakpoints and build breakpoint graph from a bam file")
 
+    parser.add_argument("-v", "--version", action="version", version=_version())
     parser.add_argument("--target-bam", dest="target_bam",
                         metavar="path", required=True, default=None, nargs="+",
                         help="path to one or multiple target bam files (e.g. tumor, must be indexed)")
@@ -139,7 +144,10 @@ def main():
         
     log_file = os.path.join(args.out_dir, "severus.log")
     _enable_logging(log_file, debug=False, overwrite=True)
-    logger.debug("Cmd: " + " ".join(sys.argv[1:]))
+
+    logger.info("Starting Severus " + _version())
+    logger.debug("Cmd: %s", " ".join(sys.argv))
+    logger.debug("Python version: " + sys.version)
     
     args.sv_size = max(args.min_sv_size - MIN_SV_THR, MIN_SV_THR)
     
@@ -191,6 +199,3 @@ def main():
     double_breaks = call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, genome_ids, control_genomes, args)
     
     output_graphs(double_breaks, coverage_histograms, thread_pool, target_genomes, control_genomes, ref_lengths, args)
-
-if __name__ == "__main__":
-    main()
