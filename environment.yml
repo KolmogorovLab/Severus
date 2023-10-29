@@ -9,7 +9,7 @@ dependencies:
   - networkx>=2.6
   - pygraphviz
   - pydot
-  - matplotlib
+  - matplotlib-base
   - biopython
   - numpy
   - pysam
