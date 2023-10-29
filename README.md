@@ -26,18 +26,22 @@ advantage of long-read phasing and uses the breakpoint graph framework to model 
 
 ## Installation
 
-The easiest way to install dependencies is through conda:
+The easiest way to install is through conda:
+
+```
+conda create -n severus_env severus
+conda activate severus_env
+severus --help
+```
+
+Or alternatively, you can clone the repository and run without installation,
+but you'll still need to install the dependencies via conda:
 
 ```
 git clone https://github.com/KolmogorovLab/Severus
 cd Severus
-conda env create --name severus --file environment.yml
-```
-
-Once installed, you will need to activate the conda environment prior running:
-
-```
-conda activate severus
+conda env create --name severus_env --file environment.yml
+conda activate severus_env
 ./severus.py
 ```
 
@@ -46,21 +50,21 @@ conda activate severus
 Single sample germline SV calling
 
 ```
-./severus.py --target-bam phased_tumor.bam --out-dir severus_out -t 16 --phasing-vcf phased.vcf \
+severus --target-bam phased_tumor.bam --out-dir severus_out -t 16 --phasing-vcf phased.vcf \
     --vntr-bed ./vntrs/human_GRCh38_no_alt_analysis_set.trf.bed
 ```
 
 Single sample somatic SV calling
 
 ```
-./severus.py --target-bam phased_tumor.bam --control-bam phased_normal.bam --out-dir severus_out \
+severus --target-bam phased_tumor.bam --control-bam phased_normal.bam --out-dir severus_out \
     -t 16 --phasing-vcf phased.vcf --vntr-bed ./vntrs/human_GRCh38_no_alt_analysis_set.trf.bed
 ```
 
 Multi-sample somatic SV calling
 
 ```
-./severus.py --target-bam phased_tumor1.bam phased_tumor2.bam --control-bam phased_normal.bam \
+severus --target-bam phased_tumor1.bam phased_tumor2.bam --control-bam phased_normal.bam \
     --out-dir severus_out -t 16 --phasing-vcf phased.vcf \
     --vntr-bed ./vntrs/human_GRCh38_no_alt_analysis_set.trf.bed
 ```
