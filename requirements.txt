@@ -1,0 +1,8 @@
+setuptools
+networkx>=2.6
+pygraphviz
+pydot
+matplotlib
+biopython
+numpy
+pysam
