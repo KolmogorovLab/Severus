@@ -1,5 +1,6 @@
 import pysam
 import numpy as np
+import bisect
 from collections import  defaultdict
 import logging
 
@@ -8,10 +9,10 @@ logger = logging.getLogger()
 class ReadSegment(object):
     __slots__ = ("align_start", "read_start", "read_end", "ref_start", "ref_end","ref_start_ori", "ref_end_ori", "read_id", "ref_id",
                  "strand", "read_length",'segment_length', "haplotype", "mapq", "genome_id",
-                 'mismatch_rate', 'is_pass', "is_insertion", "is_clipped", 'is_end', 'bg_mm_rate', 'error_rate', 'ins_seq', 'sequence')
+                 'mismatch_rate', 'is_pass', "is_insertion", "is_clipped", 'is_end', 'bg_mm_rate', 'error_rate', 'ins_seq', 'sequence', 'is_primary')
     def __init__(self, align_start, read_start, read_end, ref_start, ref_end,ref_start_ori, ref_end_ori, read_id, ref_id,
                  strand, read_length,segment_length, haplotype, mapq, genome_id,
-                 mismatch_rate, is_insertion, error_rate):
+                 mismatch_rate, is_insertion, error_rate, is_primary):
         self.align_start = align_start
         self.read_start = read_start
         self.read_end = read_end
@@ -36,6 +37,7 @@ class ReadSegment(object):
         self.error_rate = error_rate
         self.ins_seq = None
         self.sequence = None
+        self.is_primary = is_primary
     def __str__(self):
         return "".join(["read_start=", str(self.read_start), " read_end=", str(self.read_end), " ref_start=", str(self.ref_start),
                          " ref_end=", str(self.ref_end), " read_id=", str(self.read_id), " ref_id=", str(self.ref_id), " strand=", str(self.strand),
@@ -61,6 +63,10 @@ def get_segment(read, genome_id,sv_size):
     ref_start = read.reference_start
     read_segments =[]
     cigar = read.cigartuples
+    
+    is_primary = None
+    if not read.is_supplementary:
+        is_primary = True
 
     num_of_mismatch = 0
     nm = read.get_tag('NM')
@@ -104,7 +110,7 @@ def get_segment(read, genome_id,sv_size):
                     del_start, del_end = read_start , read_end
                 read_segments.append(ReadSegment(align_start, del_start, del_end, ref_start, ref_end, ref_start, ref_end, read.query_name,
                                                  read.reference_name, strand, read_length,read_aligned,
-                                                 haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate))
+                                                 haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, is_primary))
                 read_start = read_end+1
                 ref_start = ref_end+op_len+1
                 read_aligned = 0
@@ -120,7 +126,7 @@ def get_segment(read, genome_id,sv_size):
                 ins_end = read_start + read_aligned
                 read_segments.append(ReadSegment(align_start,ins_start, ins_end, ins_pos, ins_pos, ins_pos, ins_pos, read.query_name,
                                                  read.reference_name, strand, read_length,op_len, haplotype,
-                                                 read.mapping_quality, genome_id, mm_rate, True, error_rate))
+                                                 read.mapping_quality, genome_id, mm_rate, True, error_rate, None))
                 ins_seq = sequence[ins_start - hc: ins_end - hc]
                 read_segments[-1].ins_seq = ins_seq
     if ref_aligned != 0:
@@ -130,7 +136,7 @@ def get_segment(read, genome_id,sv_size):
             read_start, read_end = read_length - read_end, read_length - read_start
         read_segments.append(ReadSegment(align_start, read_start, read_end, ref_start, ref_end, ref_start, ref_end, read.query_name,
                                          read.reference_name, strand, read_length,read_aligned, haplotype,
-                                         read.mapping_quality, genome_id, mm_rate, False, error_rate))
+                                         read.mapping_quality, genome_id, mm_rate, False, error_rate, is_primary))
     merge_short_seg(read_segments)
     return read_segments
 
@@ -170,6 +176,8 @@ def merge_short_seg(read):
         else:
             init_seg.ref_end = int(np.mean([init_seg.ref_end, seg.ref_end]))
             init_seg.ref_start = init_seg.ref_end
+            init_seg.ref_end_ori = init_seg.ref_end
+            init_seg.ref_start_ori = init_seg.ref_start
             init_seg.segment_length = init_seg.segment_length + seg.segment_length
             if strand == -1:
                 init_seg.read_start = init_seg.read_end - init_seg.segment_length
@@ -199,16 +207,61 @@ def extract_clipped_end(segments_by_read):
         if s1.read_start > MAX_CLIPPED_LENGTH:
             pos = s1.ref_start if s1.strand == 1 else s1.ref_end
             read.append(ReadSegment(0, 0, s1.read_start, pos, pos, pos, pos, s1.read_id,
-                                    s1.ref_id, 1, s1.read_length, s1.segment_length, s1.haplotype, s1.mapq, s1.genome_id, s1.mismatch_rate, False, s1.error_rate))
+                                    s1.ref_id, 1, s1.read_length, s1.segment_length, s1.haplotype, s1.mapq, s1.genome_id, s1.mismatch_rate, False, s1.error_rate, None))
             read[-1].is_clipped = True
         end_clip_length = s2.read_length - s2.read_end
         if end_clip_length > MAX_CLIPPED_LENGTH:
             pos = s2.ref_end if s2.strand == 1 else s2.ref_start
             read.append(ReadSegment(s2.read_end, s2.read_end, s2.read_length, pos, pos, pos, pos, s2.read_id,
-                                    s2.ref_id, -1, s2.read_length, s2.segment_length, s2.haplotype, s2.mapq, s2.genome_id, s2.mismatch_rate, False, s2.error_rate))
+                                    s2.ref_id, -1, s2.read_length, s2.segment_length, s2.haplotype, s2.mapq, s2.genome_id, s2.mismatch_rate, False, s2.error_rate, None))
             read[-1].is_clipped = True
         read.sort(key=lambda s: s.read_start)
+        
+def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq):
+    region_start, region_end = poslist[0]-3, poslist[-1]+3
+    aln_file = pysam.AlignmentFile(bam_file, "rb")
+    cov_list = defaultdict(list)
+    for pos in poslist:
+        cov_list[(ref_id, pos)] = [0,0,0]
+    for aln in aln_file.fetch(ref_id, region_start, region_end,  multiple_iterators=True):
+        if not aln.is_secondary and not aln.is_unmapped and aln.mapping_quality > min_mapq:
+            strt = bisect.bisect_right(poslist, aln.reference_start)
+            end = bisect.bisect_left(poslist, aln.reference_end)
+            if not strt == end:
+                if aln.has_tag('HP'):
+                    hp = aln.get_tag('HP')
+                else:
+                    hp = 0
+                for pos in poslist[strt:end]:
+                    cov_list[(ref_id, pos)][hp]+=1
+    return cov_list
 
+
+def get_coverage_parallel(bam_files, genome_ids, thread_pool, min_mapq, double_breaks):
+    db_list = defaultdict(list)
+    covlist = defaultdict(list)
+    for db in double_breaks:
+        db_list[db.bp_1.ref_id].append(db.bp_1.position)
+        db_list[db.bp_2.ref_id].append(db.bp_2.position)
+    CHUNK_SIZE = 10000000
+    for key, lst in db_list.items():
+        lst = list(set(lst))
+        lst.sort()
+        indices = [i + 1 for (x, y, i) in zip(lst, lst[1:], range(len(lst))) if CHUNK_SIZE < abs(x - y)]
+        db_list[key] = [lst[start:end] for start, end in zip([0] + indices, indices + [len(lst)])]
+    for genome_id in genome_ids:
+        covlist = defaultdict(list)
+        tasks = [(bam_files[genome_id], genome_id, ref_id, pos, min_mapq) for ref_id, poslist in db_list.items() for pos in poslist]
+        parsing_results = None
+        parsing_results = thread_pool.starmap(get_cov, tasks)
+        for item in parsing_results:
+            for key, value in item.items():
+                covlist[key] = value
+        for db in double_breaks:
+            db.bp_1.spanning_reads[genome_id] = covlist[(db.bp_1.ref_id, db.bp_1.position)]
+            db.bp_2.spanning_reads[genome_id] = covlist[(db.bp_2.ref_id, db.bp_2.position)]
+    
+        
 def get_all_reads(bam_file, region, genome_id,sv_size):
     """
     Yields set of split reads for each contig separately. Only reads primary alignments
@@ -246,11 +299,12 @@ def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
     for alignments in parsing_results:
         for aln in alignments:
             segments_by_read[aln.read_id].append(aln)
-
+            
     return list(segments_by_read.values())
 
 COV_WINDOW = 500
 def update_coverage_hist(genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes, loh_out):
+    
     NUM_HAPLOTYPES = 3
     coverage_histograms = {}
 

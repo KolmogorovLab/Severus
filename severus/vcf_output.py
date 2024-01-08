@@ -12,10 +12,10 @@ import math
 
 
 class vcf_format(object):
-    __slots__ = ('chrom', 'pos', 'haplotype', 'ID', 'sv_type','alt', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2', 'DR', 'DV', 'mut_type', 'hVaf', 
-                 'ins_seq', 'gen_type', 'cluster_id','ins_len', 'detailed_type', 'prec', 'phaseset_id', 'strands')
-    def __init__(self, chrom, pos, haplotype, ID, sv_type, alt, sv_len, qual, Filter, chr2, pos2, DR, DV, mut_type, hVaf, gen_type, cluster_id, 
-                 ins_len, detailed_type, prec, phaseset_id, strands ):
+    __slots__ = ('chrom', 'pos', 'haplotype', 'ID', 'sv_type','alt', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2','mut_type',
+                 'ins_seq', 'ins_len_seq', 'cluster_id','ins_len', 'detailed_type', 'prec', 'phaseset_id', 'strands', 'sample', 'gen_type')
+    def __init__(self, chrom, pos, haplotype, ID, sv_type, alt, sv_len, qual, Filter, chr2, pos2, mut_type, cluster_id, 
+                 ins_len, ins_len_seq, detailed_type, prec, phaseset_id, strands, sample, gen_type):
         self.chrom = chrom
         self.pos = pos
         self.haplotype = haplotype
@@ -27,24 +27,68 @@ class vcf_format(object):
         self.Filter = Filter
         self.chr2 = chr2
         self.pos2 = pos2
-        self.DR = DR
-        self.DV = DV
-        self.hVaf = hVaf
         self.mut_type = mut_type
         self.ins_seq = None
-        self.gen_type = gen_type
         self.cluster_id = cluster_id
         self.ins_len = ins_len
+        self.ins_len_seq = ''
         self.detailed_type = detailed_type
         self.prec = prec
         self.phaseset_id = phaseset_id
         self.strands = strands
-        
-    def vaf(self):
-        return self.DV / (self.DV + self.DR) if self.DV > 0 else 0
+        self.sample = sample
+        self.gen_type = gen_type
+     
+    def precision(self):
+        return 'PRECISE' if self.prec else 'IMPRECISE'
     
+    def strands_vcf(self):
+        if self.sv_type == 'INS':
+            return ''
+        else:
+            return f"STRANDS={self.strands[0]}{self.strands[1]};"
+        
+    def has_ins(self):
+        if self.ins_len:
+            return f"INSLEN={self.ins_len};INSSEQ={self.ins_len_seq};"
+        else:
+            return ""
+        
+    def detailedtype(self):
+        if self.detailed_type:
+            return f"DETAILED_TYPE={self.detailed_type};"
+        else:
+            return ""
+        
+    def info(self):
+        if self.gen_type and self.phaseset_id:
+            phase_id = str(self.phaseset_id[0]) if self.phaseset_id[0] == self.phaseset_id[1] else '{0}|{1}'.format(self.phaseset_id[0], self.phaseset_id[1])
+            return f"{self.precision()};SVTYPE={self.sv_type};SVLEN={self.sv_len};CHR2={self.chr2};END={self.pos2};{self.strands_vcf()}{self.detailedtype()}{self.has_ins()}MAPQ={self.qual};PHASESET_ID={phase_id};CLUSTERID=severus_{self.cluster_id}"
+        else:
+            return f"{self.precision()};SVTYPE={self.sv_type};SVLEN={self.sv_len};CHR2={self.chr2};END={self.pos2};{self.strands_vcf()}{self.detailedtype()}{self.has_ins()}MAPQ={self.qual};CLUSTERID=severus_{self.cluster_id}"
+    
+    def to_vcf(self):
+        if self.ins_seq:
+            return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t{self.ins_seq}\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:hVAF:DR:DV\t{self.sample}\n"
+        elif not self.sv_type == self.alt:
+            return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t{self.alt}\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:hVAF:DR:DV\t{self.sample}\n"
+        else:
+            return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.sv_type}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:hVAF:DR:DV\t{self.sample}\n"
+      
+        
+class vcf_sample(object):
+    __slots__ = ('DR', 'DV', 'vaf', 'hVaf','gen_type', 'GT', 'GQ')
+    def __init__(self, DR, DV, vaf, hVaf, gen_type):
+        self.DR = DR
+        self.DV = DV
+        self.hVaf = hVaf
+        self.vaf = vaf
+        self.gen_type = gen_type
+        self.GT = None
+        self.GQ = None
+        
     def hVAF(self):
-        return '{0:.2f}|{1:.2f}|{2:.2f}'.format(self.hVaf[0], self.hVaf[1], self.hVaf[2])
+        return '{0:.2f},{1:.2f},{2:.2f}'.format(self.hVaf[0], self.hVaf[1], self.hVaf[2])
     
     def call_genotype(self):
         err = 0.1/2
@@ -61,6 +105,7 @@ class vcf_format(object):
         hom_1 = float(pow((1-err), DV) * pow(err, DR) * prior)
         hom_0 = float(pow(err, DV) * pow((1-err), DR) * prior)
         het = float(pow(0.5, DV + DR) * prior)
+        
         g_list = [hom_0, het, hom_1]
         g_list = [-10 * math.log10(p) for p in g_list]
         min_pl = min(g_list)
@@ -72,58 +117,18 @@ class vcf_format(object):
             
         g_list.sort()
         GQ = int(g_list[2])
-        return GT, GQ
+        self.GT = GT
+        self.GQ = GQ
     
-    def precision(self):
-        return 'PRECISE' if self.prec else 'IMPRECISE'
-    
-    def strands_vcf(self):
-        if self.sv_type == 'INS':
-            return ''
-        else:
-            return f"STRANDS={self.strands[0]}{self.strands[1]};"
-    
-    def info(self):
-        if (self.gen_type =='1|0' or self.gen_type =='0|1') and self.phaseset_id:
-            phase_id = str(self.phaseset_id[0]) if self.phaseset_id[0] == self.phaseset_id[1] else '{0}|{1}'.format(self.phaseset_id[0], self.phaseset_id[1])
-            return f"{self.precision()};SVTYPE={self.sv_type};SVLEN={self.sv_len};CHR2={self.chr2};END={self.pos2};{self.strands_vcf()}DETAILED_TYPE={self.detailed_type};INSLEN={self.ins_len};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()};PHASESET_ID={phase_id};CLUSTERID=severus_{self.cluster_id}"
-        else:
-            return f"{self.precision()};SVTYPE={self.sv_type};SVLEN={self.sv_len};CHR2={self.chr2};END={self.pos2};{self.strands_vcf()}DETAILED_TYPE={self.detailed_type};INSLEN={self.ins_len};MAPQ={self.qual};SUPPREAD={self.DV};HVAF={self.hVAF()};CLUSTERID=severus_{self.cluster_id}"
-            
     def sample(self):
-        GT, GQ= self.call_genotype()
-        return f"{GT}:{GQ}:{self.vaf():.2f}:{self.DR}:{self.DV}"
+        if self.DV == self.DR == 0:
+            return "0:0:0:0,0,0:0:0"
+        self.call_genotype()
+        return f"{self.GT}:{self.GQ}:{self.vaf:.2f}:{self.hVAF()}:{self.DR}:{self.DV}"
     
-    def to_vcf(self):
-        if self.ins_seq:
-            return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t{self.ins_seq}\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:DR:DV\t{self.sample()}\n"
-        elif not self.sv_type == self.alt:
-            return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t{self.alt}\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:DR:DV\t{self.sample()}\n"
-        else:
-            return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t<{self.sv_type}>\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:DR:DV\t{self.sample()}\n"
-            
-            
- 
-def get_sv_type(db):
-    if db.bp_2.loose_end_id:
-        db.sv_type = 'loose_end'
-        return 'BND'
-    if db.is_dup:
-        return 'DUP'
-    if db.bp_2.is_insertion or db.bp_1.is_insertion:
-        return 'INS'
-    if not db.bp_1.ref_id == db.bp_2.ref_id:
-        return 'BND'
-    if db.direction_1 == db.direction_2:
-        return 'INV'
-    if db.bp_1.dir_1 > 0:
-        return 'DEL'
-    else:
-        return 'BND'
- 
-def db_2_vcf(double_breaks, no_ins):
-    t = 0
-    vcf_list = defaultdict(list)
+    
+def db_2_vcf(double_breaks, no_ins, sample_ids):
+    vcf_list = []
     clusters = defaultdict(list) 
     for br in double_breaks:
         if br.bp_1.is_insertion:
@@ -132,6 +137,7 @@ def db_2_vcf(double_breaks, no_ins):
         
     for key, db_clust in clusters.items():
         db_list = defaultdict(list)
+        
         pass_list = [db.is_pass for db in db_clust]
         new_pass = True if 'PASS' in pass_list else False
         
@@ -140,76 +146,85 @@ def db_2_vcf(double_breaks, no_ins):
                 db.is_pass = 'PASS'
             db_list[db.genome_id].append(db)
             
-        sv_type = get_sv_type(db_clust[0])
-        if not sv_type:
-            continue
+        sv_type = db.vcf_sv_type
         
-        dir1 = '-' if db_clust[0].direction_1 == -1 else '+'
-        dir2 = '-' if db_clust[0].direction_2 == -1 else '+'
+        pass_list = [db.is_pass for db in db_clust]
+        if 'PASS' in pass_list:
+            sv_pass = 'PASS' 
+        elif 'FAIL_LOWCOV_OTHER' in pass_list:
+            sv_pass = 'FAIL_LOWCOV_OTHER'
+        else:
+            sv_pass = db[0].is_pass
+        
+        dir1 = '-' if db.direction_1 == -1 else '+'
+        dir2 = '-' if db.direction_2 == -1 else '+'
         strands = (dir1, dir2)
+        
+        ID = db.vcf_id
+        
+        if db.genotype == 'hom':
+            gen_type = ''
+            phaseset = ''
+        else:
+            hap_type = [db.haplotype_1 for db in db_clust]
+            gen_type = 'HP1' if 1 in hap_type else 'HP2'
+            phaseset = db.phaseset_id
+        
+        sample_list = defaultdict(list)
+        for sample_id in sample_ids:
+            sample_list[sample_id] = vcf_sample(0,0,0,0,0)
         for db1 in db_list.values():
-            if db1[0].genotype == 'hom':
-                gen_type = ''
-                phaseset = ''
-            else:
-                hap_type = [db.haplotype_1 for db in db1]
-                gen_type = 'HP1' if 1 in hap_type else 'HP2'
-                phaseset = db.phaseset_id
-            ID = 'SEVERUS_' + sv_type + str(t)
-            t += 1
-            qual_list = []
-            pass_list = [db.is_pass for db in db1]
-            if 'PASS' in pass_list:
-                sv_pass = 'PASS' 
-            elif 'FAIL_LOWCOV_OTHER' in pass_list:
-                sv_pass = 'FAIL_LOWCOV_OTHER' 
-            else:
-                sv_pass = db1[0].is_pass
             hVaf = [0.0, 0.0, 0.0]
             for db in db1:
-                if db.is_pass == 'PASS':
-                    qual_list += [db.bp_1.qual, db.bp_2.qual]
                 hVaf[db.haplotype_1]  = db.hvaf
-            if not qual_list:
-                qual_list = [0]
-            if sv_type == "BND" and not db.bp_2.loose_end_id:
-                if db.bp_2.dir_1 == 1 and db.bp_1.dir_1 == 1:
-                    alt1 = 'N]' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + ']'
-                    alt2 = 'N]' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + ']'
-                elif db.bp_2.dir_1 == -1 and db.bp_1.dir_1 == -1:
-                    alt1 = '[' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + '[N'
-                    alt2 = '[' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + '[N'
-                elif db.bp_2.dir_1 == -1 and db.bp_1.dir_1 == 1:
-                    alt1 = ']' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + ']N'
-                    alt2 = 'N[' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + '['
-                else:
-                    alt1 = 'N[' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + '['
-                    alt2 = ']' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + ']N'
-                
-                vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, alt1, db.length, int(np.median(qual_list)), 
-                                                         sv_pass, db.bp_2.ref_id, db.bp_2.position, db.DR, db.DV, db.mut_type, hVaf, gen_type, db.cluster_id,
-                                                         db.has_ins,db.sv_type, db.prec, phaseset, strands))#
-                vcf_list[db.genome_id].append(vcf_format(db.bp_2.ref_id, db.bp_2.position, db.haplotype_1, ID, sv_type, alt2, db.length, int(np.median(qual_list)), 
-                                                         sv_pass, db.bp_1.ref_id, db.bp_1.position, db.DR, db.DV, db.mut_type, hVaf, gen_type, db.cluster_id,
-                                                         db.has_ins,db.sv_type, db.prec, phaseset, strands))#
+            sample_list[db.genome_id] = vcf_sample(db.DR, db.DV, db.vaf, hVaf, gen_type)
+          
+        sample = '\t'.join([s.sample() for s in sample_list.values()])
+        phased = None
+        GT = [s.GT for s in sample_list.values()]
+        if '1|0' in GT or '0|1' in GT:
+            phased= True
+            
+        if sv_type == "BND" and not db.bp_2.loose_end_id:
+            if db.bp_2.dir_1 == 1 and db.bp_1.dir_1 == 1:
+                alt1 = 'N]' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + ']'
+                alt2 = 'N]' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + ']'
+            elif db.bp_2.dir_1 == -1 and db.bp_1.dir_1 == -1:
+                alt1 = '[' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + '[N'
+                alt2 = '[' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + '[N'
+            elif db.bp_2.dir_1 == -1 and db.bp_1.dir_1 == 1:
+                alt1 = ']' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + ']N'
+                alt2 = 'N[' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + '['
             else:
+                alt1 = 'N[' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + '['
+                alt2 = ']' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + ']N'
             
-                vcf_list[db.genome_id].append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, sv_type, db.length, int(np.median(qual_list)), 
-                                                     sv_pass, db.bp_2.ref_id, db.bp_2.position, db.DR, db.DV, db.mut_type, hVaf, gen_type, db.cluster_id,
-                                                     db.has_ins,db.sv_type, db.prec, phaseset, strands))#
-            
-            if sv_type == 'INS':
-                if not no_ins:
-                    vcf_list[db.genome_id][-1].ins_seq = db.ins_seq
-                else:
-                    vcf_list[db.genome_id][-1].ins_seq = 'INS'
+            vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, alt1, db.length, db.vcf_qual, 
+                                                     sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type,db.cluster_id,
+                                                     db.has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, phased))#
+            vcf_list.append(vcf_format(db.bp_2.ref_id, db.bp_2.position, db.haplotype_1, ID, sv_type, alt2, db.length, db.vcf_qual, 
+                                                     sv_pass, db.bp_1.ref_id, db.bp_1.position, db.mut_type, db.cluster_id,
+                                                     db.has_ins, db.ins_seq,db.sv_type, db.prec, phaseset, strands,sample, phased))
+        else:
+        
+            vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, sv_type, db.length, db.vcf_qual, 
+                                                 sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type, db.cluster_id,
+                                                 db.has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, phased))#
+        
+        if sv_type == 'INS':
+            if not no_ins:
+                vcf_list[-1].ins_seq = db.ins_seq
+            else:
+                vcf_list[-1].ins_seq = 'INS'
+                
     return vcf_list
 
 
           
-def write_vcf_header(ref_lengths, outfile):
+def write_vcf_header(ref_lengths, outfile, sample_list):
+    sample = '\t'.join(sample_list)
     outfile.write("##fileformat=VCFv4.2\n")
-    outfile.write('##source=SEVERUS\n')
+    outfile.write('##source=Severusv0.1.2\n')
     outfile.write('##CommandLine= '+ " ".join(sys.argv[1:]) +'\n')
     filedate = str(datetime.now()).split(' ')[0]
     outfile.write('##fileDate='+filedate+'\n')#
@@ -237,17 +252,17 @@ def write_vcf_header(ref_lengths, outfile):
     outfile.write("##INFO=<ID=DETAILED_TYPE,Number=1,Type=Integer,Description=\"Detailed type of the SV\">\n")
     outfile.write("##INFO=<ID=INSLEN,Number=1,Type=Integer,Description=\"Length of the unmapped sequence between breakpoint\">\n")
     outfile.write("##INFO=<ID=MAPQ,Number=1,Type=Integer,Description=\"Median mapping quality of supporting reads\">\n")
-    outfile.write("##INFO=<ID=SUPPREAD,Number=1,Type=Integer,Description=\"Number of supporting reads\">\n")#
-    outfile.write("##INFO=<ID=HVAF,Number=1,Type=String,Description=\"Haplotype specific variant Allele frequency (H0|H1|H2)\">\n")
     outfile.write("##INFO=<ID=PHASESET_ID,Number=1,Type=Integer,Description=\"Matching phaseset ID for phased SVs\">\n")
     outfile.write("##INFO=<ID=CLUSTERID,Number=1,Type=String,Description=\"Cluster ID in breakpoint_graph\">\n")
+    outfile.write("##INFO=<ID=INSSEQ,Number=1,Type=String,Description=\"Insertion sequence between breakpoints\">\n")
 
     outfile.write("##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n")
     outfile.write("##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotyping quality\">\n")
     outfile.write("##FORMAT=<ID=DR,Number=1,Type=Integer,Description=\"Number of reference reads\">\n")
     outfile.write("##FORMAT=<ID=DV,Number=1,Type=Integer,Description=\"Number of variant reads\">\n")
     outfile.write("##FORMAT=<ID=VAF,Number=1,Type=Float,Description=\"Variant allele frequency\">\n")
-    outfile.write("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE\n")
+    outfile.write("##FORMAT=<ID=hVAF,Number=3,Type=Float,Description=\"Haplotype specific variant Allele frequency (H0,H1,H2)\">\n")
+    outfile.write(f"#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{sample}\n")
     
 
 def _sorted_breakpoints(bp_list):
@@ -257,13 +272,6 @@ def _sorted_breakpoints(bp_list):
 
     return sorted(bp_list, key=lambda x: (chr_sort(x.chrom), x.pos))
 
-
-def write_somatic_vcf(vcf_list, outfile):
-    for db in _sorted_breakpoints(vcf_list):
-        if db.mut_type == 'somatic':
-            outfile.write(db.to_vcf())
-    outfile.close()
-
     
 def write_germline_vcf(vcf_list, outfile):
     for db in _sorted_breakpoints(vcf_list):
@@ -272,12 +280,13 @@ def write_germline_vcf(vcf_list, outfile):
     
     
 def write_to_vcf(double_breaks, all_ids, outpath, out_key, ref_lengths, only_somatic, no_ins):
-    vcf_list = db_2_vcf(double_breaks, no_ins)
-    key = 'somatic_' if out_key == 'somatic' else 'all_'
-    for target_id in all_ids:
-        germline_outfile = open(os.path.join(outpath, 'severus_' + key + target_id.replace('.bam' , '') + ".vcf"), "w")
-        write_vcf_header(ref_lengths, germline_outfile)
-        write_germline_vcf(vcf_list[target_id], germline_outfile)
+    vcf_list = db_2_vcf(double_breaks, no_ins, all_ids)
+    key = 'somatic' if out_key == 'somatic' else 'all'
+    sample_ids = [target_id.replace('.bam' , '') for target_id in all_ids]
+    
+    germline_outfile = open(os.path.join(outpath, 'severus_' + key + ".vcf"), "w")
+    write_vcf_header(ref_lengths, germline_outfile, sample_ids)
+    write_germline_vcf(vcf_list, germline_outfile)
     
             
     

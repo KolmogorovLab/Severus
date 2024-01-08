@@ -78,7 +78,7 @@ After running, vcf files with somatic and germline calls are available at in the
 along with breakpoint graphs and additional information about SVs. To visualize the breakpoint graph, use:
 
 ```
-dot -Tsvg -O severus_out/somatic_SVs/breakpoint_graph.dot
+dot breakpoint_graph.gv | gvpack -array_li1 -m 25 | neato -n2 -s -Tsvg > breakpoint_graph.svg
 ```
 
 ## Inputs and Parameters
@@ -116,7 +116,8 @@ dot -Tsvg -O severus_out/somatic_SVs/breakpoint_graph.dot
 --inbetween-ins         report unmapped insertions around breakpoints
 --only-somatic          omits germline outputs in the somatic mode
 --output_LOH            outputs a bed file with predicted LOH regions
---ins-to-tra            converts insertions to translocations if mapping is known
+--tra-to-ins            converts insertions to translocations if mapping is known
+--output-read-ids       outputs read IDs for support reads
 ```
 
 ## Benchmarking Severus and other SV callers
