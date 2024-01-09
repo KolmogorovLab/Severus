@@ -79,6 +79,9 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_po
     seg_span_end=[]
     is_pass = ''
     
+    if not ins_seq:
+        ins_seq = "<DUP>"
+        
     for seg in segments:
         if not seg_span_start and seg.ref_start <= vntr_strt:
             seg_span_start.append(seg)
