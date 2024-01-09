@@ -79,8 +79,6 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_po
     seg_span_end=[]
     is_pass = ''
     
-    if not ins_seq:
-        ins_seq = "{0}:{1}-{2}".format(segments[0].ref_id, vntr_strt, vntr_end)
     for seg in segments:
         if not seg_span_start and seg.ref_start <= vntr_strt:
             seg_span_start.append(seg)
@@ -121,9 +119,9 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_po
     elif bp_len >= min_sv_size:
         
         if ins_seq:
-            s1.ref_end = max([s1.ref_end, s2.ref_end])
-            s1.ref_start = min([s1.ref_start, s2.ref_start])
-            s1.segment_length = s1.ref_end - s1.ref_start
+            s2.ref_end = max([s1.ref_end, s2.ref_end])
+            s2.ref_start = min([s1.ref_start, s2.ref_start])
+            s2.segment_length = s2.ref_end - s2.ref_start
         
             dist = vntr_strt - s1.ref_start
             ins_start = s1.read_start + dist
@@ -131,7 +129,7 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_po
             
             s2_new = ReadSegment(s1.align_start, ins_start, ins_end, vntr_strt, vntr_strt, bp_pos, bp_pos, s1.read_id,
                                  s1.ref_id, s1.strand, s1.read_length, bp_len, s1.haplotype,
-                                 s1.mapq, s1.genome_id, s1.mismatch_rate, True, s1.error_rate)
+                                 s1.mapq, s1.genome_id, s1.mismatch_rate, True, s1.error_rate, None)
             s2_new.is_pass = is_pass
             if bp_len < len(ins_seq):
                 s2_new.ins_seq = ins_seq[:bp_len]
@@ -139,11 +137,11 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_po
                 s2_new.ins_seq = ins_seq
                 
             if split_seg_vntr:
-                if s1.strand == 1:
-                    s1.read_end = s2.read_end
+                if s2.strand == -1:
+                    s2.read_end = s1.read_end
                 else:
-                    s1.read_start = s2.read_start
-            return [s1, s2_new] + clipped_segs
+                    s2.read_start = s1.read_start
+            return [s2, s2_new] + clipped_segs
         else:
             s1.ref_end = vntr_strt + bp_len
             s2.ref_start = vntr_strt
@@ -164,15 +162,15 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_po
             return [s1, s2] + clipped_segs
     
     else:
-        s1.ref_end = s2.ref_end
-        s1.ref_end_ori = s2.ref_end_ori
-        s1.segment_length = s1.ref_end - s1.ref_start
+        s2.ref_start = s1.ref_start
+        s2.ref_start_ori = s1.ref_start_ori
+        s2.segment_length = s2.ref_end - s2.ref_start
         
-        if s1.strand == 1:
-            s1.read_end = s2.read_end
+        if s2.strand == -1:
+            s2.read_end = s1.read_end
         else:
-            s1.read_start = s2.read_start
-        return [s1] + clipped_segs
+            s2.read_start = s1.read_start
+        return [s2] + clipped_segs
 
 
 def check_spanning(new_read, vntr_loc):
@@ -196,9 +194,14 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
     split_seg_vntr = []
     s2 = []
     seg_to_remove = []
+    ins_pos = []
     for s in read:
         if s.is_insertion:
-            ins_segs.append(s)
+            if not (s.ref_id,s.ref_start) in ins_pos:
+                ins_pos.append((s.ref_id, s.ref_start))
+                ins_segs.append(s)
+            else:
+                seg_to_remove.append(s)
         elif s.is_clipped:
             clipped_segs.append(s)
         else:
@@ -251,7 +254,7 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
             else:
                 ins_seq += bp[0].ins_seq
                 bp_strt.append(bp[0].ref_end)
-                
+               
         bp_pos = key[1]
         if bp_strt:
             bp_pos = int(np.median(bp_strt))
@@ -260,7 +263,7 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
             s1 = bp[0]
             new_read.append(ReadSegment(s1.align_start, s1.read_start + 1, s1.read_start + bp_len, key[1], key[1], bp_pos, bp_pos, s1.read_id,
                                         s1.ref_id, s1.strand, s1.read_length,bp_len, s1.haplotype, s1.mapq,
-                                        s1.genome_id, s1.mismatch_rate, True, s1.error_rate))
+                                        s1.genome_id, s1.mismatch_rate, True, s1.error_rate, s1.is_primary))
             new_read[-1].ins_seq = ins_seq
             if not check_spanning(read, key):
                 new_read[-1].is_pass = 'vntr_only'

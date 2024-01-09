@@ -49,7 +49,6 @@ def _enable_logging(log_file, debug, overwrite):
     logger.addHandler(console_log)
     logger.addHandler(file_handler)
 
-
 def _version():
     return __version__
 
@@ -67,7 +66,7 @@ def main():
     BP_CLUSTER_SIZE = 50
     MIN_SV_SIZE = 50
     MIN_SV_THR = 10
-    VAF_THR = 0.1
+    VAF_THR = 0.05
     CONTROL_VAF = 0.01
     
 
@@ -119,6 +118,7 @@ def main():
     parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
     parser.add_argument("--filter-small-svs", dest='filter_small_svs', action = "store_true", help = 'filters small svs < 5000')
     parser.add_argument("--TIN-ratio", dest='control_vaf', metavar="float", type=float, default = CONTROL_VAF, help = 'Tumor in normal ratio[{CONTROL_VAF}]')
+    parser.add_argument("--vaf-thr", dest='vaf_thr', metavar="float", type=float, default = VAF_THR, help = 'Tumor in normal ratio[{CONTROL_VAF}]')
     parser.add_argument("--output-all", dest='output_all', action = "store_true", help = 'outputs FAIL SVs in addition to PASS SVs')
     parser.add_argument("--write-collapsed-dup", dest='write_segdup', action = "store_true", help = 'outputs a bed file with identified collapsed duplication regions')
     parser.add_argument("--no-ins-seq", dest='no_ins', action = "store_true", help = 'do not output insertion sequences to the vcf file')
@@ -127,6 +127,7 @@ def main():
     parser.add_argument("--output-LOH", dest='output_loh', action = "store_true", help = 'outputs a bed file with predicted LOH regions')
     parser.add_argument("--omit-resolve-overlaps", dest='resolve_overlaps', action = "store_false")
     parser.add_argument("--tra-to-ins", dest='tra_to_ins', action = "store_true", help = 'converts insertions to translocations if mapping is known')
+    parser.add_argument("--output-read-ids", dest='output_read_ids', action = "store_true", help = 'to output supporting read ids')
     
     
     args = parser.parse_args()
@@ -150,15 +151,18 @@ def main():
     logger.debug("Python version: " + sys.version)
     
     args.sv_size = max(args.min_sv_size - MIN_SV_THR, MIN_SV_THR)
+    args.ins_seq = False
     
     if not shutil.which(SAMTOOLS_BIN):
         logger.error("samtools not found")
         return 1
+    if len(control_genomes) > 1:
+        logger.error("only one control bam is allowed")
+        
     if args.bp_min_support == 0:
         args.bp_min_support = 3
-        args.vaf_thr = VAF_THR
     else:
-        args.vaf_thr = 0
+        args.vaf_thr = 0        
 
     #TODO: check that all bams have the same reference
     first_bam = all_bams[0]
@@ -180,10 +184,12 @@ def main():
     
     segments_by_read = []
     genome_ids=[]
+    bam_files = defaultdict(list)
     n90 = [MIN_ALIGNED_LENGTH]
     for bam_file in all_bams:
         genome_id = os.path.basename(bam_file)
         genome_ids.append(genome_id)
+        bam_files[genome_id] = bam_file
         logger.info(f"Parsing reads from {genome_id}")
         segments_by_read_bam = get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
                                                       args.min_mapping_quality, args.sv_size)
@@ -196,6 +202,6 @@ def main():
     
     logger.info('Computing coverage histogram')
     coverage_histograms = update_coverage_hist(genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes, args.write_log_out)
-    double_breaks = call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, genome_ids, control_genomes, args)
+    double_breaks = call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_files, genome_ids, control_genomes, thread_pool, args)
     
     output_graphs(double_breaks, coverage_histograms, thread_pool, target_genomes, control_genomes, ref_lengths, args)

@@ -4,8 +4,9 @@ import os
 import networkx as nx
 from collections import defaultdict
 import logging
+import numpy as np
 
-from severus.breakpoint_finder import get_genomic_segments, cluster_db, add_inbetween_ins, add_phaseset_id
+from severus.breakpoint_finder import get_genomic_segments, cluster_inversions, add_inbetween_ins
 from severus.vcf_output import write_to_vcf
 
 logger = logging.getLogger()
@@ -136,22 +137,23 @@ def _coord_cmp(node_data_1, node_data_2):
 def output_clusters_graphvis(graph, connected_components, out_file):
     
     def _add_legend(key_to_color, fout):
-        fout.write("subgraph cluster_01 {\n\tlabel = \"Legend\";\n\tnode [shape=point]\n{\n")
+        out_stream.write("digraph cluster_01 {\n")
+        out_stream.write("node [shape=\"point\"];\n rankdir = \"LR\"")
+        out_stream.write("subgraph cluster_01 {\n")
+        out_stream.write("pencolor=transparent; \nlabel = \"Legend\"\nlabeljust=l\n")
         for i, (key, color) in enumerate(key_to_color.items()):
             node_1 = f"legend_{i}_1"
             node_2 = f"legend_{i}_2"
             fout.write(f"\t{node_1} -> {node_2} [color=\"{color}\", label=\"{key}\", dir=none];\n")
-        fout.write("}\n};\n")
+        fout.write("}\n}\n")
 
     def _draw_components(graph, components_list, out_stream):
-        subgr_num = len(components_list)
-        for (rank, cc, target_adj, control_adj, num_somatic) in reversed(components_list):
-            subgr_num -= 1
-            if num_somatic == 0:
-                continue
+        for subgr_num, (_,_,_, cc,_) in enumerate(components_list):
             
+            out_stream.write("digraph cluster{0} {{\n".format(subgr_num))
+            out_stream.write("node [shape=\"box\"];\n rankdir = \"LR\"")
             out_stream.write("subgraph cluster{0} {{\n".format(subgr_num))
-            out_stream.write("label = \"subgraph cluster {0}\"\nlabeljust=l\n".format(subgr_num))
+            out_stream.write("pencolor=transparent; \nlabel = \"subgraph cluster {0}\"\nlabeljust=l\n".format(subgr_num))
             subgr_chr = defaultdict(list)
             
             #Nodes properties
@@ -172,6 +174,10 @@ def output_clusters_graphvis(graph, connected_components, out_file):
                 
             #Edges    
             for u, v, key, value in graph.edges(cc, keys=True, data = True):
+                
+                if value['_type'] == "cluster_conn":
+                    continue
+                
                 if not _coord_cmp(graph.nodes[u], graph.nodes[v]):
                     u, v = v, u
                 properties = []
@@ -181,7 +187,7 @@ def output_clusters_graphvis(graph, connected_components, out_file):
                 dir_1, dir_2 = value['_dir']
                 out_stream.write(f"{u}:{dir_1} -> {v}:{dir_2} [{prop_str}, dir=none];\n")
                 
-            out_stream.write("}\n\n")  
+            out_stream.write("}\n}\n")  
     
     #node visual attributes
     for n in graph.nodes:
@@ -219,16 +225,13 @@ def output_clusters_graphvis(graph, connected_components, out_file):
                 graph[u][v][_key]["color"] = key_to_color[_key] + ":" + key_to_color[_key]
 
     with open(out_file, "w") as out_stream:
-        out_stream.write("digraph {\n")
-        out_stream.write("node [shape=\"box\"];\n rankdir = \"LR\"")
-        _draw_components(graph, connected_components, out_stream)
         _add_legend(key_to_color, out_stream)
-        out_stream.write("}\n")
+        _draw_components(graph, connected_components, out_stream)
 
 def output_clusters_csv(db_to_cl, double_breaks, connected_components, out_file):
     
-    for subgr_num, cc_list in enumerate(connected_components):
-        cc = list(cc_list[1])
+    for subgr_num, (_,_,_,cc,_) in enumerate(connected_components):
+        
         for node_id in cc:
             for db in db_to_cl[node_id]:
                 db.cluster_id = subgr_num
@@ -254,53 +257,96 @@ def output_clusters_csv(db_to_cl, double_breaks, connected_components, out_file)
             read_support = ",".join([str(k) for k in supp_ls.values()])
             genotypes = ",".join(list(gen_ls.values()))
             fout.write(f"severus_{db.cluster_id}\t{label_1}\t{keys_text}\t{read_support}\t{genotypes}\n")
-        
 
-def cluster_adjacencies(graph, target_genomes, control_genomes):
+def output_clusters_info(connected_components, out_file):
+    with open(out_file, "w") as fout:
+        fout.write("#cluster_id\type\tSVs\tSV_count\tgenome_ids\t\n") 
+        for subgr_num, (sv_events,_type,_,_,genome) in enumerate(connected_components):
+            nsv = sum([k for k in sv_events.values()])
+            svs = ','.join([ f'{key}:{val} ' for key, val in sv_events.items() if val > 0])
+            genome_ids = ','.join(genome)
+            fout.write(f"severus_{subgr_num}\t{_type}\t{svs}\t{nsv}\t{genome_ids}\t\n")
+
+def cluster_adjacencies(graph, db_to_cl, target_genomes, control_genomes):
+    DIFF_THR = 10000
+    INDEL_THR = 1.5
     components_list = []
-    for cc in nx.connected_components(graph):
-        target_adj = set()
-        control_adj = set()
-        num_somatic_adj = 0
-        for u, v, key, data in graph.edges(cc, keys=True, data=True):
-            
-            if key in target_genomes and data["_type"] == "adjacency":
-                target_adj.add((u, v))
-            if key in control_genomes and data["_type"] == "adjacency":
-                control_adj.add((u, v))
+    connected = defaultdict(list)
+    
+    for node, cl in db_to_cl.items():
+        if cl[0].cluster_id:
+            connected[cl[0].cluster_id].append(node)
+    
+    for cl in connected.values():
+        for (a,b) in zip(cl[:-1],cl[1:]):
+            db = db_to_cl[a][0]
+            if not graph.has_edge(a,b, key=db.genome_id):
+                graph.add_edge(a,b, key=db.genome_id, _support=0,
+                           _type="cluster_conn", _genotype=db.genotype, _dir = ('e','w'))
 
-        for adj in target_adj:
-            if adj not in control_adj:
-                num_somatic_adj += 1
-
-        rank = None
-        if len(target_adj) > 0 and len(control_adj) == 0:
-            rank = len(target_adj) + 100
-        elif len(target_adj) == 0 and len(control_adj) == 0:
-            rank = -100
-        elif len(target_adj) == 0 and len(control_adj) > 0:
-            rank = -len(control_adj)
+    rank_ls = defaultdict(int)
+    for i,cc in enumerate(nx.connected_components(graph)):
+        sv_type = defaultdict(int)
+        chr_list = defaultdict(list)
+        sv_len = defaultdict(list)
+        db_ls = []
+        for node in cc:
+            if graph.nodes[node]['_phase_switch']:
+                continue
+            db_ls.append(db_to_cl[node][0])
+        db_ls = list(set(db_ls))
+        genome = list(set([db.genome_id for db in db_ls]))
+        if len(db_ls) == 1:
+            db = db_ls[0]
+            _cp = db.vcf_sv_type if not db.sv_type else db.sv_type
+            sv_type[_cp] +=1
+            _type = 'simple'
+            if not db.bp_1.ref_id == db.bp_2.ref_id:
+                _type = 'tra'
+                rank = 1
+            elif db.sv_type:
+                rank = 2
+            else:
+                rank = 0
         else:
-            rank = len(target_adj) / len(control_adj)
-
-        if len(target_adj) + len(control_adj):
-            components_list.append((rank, cc, len(target_adj), len(control_adj), num_somatic_adj))
-
-    components_list.sort(key=lambda p: p[0], reverse=True)
-
+            _type = 'complex'
+            rank = len(db_ls) + 2
+            for db in db_ls:
+                _cp = db.vcf_sv_type if not db.sv_type else db.sv_type
+                sv_type[_cp] +=1
+                chr_list[db.bp_1.ref_id].append(db.bp_1.position)
+                if not db.bp_2.is_insertion:
+                    chr_list[db.bp_2.ref_id].append(db.bp_2.position)
+                if db.length > 0:
+                    sv_len[db.bp_1.ref_id].append(db.length)
+            if sv_type['DEL'] + sv_type['INS'] + sv_type['INV'] == len(db_ls):
+                seq = list(chr_list.keys())[0]
+                pos = chr_list[seq]
+                pos.sort()
+                diff = [a-b for (a,b) in zip(pos[1:],pos[:-1])]
+                if np.median(diff) > np.median(sv_len[seq]) * INDEL_THR:
+                    _type = 'simple'
+                    rank = 3
+        components_list.append((sv_type, _type, rank, cc, genome))
+        rank_ls[rank] +=1
+    
+    components_list.sort(key=lambda p: p[2], reverse=True)
+    
     return components_list
 
 
 def build_breakpoint_graph(genomic_segments, phasing_segments, adj_segments, max_genomic_len, reference_adjacencies,
                            target_genomes, control_genomes):
     graph, db_to_cl = build_graph(genomic_segments, phasing_segments, adj_segments, max_genomic_len, reference_adjacencies)
-    adj_clusters = cluster_adjacencies(graph, target_genomes, control_genomes)
+    adj_clusters = cluster_adjacencies(graph, db_to_cl, target_genomes, control_genomes)
     return graph, adj_clusters, db_to_cl
             
             
 def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, control_genomes, ref_lengths, args):
     keys = ['germline', 'somatic']
     for key in keys:
+        if not key in list(db_list.keys()):
+            continue
         double_breaks = db_list[key]
         if key == 'germline' and args.only_somatic:
             continue
@@ -315,6 +361,7 @@ def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, con
         
         out_breakpoint_graph = os.path.join(out_folder, "breakpoint_graph.gv")
         out_clustered_breakpoints = os.path.join(out_folder, "breakpoint_clusters.csv")
+        out_cluster_list = os.path.join(out_folder, "breakpoint_clusters_list.tsv")
         
         logger.info("\tComputing segment coverage")
         if args.inbetween_ins and key == 'germline':
@@ -324,6 +371,7 @@ def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, con
             
         (genomic_segments, phasing_segments, adj_segments) = get_genomic_segments(double_breaks2, coverage_histograms, args.phase_vcf, key, ref_lengths, args.min_ref_flank, args.max_genomic_len)
         
+        cluster_inversions(double_breaks2, coverage_histograms, args.min_sv_size)
         
         logger.info("\tPreparing graph")
         graph, adj_clusters, db_to_cl = build_breakpoint_graph(genomic_segments, phasing_segments, adj_segments, args.max_genomic_len,
@@ -331,7 +379,11 @@ def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, con
         output_clusters_graphvis(graph, adj_clusters, out_breakpoint_graph)
         output_clusters_csv(db_to_cl, double_breaks, adj_clusters, out_clustered_breakpoints)
         
+        output_clusters_info(adj_clusters, out_cluster_list)
+        
         logger.info("\tWriting vcf")
         write_to_vcf(double_breaks, all_ids, out_folder, key, ref_lengths, args.only_somatic, args.no_ins)
+        
+            
         
     
