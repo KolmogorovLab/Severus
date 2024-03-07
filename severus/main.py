@@ -59,7 +59,7 @@ def main():
     MIN_BREAKPOINT_READS = 3
     MIN_MAPQ = 10
     MIN_REF_FLANK = 10000
-    MAX_GENOMIC_LEN = 50000
+    MAX_GENOMIC_LEN = 2000000
     MIN_ALIGNED_LENGTH = 7000
 
     #breakpoint
@@ -116,18 +116,17 @@ def main():
                         help=f"maximum length of genomic segment to form connected components [{MAX_GENOMIC_LEN}]")
     parser.add_argument("--phasing-vcf", dest="phase_vcf", metavar="path", help="path to vcf file used for phasing (if using haplotype specific SV calling)[None]")
     parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
-    parser.add_argument("--filter-small-svs", dest='filter_small_svs', action = "store_true", help = 'filters small svs < 5000')
     parser.add_argument("--TIN-ratio", dest='control_vaf', metavar="float", type=float, default = CONTROL_VAF, help = 'Tumor in normal ratio[{CONTROL_VAF}]')
     parser.add_argument("--vaf-thr", dest='vaf_thr', metavar="float", type=float, default = VAF_THR, help = 'Tumor in normal ratio[{CONTROL_VAF}]')
     parser.add_argument("--output-all", dest='output_all', action = "store_true", help = 'outputs FAIL SVs in addition to PASS SVs')
     parser.add_argument("--write-collapsed-dup", dest='write_segdup', action = "store_true", help = 'outputs a bed file with identified collapsed duplication regions')
     parser.add_argument("--no-ins-seq", dest='no_ins', action = "store_true", help = 'do not output insertion sequences to the vcf file')
-    parser.add_argument("--inbetween-ins", dest='inbetween_ins', action = "store_true", help = 'report unmapped insertions around breakpoints')
-    parser.add_argument("--only-somatic", dest='only_somatic', action = "store_true", help = 'omits germline outputs in the somatic mode')
     parser.add_argument("--output-LOH", dest='output_loh', action = "store_true", help = 'outputs a bed file with predicted LOH regions')
-    parser.add_argument("--omit-resolve-overlaps", dest='resolve_overlaps', action = "store_false")
-    parser.add_argument("--tra-to-ins", dest='tra_to_ins', action = "store_true", help = 'converts insertions to translocations if mapping is known')
+    parser.add_argument("--resolve-overlaps", dest='resolve_overlaps', action = "store_true")
+    parser.add_argument("--ins-to-tra", dest='tra_to_ins', action = "store_false", help = 'converts insertions to translocations if mapping is known')
     parser.add_argument("--output-read-ids", dest='output_read_ids', action = "store_true", help = 'to output supporting read ids')
+    parser.add_argument("--between-junction-ins", dest='ins_seq', action = "store_true", help = 'reports unmapped sequence between breakpoints')
+    parser.add_argument("--use-supplementary-tag", dest='use_supplementary_tag', action = "store_true", help = 'Uses haplotype tag in supplementary alignments')
     
     
     args = parser.parse_args()
@@ -151,7 +150,6 @@ def main():
     logger.debug("Python version: " + sys.version)
     
     args.sv_size = max(args.min_sv_size - MIN_SV_THR, MIN_SV_THR)
-    args.ins_seq = False
     
     if not shutil.which(SAMTOOLS_BIN):
         logger.error("samtools not found")
@@ -192,7 +190,7 @@ def main():
         bam_files[genome_id] = bam_file
         logger.info(f"Parsing reads from {genome_id}")
         segments_by_read_bam = get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
-                                                      args.min_mapping_quality, args.sv_size)
+                                                      args.min_mapping_quality, args.sv_size,args.use_supplementary_tag)
         n90.append(get_read_statistics(segments_by_read_bam))
         segments_by_read += segments_by_read_bam
     

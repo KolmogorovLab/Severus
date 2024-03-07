@@ -44,7 +44,7 @@ class ReadSegment(object):
                          " read_length=", str(self.read_length), " haplotype=", str(self.haplotype),
                          " mapq=", str(self.mapq), "mismatch_rate=", str(self.mismatch_rate), " read_qual=", str(self.is_pass), " genome_id=", str(self.genome_id)])
 
-def get_segment(read, genome_id,sv_size):
+def get_segment(read, genome_id,sv_size,use_supplementary_tag):
     """
     Parses cigar and generate ReadSegment structure with alignment coordinates
     """
@@ -82,7 +82,7 @@ def get_segment(read, genome_id,sv_size):
     clp = cigar[-1] if read.is_reverse else cigar[0]
     align_start = clp[1] if clp[0] in CIGAR_CLIP else 0
 
-    if read.has_tag('HP'):
+    if is_primary and read.has_tag('HP') or use_supplementary_tag:
         haplotype = read.get_tag('HP')
     else:
         haplotype = 0
@@ -218,13 +218,14 @@ def extract_clipped_end(segments_by_read):
         read.sort(key=lambda s: s.read_start)
         
 def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq):
-    region_start, region_end = poslist[0]-3, poslist[-1]+3
+    region_start, region_end = max(0, poslist[0]-3), poslist[-1]+3
     aln_file = pysam.AlignmentFile(bam_file, "rb")
     cov_list = defaultdict(list)
     for pos in poslist:
         cov_list[(ref_id, pos)] = [0,0,0]
     for aln in aln_file.fetch(ref_id, region_start, region_end,  multiple_iterators=True):
         if not aln.is_secondary and not aln.is_unmapped and aln.mapping_quality > min_mapq:
+            
             strt = bisect.bisect_right(poslist, aln.reference_start)
             end = bisect.bisect_left(poslist, aln.reference_end)
             if not strt == end:
@@ -262,7 +263,7 @@ def get_coverage_parallel(bam_files, genome_ids, thread_pool, min_mapq, double_b
             db.bp_2.spanning_reads[genome_id] = covlist[(db.bp_2.ref_id, db.bp_2.position)]
     
         
-def get_all_reads(bam_file, region, genome_id,sv_size):
+def get_all_reads(bam_file, region, genome_id,sv_size,use_supplementary_tag):
     """
     Yields set of split reads for each contig separately. Only reads primary alignments
     and infers the split reads from SA alignment tag
@@ -272,14 +273,14 @@ def get_all_reads(bam_file, region, genome_id,sv_size):
     aln_file = pysam.AlignmentFile(bam_file, "rb")
     for aln in aln_file.fetch(ref_id, region_start, region_end,  multiple_iterators=True):
         if not aln.is_secondary and not aln.is_unmapped:
-            new_segment = get_segment(aln, genome_id, sv_size)
+            new_segment = get_segment(aln, genome_id, sv_size,use_supplementary_tag)
             for new_seg in new_segment:
                 alignments.append(new_seg)
     return alignments
 
 
 def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
-                           min_mapq, sv_size):
+                           min_mapq, sv_size,use_supplementary_tag):
     CHUNK_SIZE = 10000000
     all_reference_ids = [r for r in pysam.AlignmentFile(bam_file, "rb").references]
     fetch_list = []
@@ -292,7 +293,7 @@ def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
                 reg_end = ctg_len
             fetch_list.append((ctg, reg_start, reg_end))
 
-    tasks = [(bam_file, region, genome_id,sv_size) for region in fetch_list]
+    tasks = [(bam_file, region, genome_id,sv_size,use_supplementary_tag) for region in fetch_list]
     parsing_results = None
     parsing_results = thread_pool.starmap(get_all_reads, tasks)
     segments_by_read = defaultdict(list)
