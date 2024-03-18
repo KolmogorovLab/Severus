@@ -388,9 +388,8 @@ def html_plot(graph, adj_clusters, db_to_cl, out_dir):
     DODGE = 0.05
     AXIS_OFF = 500000
     k_THR = 2000
-    cov_list = [graph.nodes[n]['_coverage'] for n in graph.nodes if graph.nodes[n]['_coverage']]
-    [l25, l50, l75] = np.quantile(cov_list, [0.25, 0.50, 0.75])
-    col_segments = ['#bfd4b8', '#7fa970', '#405538']
+    #cov_list = [graph.nodes[n]['_coverage'] for n in graph.nodes if graph.nodes[n]['_coverage']]
+    #col_segments = ['#bfd4b8', '#7fa970', '#405538']
     for subgr_num, (_,_,_type,_,cc,_) in enumerate(adj_clusters):
         if not _type == 'complex':
             continue
@@ -431,16 +430,10 @@ def html_plot(graph, adj_clusters, db_to_cl, out_dir):
                     len_label = f"L:{len_g}bp" 
                 cov = graph.nodes[seg[2]]['_coverage']
                 
-                col_s = col_segments[0]
-                if cov and cov <= l50:
-                    col_s = col_segments[1]
-                elif cov <= l75:
-                    col_s = col_segments[2]
                 
                 hp = ','.join(list(set(['|'.join([str(s1[0]), str(s1[1])]) for s1 in seg[3]])))
                 lab = graph.nodes[seg[2]]['_coordinate'] + '<br>Coverage:' + str(cov) + '<br>Length:' + len_label + '<br>Haplotype:' + hp
                 lab_list += [lab, lab, lab, None]
-                cols += [col_s, col_s, col_s, 'white']
                 
             x += x1
             y += y1
@@ -452,7 +445,7 @@ def html_plot(graph, adj_clusters, db_to_cl, out_dir):
         fig = go.Figure()
         add_legend(fig, colors)
         add_dbs(fig, db_list, y_pos, colors)
-        add_segments(fig, x,y, lab_list, cols)
+        add_segments(fig, x,y, lab_list)
         plots_layout_settings(fig, list(segment_list.keys()), x_limit, subgr_num)
         fig.write_html(out_dir + '/plots/severus_' + str(subgr_num) + ".html")
 
@@ -474,7 +467,7 @@ def add_legend(fig, colors):
                              name="Interchr"))
     
 
-def add_segments(fig, x,y, hoverdata, cols):
+def add_segments(fig, x,y, hoverdata):
     fig.add_trace(go.Scatter(
     x=x,
     y=y,
@@ -641,7 +634,7 @@ def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, con
             continue
         double_breaks = db_list[key]
         
-        sub_fol = "all_SVs" if key == 'germline' else 'somatic_SVs_p'
+        sub_fol = "all_SVs" if key == 'germline' else 'somatic_SVs'
         out_folder = os.path.join(args.out_dir, sub_fol)
         if not os.path.isdir(out_folder):
             os.mkdir(out_folder)

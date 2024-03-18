@@ -955,14 +955,18 @@ def add_clipped_end(position, clipped_clusters_pos, clipped_clusters_seq, by_gen
 def ins_to_tra (ins_list_pos, ins_list, bp1, bp2, dir_bp, dbs, ins_clusters, double_breaks, min_sv_size,slen):
     
     INS_WIN = 2000
+    MIN_DIFF = 50
     
     ins_1 = ins_list_pos[bp1.ref_id]
     strt = bisect.bisect_left(ins_1, bp1.position - INS_WIN)
     end = bisect.bisect_left(ins_1, bp1.position + INS_WIN)
     flag = False
-    
+    seglen = 0
     med_seg_len = int(np.quantile([cn.seg_len[slen] for cn in bp2.connections if cn in bp1.connections],0.90))
+    seg_len = sorted([cn.seg_len[slen] for cn in bp2.connections if cn in bp1.connections])
     
+    if seg_len[-1] - seg_len[0] < MIN_DIFF:
+        seglen = med_seg_len
     if strt == end:
         return []
     
@@ -977,7 +981,8 @@ def ins_to_tra (ins_list_pos, ins_list, bp1, bp2, dir_bp, dbs, ins_clusters, dou
         ins = ins_cl[0]
         if (ins.length + min_sv_size) < abs(ins.bp_1.position - bp1.position) or (ins.length + min_sv_size) < med_seg_len:
             continue
-        
+        #if seglen and abs(ins.length - seglen) > MIN_DIFF:
+        #    continue
         flag = True
         
         if dbs[0].bp_1.ref_id == dbs[0].bp_2.ref_id:
@@ -1010,13 +1015,18 @@ def tra_to_ins(ins_list_pos, ins_list, bp1, bp2, dir_bp, dbs, ins_clusters, doub
    
     INS_WIN = 2000
     total_supp_thr = 2
+    MIN_DIFF = 50
     
     ins_1 = ins_list_pos[bp1.ref_id]
     strt = bisect.bisect_left(ins_1, bp1.position - INS_WIN)
     end = bisect.bisect_left(ins_1, bp1.position + INS_WIN)
     flag = False
-    
+    seglen = 0
     med_seg_len = int( np.quantile([cn.seg_len[slen] for cn in bp2.connections if cn in bp1.connections],0.90))
+    
+    seg_len = sorted([cn.seg_len[slen] for cn in bp2.connections if cn in bp1.connections])
+    if seg_len[-1] - seg_len[0] < MIN_DIFF:
+        seglen = med_seg_len
     
     ins_db = ins_list[bp1.ref_id]
     clusters = defaultdict(list)
@@ -1030,7 +1040,8 @@ def tra_to_ins(ins_list_pos, ins_list, bp1, bp2, dir_bp, dbs, ins_clusters, doub
         total_supp = 0
         if (ins.length + min_sv_size) < abs(ins.bp_1.position - bp1.position) or (ins.length + min_sv_size) < med_seg_len:
             continue
-        
+        #if seglen and abs(ins.length - seglen) > MIN_DIFF:
+        #    continue
         flag = True
         if bp2.dir_1 == -1:
             tra_pos = bp1.ref_id + ':' + str(bp2.position)+ '-'  + str(bp2.position + ins.length)
@@ -1293,18 +1304,14 @@ def filter_germline_db(double_breaks):
     return db_list
 
 def filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segments_by_read, bam_files, thread_pool, args):
-    output_all =args.output_all
     min_sv_size = args.min_sv_size
     ins_seq = args.ins_seq
     single_bp = args.single_bp
     
     db_list = []
-    if not output_all:
-        for db in double_breaks:
-            if db.is_pass == 'PASS' and db.vaf_pass == 'PASS':
-                db_list.append(db)
-    else:
-        db_list = double_breaks
+    for db in double_breaks:
+        if db.is_pass == 'PASS' and db.vaf_pass == 'PASS' and db.vcf_qual:
+            db_list.append(db)
         
     cluster_db(db_list, coverage_histograms, min_sv_size)
     add_sv_type(db_list)
@@ -1315,7 +1322,8 @@ def filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segmen
     if single_bp:
         db_list += single_bps
     
-    add_vntr_annot(db_list, args)
+    if args.vntr_file:
+        add_vntr_annot(db_list, args)
     db_list = filter_germline_db(db_list)
     return db_list
 
@@ -1831,6 +1839,37 @@ def cluster_inversions(double_breaks, coverage_histograms, min_sv_size):
     for ind_id, db_list in enumerate(by_genome.values()):
         complex_inv(db_list, coverage_histograms, min_sv_size, ind_id)
 
+def reciprocal_inv(clusters):
+    inv_list = defaultdict(list)
+    MINSIZE = 200
+    for cl in clusters.values():
+        db = cl[0]
+        supp = sum([db.supp for db in cl])
+        pos_list = (cl[0].bp_1.position, cl[0].bp_1.dir_1, cl[0].haplotype_1, cl[0].phaseset_id[0], cl, supp)
+        inv_list[db.bp_1.ref_id].append(pos_list)
+        if not db.bp_1.ref_id == db.bp_2.ref_id:
+            pos_list = (cl[0].bp_2.position, cl[0].bp_2.dir_1, cl[0].haplotype_2, cl[0].phaseset_id[1], cl, supp)
+            inv_list[db.bp_2.ref_id].append(pos_list)
+            
+    for seq, pos_list in inv_list.items():
+        pos_list.sort(key=lambda s:(s[0], -s[1]))
+        neg_ls = [s for s in pos_list if s[1] == -1 and s[4][0].bp_1.ref_id == s[4][0].bp_2.ref_id]
+        neg_pos = [s[0] for s in neg_ls]
+        for i, pos in enumerate(pos_list[:-1]):
+            if pos[1] == -1 or not pos[4][0].bp_1.ref_id == pos[4][0].bp_2.ref_id:
+                continue
+            strt = bisect.bisect_left(neg_pos, pos[0] - MINSIZE)
+            end = min(bisect.bisect_left(neg_pos, pos[0] + MINSIZE), len(neg_pos)-2)
+            black_list = []
+            if len(pos[4]) == 1 and not pos_list[i][2] == 0:
+                black_list = [ind for ind, (_,dir1, hp, phase_id, _, _) in enumerate(neg_ls[strt:end+1]) if phase_id == pos[3] and not (hp == 0 or hp == pos[2])]
+            for j in range(strt,end+1):
+                if not j in black_list and neg_ls[j][4][0].bp_2.position + MINSIZE >= pos[4][0].bp_2.position:
+                    if (pos[4][0].bp_2.position - neg_ls[j][4][0].bp_1.position) / (neg_ls[j][4][0].bp_2.position - pos[4][0].bp_1.position) > 0.90:
+                        for db in pos[4]+neg_ls[j][4]:
+                            db.sv_type = 'reciprocal_inv'
+    
+    
 def complex_inv(double_breaks, coverage_histograms, min_sv_size, ind_id):
     THR_MIN = 4
     THR_MAX = 10
@@ -1841,6 +1880,7 @@ def complex_inv(double_breaks, coverage_histograms, min_sv_size, ind_id):
     for br in double_breaks:
         clusters[br.to_string()].append(br)
     
+    reciprocal_inv(clusters)
     foldback_inv(clusters, coverage_histograms, ind_id)
     
     for cl in clusters.values():
@@ -1871,7 +1911,6 @@ def complex_inv(double_breaks, coverage_histograms, min_sv_size, ind_id):
             for j in range (i+1, len(pos_list)):
                 if not j in black_list and supp - supp_thr <= pos_list[j][5] <= supp + supp_thr and pos_list[j][1] + pos[1] == 0 and pos_list[j][0] <= max_dist:
                     j_lis.append(j)
-            
             if not j_lis:
                 continue
             if len(j_lis) == 1:
@@ -1951,6 +1990,8 @@ def foldback_inv(clusters, coverage_histograms, ind_id):
     HP = [0,1,2]
     for cl in clusters.values():
         db = cl[0]
+        if db.sv_type:
+            continue
         if db.direction_1 == db.direction_2 == 1:
             inv_list_pos[db.bp_1.ref_id].append(cl)
         elif db.direction_1 == db.direction_2 == -1:
@@ -1964,9 +2005,6 @@ def foldback_inv(clusters, coverage_histograms, ind_id):
             if db.bp_2.position - db.bp_1.position > FOLD_BACK_DIST_THR:
                 continue
             pos1 = db.bp_1.position // 500
-            #pos2 = db.bp_2.position // 500
-            #max_pos = len(coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)])
-            #max_pos1 = len(coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)])
             cov1_0 = sum([coverage_histograms[(db.genome_id, hp, db.bp_1.ref_id)][pos1-1] for hp in HP])
             cov1_2 = sum(db.bp_1.spanning_reads[db.genome_id])
             cov2 = sum(db.bp_2.spanning_reads[db.genome_id])
@@ -1980,9 +2018,6 @@ def foldback_inv(clusters, coverage_histograms, ind_id):
             if db.bp_2.position - db.bp_1.position > FOLD_BACK_DIST_THR:
                 continue
             pos1 = db.bp_1.position // 500
-            #pos2 = db.bp_2.position // 500
-            #max_pos = len(coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)])
-            #max_pos1 = len(coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)])
             cov1_0 = sum([coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos1-1] for hp in HP])
             cov1_2 = sum(db.bp_1.spanning_reads[db.genome_id])
             cov2 = sum(db.bp_2.spanning_reads[db.genome_id])

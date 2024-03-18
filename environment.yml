@@ -13,3 +13,4 @@ dependencies:
   - biopython
   - numpy
   - pysam
+  - plotly

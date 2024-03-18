@@ -82,16 +82,14 @@ class vcf_format(object):
     def end_pos(self):
         if self.sv_type == 'BND':
             if self.mate_id:
-                return f"CHR2={self.chr2};END={self.pos2};MATE_ID={self.mate_id};"
-            else:
-                return ""
-        if self.ins_seq:
-            return ""
+                return f"MATE_ID={self.mate_id};"
+        elif self.sv_type == 'DEL' or self.sv_type == 'DUP':
+            return  f"END={self.pos2};"
         else:
-            return f"CHR2={self.chr2};END={self.pos2};"
+            return ""
         
     def svlen(self):
-        if self.sv_len:
+        if self.sv_len > 0:
             return f"SVLEN={self.sv_len};"
         else:
             return ""
@@ -264,7 +262,7 @@ def db_2_vcf(double_breaks, no_ins, sample_ids):
                                                      sv_pass, db.bp_1.ref_id, db.bp_1.position, db.mut_type, db.cluster_id,
                                                      db.has_ins, db.ins_seq,db.sv_type, db.prec, phaseset, strands,sample2, gen_type2, ID1,vntr, db.tra_pos))
         elif db.is_single:
-            alt= 'N'
+            alt= '.N' if db.direction_1 == -1 else 'N.'
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, alt, db.length, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type, db.cluster_id,
                                                  db.has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.tra_pos))
@@ -333,16 +331,23 @@ def write_vcf_header(ref_lengths, outfile, sample_list):
     outfile.write(f"#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{sample}\n")
     
 
-def _sorted_breakpoints(bp_list):
-    def chr_sort(x):
-        stripped_chr = x[3:] if x.startswith("chr") else x
-        return int(stripped_chr) if stripped_chr.isnumeric() else sum(map(ord, stripped_chr))
+def _sorted_breakpoints(bp_list,ref_lengths):
+    db_ls = defaultdict(list)
+    dbls= []
+    for chr_id in ref_lengths.keys():
+        db_ls[chr_id]=[]
+        
+    for db in bp_list:
+        db_ls[db.chrom].append(db)
+        
+    for chr_id, dbs in db_ls.items():
+        dbls += sorted(dbs, key=lambda x:x.pos)
 
-    return sorted(bp_list, key=lambda x: (chr_sort(x.chrom), x.pos))
+    return dbls
 
     
-def write_germline_vcf(vcf_list, outfile):
-    for db in _sorted_breakpoints(vcf_list):
+def write_germline_vcf(vcf_list, outfile,ref_lengths):
+    for db in _sorted_breakpoints(vcf_list,ref_lengths):
         outfile.write(db.to_vcf())
     outfile.close()
     
@@ -354,7 +359,7 @@ def write_to_vcf(double_breaks, all_ids, outpath, out_key, ref_lengths, no_ins):
     
     germline_outfile = open(os.path.join(outpath, 'severus_' + key + ".vcf"), "w")
     write_vcf_header(ref_lengths, germline_outfile, sample_ids)
-    write_germline_vcf(vcf_list, germline_outfile)
+    write_germline_vcf(vcf_list, germline_outfile,ref_lengths)
     
             
     

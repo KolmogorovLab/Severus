@@ -47,7 +47,7 @@ conda activate severus_env
 
 ## Quick Usage
 
-Single sample germline SV calling
+Single sample SV calling
 
 ```
 severus --target-bam phased_tumor.bam --out-dir severus_out -t 16 --phasing-vcf phased.vcf \
@@ -76,14 +76,11 @@ If using haplotagged bam, the matching phased VCF file should be provided as `--
 `--vntr-bed` argument is optional but highly recommended. VNTR annotations for common references are available
 in the `vntrs` folder. See [below](#generating-vntr-annotation) how to generate annotations for a custom reference. 
 
-Without `--control-bam`, only germnline variants will be called.
+Without `--control-bam`, only germline variants will be called.
 
-After running, vcf files with somatic and germline calls are available at in the output folder,
-along with breakpoint graphs and additional information about SVs. To visualize the breakpoint graph, use:
+After running, vcf files with somatic and germline(with somatic) calls are available at in the output folder,
+along with complexSV clusters and additional information about SVs. See [below][#breakpoint-graphs] for complexSV cluster outputs.
 
-```
-dot breakpoint_graph.gv | gvpack -array_li1 -m 25 | neato -n2 -s -Tsvg > breakpoint_graph.svg
-```
 
 ## Inputs and Parameters
 
@@ -130,118 +127,175 @@ dot breakpoint_graph.gv | gvpack -array_li1 -m 25 | neato -n2 -s -Tsvg > breakpo
 
 First, we verified performance of Severus on a germline SV benchmark. 
 We compared Severus, [sniffles2](https://github.com/fritzsedlazeck/Sniffles) and [cuteSV](https://github.com/tjiangHIT/cuteSV) using 
-[HG002 GIAB SV benchmark set](https://www.nature.com/articles/s41587-020-0538-8). Comparison was perfromed using `truvari`.
+[HG002 GIAB SV benchmark set](https://www.nature.com/articles/s41587-020-0538-8). Comparison was perfromed using [Minda](https://github.com/KolmogorovLab/minda).
 The benchamrking was done against the grch38 reference, for consistency with the benchmarks below (confident regions were lifted over).
 Severus and Sniffles2 performed similarly, with CuteSV running a bit behind.
 
-|SV Caller | TP | FN | FP  | Precision | Recall | F1 score |
-|----------|----|----|-----|-----------|--------|----------|
-| Severus  |9453| 402| 345 | 0.965     | 0.959  | 0.962    |
-| sniffles2|9459| 396| 336 | 0.960     | 0.966  | 0.963    |
-| cuteSV   |9231| 624| 676 | 0.936     | 0.931  | 0.934    |
+|SV Caller | TP   | FN  | FP  | Precision | Recall | F1 score |
+|----------|------|-----|-----|-----------|--------|----------|
+|Severus   | 9568 |	302 | 216 |	  **0.98** |**0.97**| **0.97** |
+|Sniffles2 | 9603 |	277 | 305 |	   0.97    |   0.97 |	  0.97 |
+|cuteSV    | 9530 |	465	| 530 |	   0.95    |   0.95 |     0.95 |
 
 ### Somatic benchmarking results COLO829
 
 We compared the performance of existing somatic SV callers [nanomonSV](https://github.com/friend1ws/nanomonsv), [SAVANA](https://github.com/cortes-ciriano-lab/savana) 
 and [sniffles2](https://github.com/fritzsedlazeck/Sniffles) in mosaic mode using COLO829 cell line data against multi-platform 
 [Valle-Inclan et al. truthset](https://www.sciencedirect.com/science/article/pii/S2666979X22000726).  
-Because `truvari` was primarily designed for indel comparison, we compared somatic SVs by 
-matching individual breakpoints (defined by a pair of reference coordinates). Severus had the highest recall and precision on the HiFi dataset,
-and highest recall on the ONT dataset, with SAVANA having highest precision.
+We compared somatic SVs using [Minda](https://github.com/KolmogorovLab/minda) with 0.1 VAF threshold. Severus had the highest recall and precision on the HiFi dataset,
+and highest recall on the ONT dataset, with nanomonsv having highest precision.
 
-#### Pacbio HiFi
-
-|SV Caller  | TP | FP | FN | Precision | Recall   | F1 score |
-|-----------|----|----|----|-----------|----------|----------|
-| Severus   | 59 | 33 | 9  | **0.64**  | **0.87** | **0.74** |
-| nanomonsv | 52 | 55 | 16 | 0.49      | 0.76     | 0.59     |
-| sniffles2 | 46 | 252| 22 | 0.15      | 0.68     | 0.25     |
-| SAVANA    | 55 | 88 | 13 | 0.38      | 0.8      | 0.52     |
-
-#### Oxford Nanopore
-
-|SV Caller | TP  | FP  | FN | Precision | Recall | F1 score |
-|----------|-----|-----|----|-----------|--------|----------|
-| Severus  | 53  | 33  | 15 |  0.61     |**0.78**| 0.69     |
-| nanomonsv| 44  | 46  | 24 |  0.49     | 0.65   | 0.56     |
-| sniffles2| 35  | 263 | 33 |  0.12     | 0.51   | 0.19     |
-| SAVANA   | 51  | 18  | 17 | **0.74**  | 0.75   | **0.74** |
+|Technology|Caller|TP|FN|FP|Precision|Recall|F1|
+|----------|------|--|--|--|--------|-------|--|
+|PacBio|Severus|59|10|20|0.75|**0.86**|**0.80**|
+|PacBio|SAVANA|56|14|78|0.42|0.80|0.55|
+|PacBio|nanomonsv|51|17|15|**0.77**|0.75|0.76|
+|PacBio|Sniffles2|49|20|249|0.16|0.71|0.27|
+|-----|
+|ONT|Severus|54|14|24|0.69|**0.79**|0.74|
+|ONT|SAVANA|51|18|14|0.78|0.74|**0.76**|
+|ONT|nanomonsv|45|25|11|**0.80**|0.64|0.71|
+|ONT|Sniffles2|36|32|262|0.12|0.53|0.20|
+|-----|
+|Illumina|SvABA|48|20|10|0.83|0.71|0.76|
+|Illumina|GRIPSS|55|13|0|**1.00**|**0.81**|**0.89**|
+|Illumina|manta|46|22|7|0.87|0.68|0.76|
 
 ### Somatic Benchmarking results: Tumor/Normal Cell line pairs
 
-We compared the performance of the somatic SV callers using 4 tumor/normal cell line pairs. Since no ground truth
-SV calls are available, we created an ensemble set of SVs supported by 2+ long-read methods for each dataset.
+We compared the performance of the somatic SV callers using 5 tumor/normal cell line pairs. Since no ground truth
+SV calls are available, we created an ensemble set of SVs supported by 2+ technology and 4+ callers (out off 11) for each dataset.
 This assumes that singleton calls are false-positives, and calls supported by multiple tools are more reliable.
 Severus consistently had the highest recall and precision against the ensemble SV sets.
 
-#### H2009/BL2009
+#### HCC1395/HCC1395BL
 
-|SV Caller  | TP  | FP  | FN  | Precision | Recall | F1 score |
-|-----------|-----|-----|-----|-----------|--------|----------|
-| Severus   | 841 | 104 | 34  | **0.89**  |**0.96**| **0.92** |
-| nanomonsv | 758 | 226 | 117 | 0.77      | 0.87   | 0.82     |
-| sniffles2 | 542 | 717 | 333 | 0.43      | 0.62   | 0.51     |
-| SAVANA    | 711 | 329 | 164 | 0.68      | 0.81   | 0.74     |
+|Technology|Caller|TP|FN|FP|Precision|Recall|F1|
+|----------|------|--|--|--|--------|-------|--|
+|PacBio|PB_Severusv0.1.2|1184|105|261|0.82|**0.92**|**0.87**|
+|PacBio|PB_SAVANAv1.0.3|913|376|134|**0.87**|0.71|0.78|
+|PacBio|PB_nanomonsv-0.7.0|1025|264|225|0.82|0.80|0.81|
+|PacBio|PB_Sniffles2_2.0.7|840|449|430|0.66|0.65|0.66|
+|-----|
+|ONT|ONT_Severusv0.1.2|1139|150|230|**0.83**|**0.88**|**0.86**|
+|ONT|ONT_SAVANAv1.0.3|927|362|203|0.82|0.72|0.77|
+|ONT|ONT_nanomonsv-0.7.0|1012|277|220|0.82|0.79|0.80|
+|ONT|ONT_Sniffles2_2.0.7|886|403|490|0.64|0.69|0.66|
+|-----|
+|Illumina|ILL_svaba(v1.2.0)|838|451|192|0.81|0.65|0.72|
+|Illumina|ILL_GRIPSS|806|483|170|**0.83**|0.63|0.71|
+|Illumina|ILL_manta|884|405|248|0.78|**0.69**|**0.73**|
 
 #### H1437/BL1437
 
-|SV Caller  | TP  | FP | FN  | Precision | Recall | F1 score |
-|-----------|-----|----|-----|-----------|--------|----------|
-| Severus   | 200 | 72 | 13  |**0.74**   |**0.94**| **0.82** |
-| nanomonsv | 172 | 92 | 41  | 0.65      | 0.81   | 0.72     |
-| sniffles2 | 111 | 442| 102 | 0.20      | 0.52   | 0.29     |
-| SAVANA    | 199 | 79 | 14  | 0.72      | 0.93   | 0.81     |
+|Technology|Caller|TP|FN|FP|Precision|Recall|F1|
+|----------|------|--|--|--|--------|-------|--|
+|PacBio|PB_Severusv0.1.2|184|36|65|0.74|**0.84**|0.78|
+|PacBio|PB_SAVANAv1.0.3|170|50|39|**0.81**|0.77|**0.79**|
+|PacBio|PB_nanomonsv-0.7.0|161|59|42|0.79|0.73|0.76|
+|PacBio|PB_Sniffles2_2.0.7|112|108|175|0.39|0.51|0.44|
+|-----|
+|ONT|ONT_Severusv0.1.2|202|18|111|0.65|**0.92**|0.76|
+|ONT|ONT_SAVANAv1.0.3|192|28|89|**0.68**|0.87|**0.77**|
+|ONT|ONT_nanomonsv-0.7.0|172|48|92|0.65|0.78|0.71|
+|ONT|ONT_Sniffles2_2.0.7|128|92|425|0.23|0.58|0.33|
+|-----|
+|Illumina|ILL_svaba(v1.2.0)|181|39|1269|0.12|0.82|0.22|
+|Illumina|ILL_GRIPSS|173|47|224|0.44|0.79|0.56|
+|Illumina|ILL_manta|186|34|238|0.44|**0.85**|**0.58**|
+
+#### H2009/BL2009
+
+|Technology|Caller|TP|FN|FP|Precision|Recall|F1|
+|----------|------|--|--|--|--------|-------|--|
+|PacBio|PB_Severusv0.1.2|825|99|80|**0.91**|**0.89**|**0.90**|
+|PacBio|PB_SAVANAv1.0.3|598|326|78|0.88|0.65|0.75|
+|PacBio|PB_nanomonsv-0.7.0|790|134|83|0.90|0.85|0.88|
+|PacBio|PB_Sniffles2_2.0.7|687|237|231|0.75|0.74|0.75|
+|-----|
+|ONT|ONT_Severusv0.1.2|863|61|164|**0.84**|**0.93**|**0.88**|
+|ONT|ONT_SAVANAv1.0.3|748|176|297|0.72|0.81|0.76|
+|ONT|ONT_nanomonsv-0.7.0|809|115|167|0.83|0.88|0.85|
+|ONT|ONT_Sniffles2_2.0.7|679|245|581|0.54|0.73|0.62|
+|-----|
+|Illumina|ILL_svaba(v1.2.0)|278|646|2079|0.12|0.30|0.17|
+|Illumina|ILL_GRIPSS|291|633|688|0.30|0.31|0.31|
+|Illumina|ILL_manta|319|605|663|0.32|0.35|0.33|
 
 #### HCC1937/HCC1937BL
 
-|SV Caller  | TP  | FP  | FN  | Precision | Recall | F1 score |
-|-----------|-----|-----|-----|-----------|--------|----------|
-| Severus   | 597 | 169 | 47  | **0.78**  |**0.93**| **0.85** |
-| nanomonsv | 503 | 278 | 141 | 0.64      | 0.78   | 0.71     |
-| sniffles2 | 320 | 754 | 324 | 0.30      | 0.50   | 0.37     |
-| SAVANA    | 540 | 353 | 104 | 0.60      | 0.84   | 0.70     |
+|Technology|Caller|TP|FN|FP|Precision|Recall|F1|
+|----------|------|--|--|--|--------|-------|--|
+|PacBio|PB_Severusv0.1.2|566|134|93|0.86|**0.81**|**0.83**|
+|PacBio|PB_SAVANAv1.0.3|482|218|70|0.87|0.69|0.77|
+|PacBio|PB_nanomonsv-0.7.0|502|198|54|**0.90**|0.72|0.80|
+|PacBio|PB_Sniffles2_2.0.7|392|308|252|0.61|0.56|0.58|
+|-----|
+|ONT|ONT_Severusv0.1.2|626|74|220|**0.74**|**0.89**|**0.81**|
+|ONT|ONT_SAVANAv1.0.3|549|151|355|0.61|0.78|0.68|
+|ONT|ONT_nanomonsv-0.7.0|549|151|220|0.71|0.78|0.75|
+|ONT|ONT_Sniffles2_2.0.7|408|292|667|0.38|0.58|0.46|
+|-----|
+|Illumina|ILL_svaba(v1.2.0)|507|193|2625|0.16|0.72|0.26|
+|Illumina|ILL_GRIPSS|525|175|675|0.44|0.75|0.55|
+|Illumina|ILL_manta|533|167|416|**0.56**|**0.76**|**0.65**|
 
 #### HCC1954/HCC1954BL
 
-|SV Caller  | TP  | FP  | FN  | Precision | Recall | F1 score |
-|-----------|-----|-----|-----|-----------|--------|----------|
-| Severus   | 819 | 100 | 51  | **0.89**  |**0.94**| **0.92** |
-| nanomonsv | 703 | 167 | 167 | 0.81      | 0.81   | 0.81     |
-| sniffles2 | 245 | 566 | 625 | 0.30      | 0.28   | 0.29     |
-| SAVANA    | 802 | 392 | 68  | 0.67      | 0.92   | 0.78     |
+|Technology|Caller|TP|FN|FP|Precision|Recall|F1|
+|----------|------|--|--|--|--------|-------|--|
+|PacBio|PB_Severusv0.1.2|903|200|81|0.92|**0.82**|**0.87**|
+|PacBio|PB_SAVANAv1.0.3|878|225|73|0.92|0.80|0.85|
+|PacBio|PB_nanomonsv-0.7.0|720|383|31|**0.96**|0.65|0.78|
+|PacBio|PB_Sniffles2_2.0.7|239|864|220|0.52|0.22|0.31|
+|-----|
+|ONT|ONT_Severusv0.1.2|981|122|159|0.86|**0.89**|**0.87**
+|ONT|ONT_SAVANAv1.0.3|983|120|232|0.81|0.89|0.85|
+|ONT|ONT_nanomonsv-0.7.0|768|335|97|**0.89**|0.70|0.78|
+|ONT|ONT_Sniffles2_2.0.7|274|829|536|0.34|0.25|0.29|
+|-----|
+|Illumina|ILL_svaba(v1.2.0)|919|184|525|0.64|0.83|0.72|
+|Illumina|ILL_GRIPSS|1004|99|292|0.77|0.91|0.84|
+|Illumina|ILL_manta|1022|81|270|**0.79**|**0.93**|**0.85**|
 
 
 ## Output Files
 
-### VCF file
+#### VCF file
 
 For each target sample, Severus outputs a VCF file with somatic SV calls.
-If the input alignment is haplotagged, VCF will be phased. In addition,
+If the input alignment is haplotagged, haplotype will be reported as HP in INFO. In addition,
 Severus outputs a set of all SVs (somatic + germline) for each input sample.
 VCF contains additional information about SVs, such as the clustering of complex
 variants. Please see the detailed description [below](#additional-fields-in-the-vcf).
 
-### breakpoint_graph.gv
+#### breakpoint_graph.gv
 
-Severus also outputs a breakpoint graph in graphvis format that describes the derived structure
+Severus outputs a breakpoint graph in graphvis format that describes the derived structure
 of tumor haplotypes. Solid edges correspond to the fragments of the reference genome (L: length C: coverage)
 and dashed colored edges correspond to non-reference connections from reads (R: number of support reads). 
-See the detailed description of the graph format [below](#breakpoint-graphs). `breakpoints_clusters.csv` contains the
+See the detailed description of the graph format [below](#breakpoint-graphs). `breakpoints_clusters.tsv` contains the
 same breakpoint information in the text format.
 
-### breakpoint_double.csv
+#### html plots
 
-Detailed info about the deteted breakpoints for all samples in text format, intended for an advanced user.
+Severus also outputs subgraph as interactive plotly graph. See the detailed description [below](#breakpoint-graphs).
 
-```
-# To convert gv format to svg
-dot -Tsvg -O severus_out/breakpoint_graph.gv
-```
+#### breakpoint_double.csv
+
+Detailed info about the detected breakpoints for all samples in text format, intended for an advanced user.
+
+#### breakpoint_clusters_list.tsv
+
+A summary file for the complexSVs clusters. 
+
+#### breakpoint_clusters.tsv
+Detailed information of the junctions in involved in complex SVs.
 
 ## Overview of the Severus algorithm
 
 <p align="center">
-  <img src="docs/severus_workflow1.jpg" alt="Severus workflow"/>
+  <img src="docs/severus_flow.png" alt="Severus workflow" style="width:90%"/>
 </p>
 
 Somatic SVs in cancer are typically more complex compared to germline SVs. For example, breakage-fusion-bridge (BFB) amplifications 
@@ -278,12 +332,7 @@ As a result, the connected components of the constructed breakpoint graph natura
 more complex and potentially overlapping SVs - such as chromoplexy or breakage-fusion-bridge - we perform additional clustering specific to complex SV types.
 
 
-
 ## Preparing phased and haplotagged alignments
-
-<p align="left">
-  <img src="docs/phasing2.jpg" alt="Somatic Phasing"/ style="width:70%">
-</p>
 
 We recommend running Severus with phased and haplotagged tumor and normal alignments. Below is an example
 workflow that can be used to produce them, assuming that reads are already aligned using minimap2/pbmm2.
@@ -359,8 +408,28 @@ docker run -it \
 
 ```
 
-* 2. Haplotagging normal and tumor bams using phased vcf from step1. See for [whatshap](https://whatshap.readthedocs.io/en/latest/index.html)
+  + Using HiPhase for phasing (HiFi only) [see](https://github.com/PacificBiosciences/HiPhase)
+    
+    
+```
+# To install HiPhase
 
+    conda create -n hiphase -c bioconda hiphase
+    conda install hiphase
+
+# To run HiPhase with DV or Clair3 output
+    
+    hiphase --bam normal.bam\
+        --vcf hifi_vcf.vcf.gz\
+        --output-vcf hifi_hiphase.vcf.gz\
+        --reference ref.fa --threads 16 --ignore-read-groups
+    
+```
+
+* 2. Haplotagging normal and tumor bams using phased vcf from step1.
+
+  + Using [whatshap](https://whatshap.readthedocs.io/en/latest/index.html)
+    
 ```
 # To install WhatsHap using Conda
 
@@ -375,11 +444,24 @@ whatshap haplotag --reference ref.fa phased_vcf.vcf tumor.bam -o tumor.haplotagg
 
 ```
 
-## Generating VNTR annotation
+  + Using [longphase](https://github.com/twolinin/longphase)
+    
+```
+# To install longphase
 
-<p align="left">
-  <img src="docs/vntrs.png" alt="VNTR handling" style="width:70%">
-</p>
+ wget https://github.com/twolinin/longphase/releases/download/v1.6/longphase_linux-x64.tar.xz
+ tar -xJf longphase_linux-x64.tar.xz
+ 
+# To haplotag Normal and Tumor
+
+longphase haplotag -r ref.fa -s phased_vcf.vcf -b normal.bam -t 8 -o normal_haplotagged --tagSupplementary --qualityThreshold 10
+
+longphase haplotag -r ref.fa -s phased_vcf.vcf -b tumor.bam -t 8 -o tumor_haplotagged --tagSupplementary --qualityThreshold 10
+
+
+```
+
+## Generating VNTR annotation
 
 Alignments to highly repetitive regions are often ambigous and leads false positives. Severus clusters SVs inside a single VNTR region to uniform the SV representation for each read.
 
@@ -399,16 +481,24 @@ findTandemRepeats --merge <REF>.fa <REF>.trf.bed
 Severus outputs several unique fileds in INFO column.
 
 * `DETAILED_TYPE` : Severus can identify SV types other than standart SV types; INS, DEL, INV, BND. Additional types: 
-
+  + `reciprocal_inv`: a reciprocal inversion with matching (+,+) and (-,-) adjecencies.
+  + `dup_inv_segment`: an inversion with a duplicated segment
+  + `reciprocal_inv_del`: an inversion with a deletion
   + `foldback`: foldback inversion
-  + `BFB-like`: Two matching foldback inversions
-  + `Inter_chr_ins`: one chromosome piece inserted into another one
+  + `BFB_foldback`: Two matching foldback inversions
+  + `Reciprocal_tra`: Reciprocal translocation
+  + `inv_tra`: An inversion with a translocation
+  + `Templated_ins`: templated insertion cycle
   + `Intra_chr_ins`: one chromosome piece inserted into the same chromosome
-  + `Complete_inv`: a full inversion with matching (+,+) and (-,-) adjecencies. 
+  
 
-* `INSLEN`: if `--inbetween-ins` added to run severus, it outputs the length of unmapped sequence between two ends.
+* `INSLEN`: if `--between-junction-ins` added to run severus, it outputs the length of unmapped sequence between two ends.
 
-* `HVAF` : if phasing vcf is provided, severus calculates haplotype specific variant allele frequency (H0|H1|H2).
+* `INSSEQ`: if `--between-junction-ins` added to run severus, it outputs the unmapped sequence between two ends.
+
+* `INSIDE_VNTR`: True if the both breakpoints are inside the same VNTR.
+
+* `ALINGED_POS`: Position if the insertion sequence if there is a supporting read.
 
 * `PHASESET_ID` : if phasing vcf is provided, severus outputs phaseset ID from phasing vcf for phased SVs.
 
@@ -418,25 +508,40 @@ Severus outputs several unique fileds in INFO column.
 ## Breakpoint Graphs
 
 <p align="center">
-  <img src="docs/severus_first.png" alt="Severus overview"/>
+  <img src="docs/graph1.png" alt="Severus overview"/ style="width:90%"/>
 </p>
 
-The primary output of Severus is the breakpoint graph generated separately for somatic and germline SVs and the accompanying breakpoint_clusters.csv file. 
-After identifying breakpoint pairs (or a single breakpoint and insertion sequence in unmapped insertions), it adds the adjacency edges (dashed edges) between them. 
-The second step is to add genomic segments as it connects breakpoints to the nearest breakpoints based on genomic coordinates and direction: i) 
-both breakpoints are in the same phase block and haplotype, and (iii) the length is less than MAX_GENOMIC_DIST (50000 by default). 
-Genomic segments are labeled as chromosome:start-end C: Coverage, L: length of the genomic segment. 
+The primary output of Severus is the breakpoint graph generated separately for somatic and germline SVs.
+After identifying breakpoint pairs (or a single breakpoint and insertion sequence in unmapped insertions), it filters simple SVs, i.e., INDELS, reciprocal inversions, local duplications.
+For the remaining SVs, it adds the adjacency edges (dashed edges) between breakpoint pairs.
+The second step is to add genomic segments as it connects breakpoints to the nearest breakpoints based on genomic coordinates and direction: i), (ii) both breakpoints have similar coverage,
+and (ii) the length is less than MAX_GENOMIC_DIST (2Mb by default).
 
-Phase block switch points are defined as the midpoint between the last SNP of the phase block and the first SNP of the consecutive phase block. 
-Phase block switch points are depicted as gray points and connected to genomic edges through gray dashed edges. 
+Each subgraph with +2 SVs are selected as complex SV clusters and assigned a cluster ID which are also output in vcfs in CLUSTER_ID filed in the INFO column.
+
+The breakpoints in each cluster and the number of support reads are also summarized in breakpoint_cluster.csv. 
+
+Severus outputs two visualization options for breakpoint graphs; Graphviz graphs and interactive plotly graphs in plots folder along with summary files; breakpoint_clusters.csv and breakpoint_clusters_list.tsv.
+
+#### Graphviz graphs
+
+Genomic segments are labeled as chromosome:start-end C: Coverage, L: length of the genomic segment. 
  
 Adjacencies are represented with double edges and single edges supported by both haplotypes and single haplotypes (or unphased reads).
 In case of an adjacency supported by phased and unphased reads, the unphased reads are added to the haplotype with the highest number of support reads.
-The edges are labeled with the number of support reads (R: XX).
+The edges are labeled with the number of support reads (R: XX). To visualize graphviz graphs:
 
-Subgraph IDs shown at the top-left corner of each cluster are also output in vcfs in CLUSTER_ID filed in the INFO column.
+```
+dot breakpoint_graph.gv | gvpack -array_li1 -m 25 | neato -n2 -s -Tsvg > breakpoint_graph.svg
+```
+#### Plotly graphs
 
-The breakpoints in each cluster and the number of support reads are also summarized in breakpoint_cluster.csv. 
+Plotly graphs are generated as html files in plots folder. 
+
+Genomic segments are seperated by chromosome and ordered with their respective position in chromosome and represented by green segments. Each segment is labelled with the coverage of the segments (total coverage), length, and haplotype as Bp1 Haplotype|Bp2 Haplotype.
+
+Adjacencies are represented by solid edges and colored according to the direction of the junction i.e., HT(Head-to-Tail or '+-' or DEL-like), TH(Tail-to-Head or '-+' or DUP-like), HH/TT(Head-to-Head or Tail-to-Tail or INV-like) and interchromosomal (translocation like).
+Each adjacency is labelled with the supporting sample, number of supporting reads and haplotype.
 
 In the example above, there is a deletion in one of the haplotypes (chr19: 9040865- 9041235),
 and there is an insertion of a 73.3kb region in chr10 to chr19 in the other haplotype.

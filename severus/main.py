@@ -118,7 +118,6 @@ def main():
     parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
     parser.add_argument("--TIN-ratio", dest='control_vaf', metavar="float", type=float, default = CONTROL_VAF, help = 'Tumor in normal ratio[{CONTROL_VAF}]')
     parser.add_argument("--vaf-thr", dest='vaf_thr', metavar="float", type=float, default = VAF_THR, help = 'Tumor in normal ratio[{CONTROL_VAF}]')
-    parser.add_argument("--output-all", dest='output_all', action = "store_true", help = 'outputs FAIL SVs in addition to PASS SVs')
     parser.add_argument("--write-collapsed-dup", dest='write_segdup', action = "store_true", help = 'outputs a bed file with identified collapsed duplication regions')
     parser.add_argument("--no-ins-seq", dest='no_ins', action = "store_true", help = 'do not output insertion sequences to the vcf file')
     parser.add_argument("--output-LOH", dest='output_loh', action = "store_true", help = 'outputs a bed file with predicted LOH regions')

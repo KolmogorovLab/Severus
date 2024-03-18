@@ -157,11 +157,11 @@ def merge_short_seg(read):
             init_seg = seg
         elif seg.segment_length <= DEL_SEG_THR:
             init_seg.ref_end = init_seg.ref_end + seg.segment_length
-            if strand == -1:
-                init_seg.read_start = seg.read_start
-            else:
-                init_seg.read_end = seg.read_end
-            init_seg.segment_length = init_seg.read_end - init_seg.read_start
+            #if strand == -1:
+            #    init_seg.read_start = seg.read_start
+            #else:
+            #    init_seg.read_end = seg.read_end
+            #init_seg.segment_length = init_seg.read_end - init_seg.read_start
             seg_to_remove.append(seg)
 
     init = True
