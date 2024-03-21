@@ -664,7 +664,7 @@ def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, con
         logger.info("\tPreparing graph")
         graph, adj_clusters, db_to_cl = build_breakpoint_graph(genomic_segments, adj_segments, components_list, target_genomes, control_genomes)
         html_plot(graph, adj_clusters, db_to_cl, out_folder)
-        output_clusters_graphvis(graph, adj_clusters, out_breakpoint_graph)
+        #output_clusters_graphvis(graph, adj_clusters, out_breakpoint_graph)
         output_clusters_csv(db_to_cl, adj_clusters, out_clustered_breakpoints)
         
         output_clusters_info(adj_clusters, out_cluster_list)

@@ -81,8 +81,12 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag):
     hc = 0
     clp = cigar[-1] if read.is_reverse else cigar[0]
     align_start = clp[1] if clp[0] in CIGAR_CLIP else 0
+    
+    use_tag = False
+    if use_supplementary_tag or is_primary:
+        use_tag = True
 
-    if is_primary and read.has_tag('HP') or use_supplementary_tag:
+    if use_tag and read.has_tag('HP'):
         haplotype = read.get_tag('HP')
     else:
         haplotype = 0

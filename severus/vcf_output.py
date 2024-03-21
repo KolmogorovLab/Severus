@@ -54,8 +54,10 @@ class vcf_format(object):
             return f"STRANDS={self.strands[0]}{self.strands[1]};"
         
     def has_ins(self):
-        if self.ins_len:
+        if self.ins_len and self.ins_len_seq:
             return f"INSLEN={self.ins_len};INSSEQ={self.ins_len_seq};"
+        elif self.ins_len:
+            return f"INSLEN={self.ins_len};"
         else:
             return ""
     
@@ -83,6 +85,8 @@ class vcf_format(object):
         if self.sv_type == 'BND':
             if self.mate_id:
                 return f"MATE_ID={self.mate_id};"
+            else:
+                return ""
         elif self.sv_type == 'DEL' or self.sv_type == 'DUP':
             return  f"END={self.pos2};"
         else:

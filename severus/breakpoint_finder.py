@@ -536,8 +536,8 @@ def match_breakends(double_breaks):
                 db.bp_1.connections = conn
         for cl in bp2list:
             for db in cl[2]:
-                db.bp_2.connections = conn
-
+                db.bp_2.connections = conn    
+        
 def double_breaks_filter(double_breaks, min_reads, control_id, resolve_overlaps):
 
     PASS_2_FAIL_RAT = 0.5
@@ -730,7 +730,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
                 continue
             
             if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank:
-                cl = add_clipped_end(position, clipped_clusters_pos, clipped_clusters_seq, by_genome_id_pass,unique_reads_pass)
+                cl = add_clipped_end(ins_length, position, clipped_clusters_pos, clipped_clusters_seq, by_genome_id_pass,unique_reads_pass)
                 if cl:
                     clipped_to_remove.append(cl)
                 if not by_genome_id_pass.values() or not max(by_genome_id_pass.values()) >= min_reads:
@@ -908,16 +908,6 @@ def get_single_bp(single_bp, clipped_clusters, double_breaks, bp_min_support, co
                     filtered_sbp[-1].is_single = True
                     filtered_sbp[-1].vcf_qual = s_bp.qual
                     
-    clusters = defaultdict(list) 
-    for br in filtered_sbp:
-        clusters[br.to_string()].append(br)
-    sv_id = 'severus_sBND'
-    t = 0
-    for cl in clusters.values():
-        for db in cl:
-            db.vcf_id = sv_id + str(t)
-            t+=1
-                    
     return filtered_sbp
 
 def filter_single_bp(single_bps, cont_id, control_vaf, vaf_thr):
@@ -928,16 +918,26 @@ def filter_single_bp(single_bps, cont_id, control_vaf, vaf_thr):
     for sbp in single_bps:
         if sbp.vaf_pass == 'PASS' and sbp.vcf_qual > QUAL_THR and sbp.is_pass == 'PASS':
             sbp_list.append(sbp)
+                        
+    clusters = defaultdict(list) 
+    for br in sbp_list:
+        clusters[br.to_string()].append(br)
+    sv_id = 'severus_sBND'
+    t = 0
+    for cl in clusters.values():
+        for db in cl:
+            db.vcf_id = sv_id + str(t)
+            t+=1
     return sbp_list
 
-def add_clipped_end(position, clipped_clusters_pos, clipped_clusters_seq, by_genome_id_pass, unique_reads_pass):
+def add_clipped_end(ins_length,position, clipped_clusters_pos, clipped_clusters_seq, by_genome_id_pass, unique_reads_pass):
     
     ind = bisect.bisect_left(clipped_clusters_pos, position)
     cl = []
-    MIN_SV_DIFF = 50
-    if ind < len(clipped_clusters_pos)-1 and abs(clipped_clusters_pos[ind] - position) < MIN_SV_DIFF:
+    sv_diff = min(250, ins_length)
+    if ind < len(clipped_clusters_pos)-1 and abs(clipped_clusters_pos[ind] - position) < sv_diff:
         cl = clipped_clusters_seq[ind]
-    elif ind > 0 and abs(clipped_clusters_pos[ind - 1] - position) < MIN_SV_DIFF:
+    elif ind > 0 and abs(clipped_clusters_pos[ind - 1] - position) < sv_diff:
         cl = clipped_clusters_seq[ind - 1]
         
     if cl:
@@ -1452,16 +1452,12 @@ def get_genomic_segments(double_breaks, coverage_histograms, hb_vcf, key_type, r
         gen_id = sorted(list(set([db.genome_id for db in cl])))
         gen_id = ','.join(gen_id)
         by_genome[gen_id] += cl
-    
     db_segments = defaultdict(list)
     ref_adj = defaultdict(list)
     for d_breaks in by_genome.values():
         calc_gen_segments(d_breaks, coverage_histograms,ref_lengths, min_ref_flank, max_genomic_length, db_segments, ref_adj)
-    
     genomic_segments = get_segments_coverage(db_segments, coverage_histograms, max_genomic_length)
-    
     adj_segments = get_ref_adj(genomic_segments, ref_adj)
-        
     return (genomic_segments, adj_segments)
 
 def calc_gen_segments(double_breaks,coverage_histograms,ref_lengths, min_ref_flank, max_genomic_length, db_segments, ref_adj):
@@ -2308,30 +2304,32 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
     clipped_reads = get_clipped_reads(segments_by_read)
     clipped_clusters = cluster_clipped_ends(clipped_reads, args.bp_cluster_size,args.min_ref_flank, ref_lengths)
     
-    logger.info('Clustering unmapped insertions')
-    ins_clusters = extract_insertions(ins_list_all, clipped_clusters, ref_lengths, args)
+    
     
     logger.info('Starting breakpoint detection')
     double_breaks, single_bps = get_breakpoints(split_reads, ref_lengths, args)
+    
+    logger.info('Clustering unmapped insertions')
+    ins_clusters = extract_insertions(ins_list_all, clipped_clusters, ref_lengths, args)
+
     match_long_ins(ins_clusters, double_breaks, args.min_sv_size, args.tra_to_ins)
     
     if args.single_bp:
         logger.info('Starting single breakpoint detection')
-        single_bps = get_single_bp(single_bps, clipped_clusters, double_breaks, args.bp_min_support, cont_id,args.min_ref_flank, ref_lengths)
+        single_bps = get_single_bp(single_bps, clipped_clusters, double_breaks+ins_clusters, args.bp_min_support, cont_id,args.min_ref_flank, ref_lengths)
     else:
         single_bps = []
     
     logger.info('Starting compute_bp_coverage')
     get_coverage_parallel(bam_files, genome_ids, thread_pool, args.min_mapping_quality, double_breaks + ins_clusters + single_bps)
-    #get_coverage_parallel(bam_files, genome_ids, thread_pool, args.min_mapping_quality, ins_clusters)
-    
-    if args.single_bp and single_bps:
-        get_coverage_parallel(bam_files, genome_ids, thread_pool, args.min_mapping_quality, single_bps)
-        single_bps = filter_single_bp(single_bps, cont_id, args.control_vaf, args.vaf_thr)
+
         
     logger.info('Filtering breakpoints')
     double_breaks_filter(double_breaks, args.bp_min_support, cont_id, args.resolve_overlaps)
     double_breaks.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position, b.direction_1))
+    
+    if args.single_bp and single_bps:
+        single_bps = filter_single_bp(single_bps, cont_id, args.control_vaf, args.vaf_thr)
     
     insertion_filter(ins_clusters, args.bp_min_support, cont_id)
     ins_clusters.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position))

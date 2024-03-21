@@ -6,3 +6,4 @@ matplotlib
 biopython
 numpy
 pysam
+plotly
