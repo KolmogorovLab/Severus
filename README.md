@@ -7,6 +7,8 @@
 Severus is a somatic structural variation (SV) caller for long reads (both PacBio and ONT). It is designed for matching tumor/normal analysis,
 supports multiple tumor samples, and produces accurate and complete somatic and germline calls. Severus takes
 advantage of long-read phasing and uses the breakpoint graph framework to model complex chromosomal rearrangements.
+
+If you use Severus, please cite https://www.medrxiv.org/content/10.1101/2024.03.22.24304756v1
 </p>
 
 <br/>
@@ -122,6 +124,8 @@ along with complexSV clusters and additional information about SVs. See [below][
 ```
 
 ## Benchmarking Severus and other SV callers
+
+For the details of benchmarking and complete results, please check https://www.medrxiv.org/content/10.1101/2024.03.22.24304756v1
 
 ### Germline benchmarking results using HG002
 
