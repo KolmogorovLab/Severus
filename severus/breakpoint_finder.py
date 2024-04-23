@@ -1015,18 +1015,22 @@ def tra_to_ins(ins_list_pos, ins_list, bp1, bp2, dir_bp, dbs, ins_clusters, doub
    
     INS_WIN = 2000
     total_supp_thr = 2
-    MIN_DIFF = 50
+    MAX_DEPTH = 1000
+    #MIN_DIFF = 50
     
     ins_1 = ins_list_pos[bp1.ref_id]
     strt = bisect.bisect_left(ins_1, bp1.position - INS_WIN)
     end = bisect.bisect_left(ins_1, bp1.position + INS_WIN)
     flag = False
-    seglen = 0
-    med_seg_len = int( np.quantile([cn.seg_len[slen] for cn in bp2.connections if cn in bp1.connections],0.90))
+    #seglen = 0
+    if len(bp1.connections) > MAX_DEPTH:
+        med_seg_len = int( np.quantile([cn.seg_len[slen] for cn in bp1.connections[:MAX_DEPTH]],0.90))
+    else:
+        med_seg_len = int( np.quantile([cn.seg_len[slen] for cn in bp2.connections if cn in bp1.connections],0.90))
     
-    seg_len = sorted([cn.seg_len[slen] for cn in bp2.connections if cn in bp1.connections])
-    if seg_len[-1] - seg_len[0] < MIN_DIFF:
-        seglen = med_seg_len
+    #seg_len = sorted([cn.seg_len[slen] for cn in bp2.connections if cn in bp1.connections])
+    #if seg_len[-1] - seg_len[0] < MIN_DIFF:
+    #    seglen = med_seg_len
     
     ins_db = ins_list[bp1.ref_id]
     clusters = defaultdict(list)
@@ -1200,7 +1204,7 @@ def calc_vaf(db_list):
         for db in db1:
             if db.is_pass == 'FAIL_MERGED_HP':
                 continue
-            DR1 = int(np.median([db.bp_1.spanning_reads[(db.genome_id, db.haplotype_1)], db.bp_2.spanning_reads[(db.genome_id, db.haplotype_2)]])) if not db.bp_2.is_insertion else db.bp_1.spanning_reads[(db.genome_id, db.haplotype_1)]
+            DR1 = int(np.median([db.bp_1.spanning_reads[db.genome_id][db.haplotype_1], db.bp_2.spanning_reads[db.genome_id][db.haplotype_2]])) if not db.bp_2.is_insertion else db.bp_1.spanning_reads[db.genome_id][db.haplotype_1]
             DV1 = db.supp
             db.hvaf =  DV1 / (DV1 + DR1) if DV1 > 0 else 0
             DV += DV1
@@ -1431,7 +1435,6 @@ def get_ref_adj(genomic_segments, ref_adj):
                 adj_segments.append((gs[0],g[0]))
     return adj_segments
 
-    
 
 def get_genomic_segments(double_breaks, coverage_histograms, hb_vcf, key_type, ref_lengths, min_ref_flank, max_genomic_length, min_sv_size):
     hb_points = []
@@ -1799,9 +1802,9 @@ def match_haplotypes(double_breaks):
                     for db in dbs[1:]:
                         db.is_pass = 'FAIL_MERGED_HP'
                         
-def cluster_db(double_breaks2, coverage_histograms, min_sv_size):
+def cluster_db(double_breaks, coverage_histograms, min_sv_size):
     clusters = defaultdict(list)
-    for br in double_breaks2:
+    for br in double_breaks:
         br.subgraph_id = []
         if br.bp_1.is_insertion or not br.is_pass == 'PASS':
             continue
@@ -2108,21 +2111,17 @@ def conn_duplications(clusters, coverage_histograms):
         is_dup = False
         if not db.bp_1.ref_id == db.bp_2.ref_id or db.bp_2.is_insertion:
             continue
-        
         if db.is_dup:
             db.sv_type = 'tandem_duplication'
             continue
-        
         if db.direction_1 == -1 and db.direction_2 == 1:
             pos1 = db.bp_1.position // COV_WINDOW
             pos2 = db.bp_2.position // COV_WINDOW
-            
             max_pos = len(coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)])
             cov1 = coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][max(pos1-5,0):pos1]
             cov1 += coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)][pos2:min(pos2+5,max_pos)]
             cov1 = int(np.median(cov1))
-            cov3 = int(np.median(coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos1:pos2+1]))
-            
+            cov3 = int(np.median(coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos1:min(pos2+1, max_pos)]))
             if cov3 > cov1 + db.supp * DUP_COV_THR:
                 is_dup = True
             svtype = 'tandem_duplication' if is_dup else 'Templated_ins'
@@ -2299,12 +2298,8 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
     
     logger.info('Extracting clipped reads')
 
-    clipped_clusters = []
-    extract_clipped_end(segments_by_read)
     clipped_reads = get_clipped_reads(segments_by_read)
     clipped_clusters = cluster_clipped_ends(clipped_reads, args.bp_cluster_size,args.min_ref_flank, ref_lengths)
-    
-    
     
     logger.info('Starting breakpoint detection')
     double_breaks, single_bps = get_breakpoints(split_reads, ref_lengths, args)

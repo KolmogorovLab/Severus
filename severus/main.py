@@ -18,7 +18,7 @@ from collections import defaultdict
 import logging
 
 from severus.build_graph import output_graphs
-from severus.bam_processing import get_all_reads_parallel, update_coverage_hist, get_read_statistics
+from severus.bam_processing import get_all_reads_parallel, init_hist, init_mm_hist, update_coverage_hist
 from severus.breakpoint_finder import call_breakpoints
 from severus.resolve_vntr import update_segments_by_read
 from severus.__version__ import __version__
@@ -180,25 +180,28 @@ def main():
     args.outpath_readqual = os.path.join(args.out_dir, "read_qual.txt")
     
     segments_by_read = []
-    genome_ids=[]
+    genome_ids = [os.path.basename(bam_file) for bam_file in all_bams]
     bam_files = defaultdict(list)
+    args.min_aligned_length = MIN_ALIGNED_LENGTH
+    coverage_histograms = init_hist(genome_ids, ref_lengths)
+    mismatch_histograms = init_mm_hist(ref_lengths)
     n90 = [MIN_ALIGNED_LENGTH]
+    bg_mm = []
     for bam_file in all_bams:
         genome_id = os.path.basename(bam_file)
-        genome_ids.append(genome_id)
         bam_files[genome_id] = bam_file
         logger.info(f"Parsing reads from {genome_id}")
         segments_by_read_bam = get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
-                                                      args.min_mapping_quality, args.sv_size,args.use_supplementary_tag)
-        n90.append(get_read_statistics(segments_by_read_bam))
+                                                      coverage_histograms, mismatch_histograms, n90, bg_mm,args)
         segments_by_read += segments_by_read_bam
-    
+
     args.min_aligned_length = min(n90)
     logger.info('Computing read quality') 
-    update_segments_by_read(segments_by_read, ref_lengths, args)
+    update_segments_by_read(segments_by_read, mismatch_histograms, bg_mm, ref_lengths, args)
     
     logger.info('Computing coverage histogram')
-    coverage_histograms = update_coverage_hist(genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes, args.write_log_out)
+    update_coverage_hist(coverage_histograms,genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes, args.write_log_out)
+
     double_breaks = call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_files, genome_ids, control_genomes, thread_pool, args)
     
     output_graphs(double_breaks, coverage_histograms, thread_pool, target_genomes, control_genomes, ref_lengths, args)

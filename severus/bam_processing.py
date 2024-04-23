@@ -8,10 +8,10 @@ logger = logging.getLogger()
 
 class ReadSegment(object):
     __slots__ = ("align_start", "read_start", "read_end", "ref_start", "ref_end","ref_start_ori", "ref_end_ori", "read_id", "ref_id",
-                 "strand", "read_length",'segment_length', "haplotype", "mapq", "genome_id",
-                 'mismatch_rate', 'is_pass', "is_insertion", "is_clipped", 'is_end', 'bg_mm_rate', 'error_rate', 'ins_seq', 'sequence', 'is_primary')
+                 "strand", "read_length",'align_len','segment_length', "haplotype", "mapq", "genome_id",
+                 'mismatch_rate', 'is_pass', "is_insertion", "is_clipped", 'error_rate', 'ins_seq', 'is_primary', 'ins_pos')
     def __init__(self, align_start, read_start, read_end, ref_start, ref_end,ref_start_ori, ref_end_ori, read_id, ref_id,
-                 strand, read_length,segment_length, haplotype, mapq, genome_id,
+                 strand, read_length,align_len,segment_length, haplotype, mapq, genome_id,
                  mismatch_rate, is_insertion, error_rate, is_primary):
         self.align_start = align_start
         self.read_start = read_start
@@ -24,6 +24,7 @@ class ReadSegment(object):
         self.ref_id = ref_id
         self.strand = strand
         self.read_length = read_length
+        self.align_len = align_len
         self.segment_length = segment_length
         self.haplotype = haplotype
         self.mapq = mapq
@@ -32,12 +33,10 @@ class ReadSegment(object):
         self.is_pass = ''
         self.is_insertion = is_insertion
         self.is_clipped = False
-        self.is_end = False
-        self.bg_mm_rate = 1
         self.error_rate = error_rate
         self.ins_seq = None
-        self.sequence = None
         self.is_primary = is_primary
+        self.ins_pos = None
     def __str__(self):
         return "".join(["read_start=", str(self.read_start), " read_end=", str(self.read_end), " ref_start=", str(self.ref_start),
                          " ref_end=", str(self.ref_end), " read_id=", str(self.read_id), " ref_id=", str(self.ref_id), " strand=", str(self.strand),
@@ -59,6 +58,7 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag):
     read_aligned = 0
     read_length = 0
     ref_aligned = 0
+    MIN_CLIPPED_LENGTH = 500
 
     ref_start = read.reference_start
     read_segments =[]
@@ -70,12 +70,12 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag):
 
     num_of_mismatch = 0
     nm = read.get_tag('NM')
-    indel = sum([b for a, b in cigar if a in [CIGAR_INS, CIGAR_DEL]])
-    num_of_mismatch = nm - indel
+    indel = [b for a, b in cigar if a in [CIGAR_INS, CIGAR_DEL]]
+    num_of_mismatch = nm - sum(indel)
     total_segment_length = sum([b for a, b in cigar if a not in CIGAR_CLIP + [CIGAR_DEL]])
     mm_rate = num_of_mismatch / total_segment_length
     error_rate = nm / total_segment_length
-    read_length = np.sum([k[1] for k in cigar if k[0] != CIGAR_DEL])
+    read_length = sum([k[1] for k in cigar if k[0] != CIGAR_DEL])
     strand = -1 if read.is_reverse else 1
     sequence = read.query_sequence
     hc = 0
@@ -90,6 +90,23 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag):
         haplotype = read.get_tag('HP')
     else:
         haplotype = 0
+    
+    read_inf = []
+    
+    if (not indel or max(indel) < sv_size) and is_primary and not read.has_tag('SA'):
+        read_inf = [(read.reference_name, read.reference_start, read.reference_end,read_length,total_segment_length, haplotype,mm_rate, error_rate, read.mapping_quality)]
+        if cigar[0][0] in CIGAR_CLIP and cigar[0][1] > MIN_CLIPPED_LENGTH:
+            pos = read.reference_start if strand == 1 else read.reference_end
+            read_segments.append(ReadSegment(0, 0, 0, 0, pos, 0, pos, read.query_name,
+                                        read.reference_name, strand, read_length, total_segment_length, cigar[0][1], haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, None))
+            read_segments[-1].is_clipped = True
+        if cigar[-1][0] in CIGAR_CLIP and cigar[-1][1] > MIN_CLIPPED_LENGTH:
+            pos = read.reference_start if strand == -1 else read.reference_end
+            read_segments.append(ReadSegment(0, 0, 0, 0, pos, 0, pos, read.query_name,
+                                        read.reference_name, strand, read_length, total_segment_length, cigar[0][1], haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, None))
+            read_segments[-1].is_clipped = True
+            
+        return [read_segments, read_inf]
 
     for token in cigar:
         op = token[0]
@@ -113,7 +130,7 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag):
                 else:
                     del_start, del_end = read_start , read_end
                 read_segments.append(ReadSegment(align_start, del_start, del_end, ref_start, ref_end, ref_start, ref_end, read.query_name,
-                                                 read.reference_name, strand, read_length,read_aligned,
+                                                 read.reference_name, strand, read_length,total_segment_length,read_aligned,
                                                  haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, is_primary))
                 read_start = read_end+1
                 ref_start = ref_end+op_len+1
@@ -129,20 +146,40 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag):
                 ins_pos= ref_start + ref_aligned
                 ins_end = read_start + read_aligned
                 read_segments.append(ReadSegment(align_start,ins_start, ins_end, ins_pos, ins_pos, ins_pos, ins_pos, read.query_name,
-                                                 read.reference_name, strand, read_length,op_len, haplotype,
+                                                 read.reference_name, strand, read_length,total_segment_length,op_len, haplotype,
                                                  read.mapping_quality, genome_id, mm_rate, True, error_rate, None))
                 ins_seq = sequence[ins_start - hc: ins_end - hc]
                 read_segments[-1].ins_seq = ins_seq
+                read_segments[-1].ins_pos = (read.reference_start, read.reference_end)
+                
     if ref_aligned != 0:
         ref_end = ref_start + ref_aligned
         read_end = read_start + read_aligned
         if read.is_reverse:
             read_start, read_end = read_length - read_end, read_length - read_start
         read_segments.append(ReadSegment(align_start, read_start, read_end, ref_start, ref_end, ref_start, ref_end, read.query_name,
-                                         read.reference_name, strand, read_length,read_aligned, haplotype,
+                                         read.reference_name, strand, read_length,total_segment_length,read_aligned, haplotype,
                                          read.mapping_quality, genome_id, mm_rate, False, error_rate, is_primary))
     merge_short_seg(read_segments)
-    return read_segments
+    
+        
+    if is_primary and not read.has_tag('SA'):
+        split = [seg for seg in read_segments if not seg.is_insertion]
+        if len(split) == 1:
+            read_segments = [seg for seg in read_segments if seg.is_insertion]
+            read_inf = [(read.reference_name, read.reference_start, read.reference_end,read_length,total_segment_length, haplotype,mm_rate, error_rate, read.mapping_quality)]
+            if cigar[0][0] in CIGAR_CLIP and cigar[0][1] > MIN_CLIPPED_LENGTH:
+                pos = read.reference_start if strand == 1 else read.reference_end
+                read_segments.append(ReadSegment(0, 0, 0, 0, pos, 0, pos, read.query_name,
+                                            read.reference_name, strand, read_length, total_segment_length, cigar[0][1], haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, None))
+                read_segments[-1].is_clipped = True
+            if cigar[-1][0] in CIGAR_CLIP and cigar[-1][1] > MIN_CLIPPED_LENGTH:
+                pos = read.reference_start if strand == -1 else read.reference_end
+                read_segments.append(ReadSegment(0, 0, 0, 0, pos, 0, pos, read.query_name,
+                                            read.reference_name, strand, read_length, total_segment_length, cigar[0][1], haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, None))
+                read_segments[-1].is_clipped = True
+            
+    return [read_segments, read_inf]
 
 def merge_short_seg(read):
     seg_to_remove = []
@@ -197,7 +234,7 @@ def merge_short_seg(read):
 
 
 def extract_clipped_end(segments_by_read):
-    MAX_CLIPPED_LENGTH = 500
+    MIN_CLIPPED_LENGTH = 500
 
     for read in segments_by_read:
         read2 = [seg for seg  in read if not seg.is_insertion and seg.is_pass == 'PASS']
@@ -206,15 +243,13 @@ def extract_clipped_end(segments_by_read):
         read2.sort(key=lambda s: s.read_start)
         s1 = read2[0]
         s2 = read2[-1]
-        s1.is_end = True
-        s2.is_end = True
-        if s1.read_start > MAX_CLIPPED_LENGTH:
+        if s1.read_start > MIN_CLIPPED_LENGTH:
             pos = s1.ref_start if s1.strand == 1 else s1.ref_end
             read.append(ReadSegment(0, 0, s1.read_start, pos, pos, pos, pos, s1.read_id,
                                     s1.ref_id, 1, s1.read_length, s1.segment_length, s1.haplotype, s1.mapq, s1.genome_id, s1.mismatch_rate, False, s1.error_rate, None))
             read[-1].is_clipped = True
         end_clip_length = s2.read_length - s2.read_end
-        if end_clip_length > MAX_CLIPPED_LENGTH:
+        if end_clip_length > MIN_CLIPPED_LENGTH:
             pos = s2.ref_end if s2.strand == 1 else s2.ref_start
             read.append(ReadSegment(s2.read_end, s2.read_end, s2.read_length, pos, pos, pos, pos, s2.read_id,
                                     s2.ref_id, -1, s2.read_length, s2.segment_length, s2.haplotype, s2.mapq, s2.genome_id, s2.mismatch_rate, False, s2.error_rate, None))
@@ -273,19 +308,23 @@ def get_all_reads(bam_file, region, genome_id,sv_size,use_supplementary_tag):
     and infers the split reads from SA alignment tag
     """
     alignments = []
+    read_info = []
     ref_id, region_start, region_end = region
     aln_file = pysam.AlignmentFile(bam_file, "rb")
     for aln in aln_file.fetch(ref_id, region_start, region_end,  multiple_iterators=True):
         if not aln.is_secondary and not aln.is_unmapped:
-            new_segment = get_segment(aln, genome_id, sv_size,use_supplementary_tag)
-            for new_seg in new_segment:
-                alignments.append(new_seg)
-    return alignments
+            new_segment, read_inf = get_segment(aln, genome_id, sv_size,use_supplementary_tag)
+            alignments += new_segment
+            read_info += read_inf
+    return [alignments, read_info]
 
 
 def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
-                           min_mapq, sv_size,use_supplementary_tag):
+                           coverage_histograms, mismatch_histograms, n90ls, bg_mmls, args):
     CHUNK_SIZE = 10000000
+    sv_size = args.sv_size
+    use_supplementary_tag = args.use_supplementary_tag
+    
     all_reference_ids = [r for r in pysam.AlignmentFile(bam_file, "rb").references]
     fetch_list = []
     for ctg in all_reference_ids:
@@ -302,22 +341,47 @@ def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
     parsing_results = thread_pool.starmap(get_all_reads, tasks)
     segments_by_read = defaultdict(list)
     for alignments in parsing_results:
-        for aln in alignments:
-            segments_by_read[aln.read_id].append(aln)
-            
+        for aln in alignments[0]:
+            if aln:
+                segments_by_read[aln.read_id].append(aln)
+    n90, bg_mm = calc_read_qual(parsing_results, segments_by_read, mismatch_histograms, coverage_histograms, genome_id, ref_lengths, args)
+    n90ls.append(n90)
+    bg_mmls.append(bg_mm)
+    
     return list(segments_by_read.values())
 
-COV_WINDOW = 500
-def update_coverage_hist(genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes, loh_out):
-    
-    NUM_HAPLOTYPES = 3
-    coverage_histograms = {}
 
+def calc_read_qual(parsing_results,segments_by_read, mismatch_histograms, coverage_histograms, genome_id, ref_lengths, args):
+    bg_mm = background_mm_rat(parsing_results)
+    update_mm_hist(parsing_results, mismatch_histograms, ref_lengths)
+    n90 = get_read_statistics(parsing_results, segments_by_read)
+    n90 = min(n90, args.min_aligned_length)
+    update_cov_hist(parsing_results, coverage_histograms, genome_id, ref_lengths, bg_mm, n90, args)
+    return n90, bg_mm
+
+COV_WINDOW = 500
+NUM_HAPLOTYPES = 3
+
+def init_hist(genome_ids, ref_lengths):
+    coverage_histograms = {}
     for genome_id in genome_ids:
         for chr_id, chr_len in ref_lengths.items():
             for hp in range(0, NUM_HAPLOTYPES):
                 coverage_histograms[(genome_id, hp, chr_id)] = [0 for _ in range(chr_len // COV_WINDOW + 1)]
+    return coverage_histograms
 
+
+def update_cov_hist(parsing_results, coverage_histograms, genome_id, ref_lengths, bg_mm, n90, args):
+    for alignments in parsing_results:
+        for aln in alignments[1]:
+            if aln[8] > args.min_mapping_quality and aln[6] < bg_mm and aln[3] > n90 and abs(aln[3] - aln[4]) < aln[4]:
+                hist_start = aln[1] // COV_WINDOW
+                hist_end = min([aln[2], ref_lengths[aln[0]]])// COV_WINDOW
+                for i in range(hist_start, hist_end + 1):
+                    coverage_histograms[(genome_id, aln[5], aln[0])][i] += 1    
+
+def update_coverage_hist(coverage_histograms,genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes, loh_out):
+    
     for read in segments_by_read:
         for seg in read:
             if seg.is_pass == 'PASS' and not seg.is_insertion and not seg.is_clipped:
@@ -338,28 +402,26 @@ def update_coverage_hist(genome_ids, ref_lengths, segments_by_read, control_geno
         
         if loh_out:
             extract_LOH(coverage_histograms, ref_lengths, control_genomes, target_genomes, loh_out)
+        
 
-    return coverage_histograms
-
-
-def add_read_qual(segments_by_read, ref_lengths, bg_mm,args):
+def add_read_qual(segments_by_read, ref_lengths, bg_mm, mismatch_histograms, args):
     min_mapq = args.min_mapping_quality
-    max_error_rate = args.max_read_error
-    write_segdups_out = args.write_segdups_out
     min_aligned_length = args.min_aligned_length
+    write_segdups_out = args.write_segdups_out
+    
+    mm_hist_high = background_mm_hist(segments_by_read, mismatch_histograms, bg_mm, ref_lengths)
 
-    mm_hist_high = background_mm_hist(segments_by_read, bg_mm, ref_lengths) ###
     if write_segdups_out:
         extract_segdups(mm_hist_high, write_segdups_out) ###
-    for i, alignments in enumerate(segments_by_read):
+    for alignments in segments_by_read:
         if not alignments:
             continue
-        segments_by_read[i] = label_reads(alignments, min_mapq, bg_mm, mm_hist_high, max_error_rate, min_aligned_length)
+        label_reads(alignments, min_mapq, bg_mm, mm_hist_high, min_aligned_length)
 
     write_readqual(segments_by_read, args.outpath_readqual)
 
 
-def label_reads(read, min_mapq, bg_mm, mm_hist_high, max_error_rate, min_aligned_length):
+def label_reads(read, min_mapq, bg_mm, mm_hist_high, min_aligned_length):
     MIN_ALIGNED_RATE = 0.5
 
     for seg in read:
@@ -368,7 +430,8 @@ def label_reads(read, min_mapq, bg_mm, mm_hist_high, max_error_rate, min_aligned
         if high_mm_check(mm_hist_high, bg_mm, seg):
             seg.is_pass += '_HIGH_MM_rate'
 
-    aligned_len = sum([seg.read_end - seg.read_start for seg in read if not seg.is_clipped])
+    seg_ins = [1 for seg in read if not seg.is_insertion and not seg.is_clipped]
+    aligned_len = sum([seg.read_end - seg.read_start for seg in read if not seg.is_clipped]) if seg_ins else read[0].align_len
     aligned_ratio = aligned_len/read[0].read_length
 
     if aligned_ratio < MIN_ALIGNED_RATE:
@@ -378,7 +441,6 @@ def label_reads(read, min_mapq, bg_mm, mm_hist_high, max_error_rate, min_aligned
     for seg in read:
         if not seg.is_pass:
             seg.is_pass = 'PASS'
-    return read
 
 def write_readqual(segments_by_read, outpath):
     read_qual = defaultdict(int)
@@ -398,11 +460,14 @@ def write_readqual(segments_by_read, outpath):
 
 COV_WINDOW_MM  = 500
 
-def background_mm_rat(segments_by_read):
-    COV_WINDOW_BG_MM = 1000
+def background_mm_rat(parsing_results):
+    COV_WINDOW_BG_MM = 2000
     mm_list = []
-    for read in segments_by_read:
-        for seg in read:
+    for alignments in parsing_results:
+        for aln in alignments[1]:
+            n_mm = (aln[3] // COV_WINDOW_BG_MM) +1
+            mm_list += [aln[6]] * n_mm
+        for seg in alignments[0]:
             if seg.is_clipped or seg.is_insertion:
                 continue
             n_mm = ((seg.ref_end - seg.ref_start) // COV_WINDOW_BG_MM) +1
@@ -410,18 +475,30 @@ def background_mm_rat(segments_by_read):
     bg_mm = np.quantile(mm_list, 0.95)
     return bg_mm
 
-def background_mm_hist(segments_by_read, bg_mm, ref_lengths):
+def init_mm_hist(ref_lengths):
+    mismatch_histograms = defaultdict(list)
+    for chr_id, chr_len in ref_lengths.items():
+        mismatch_histograms[chr_id] = [[] for _ in range(chr_len // COV_WINDOW_MM + 2)]
+    return mismatch_histograms
+
+def update_mm_hist(parsing_results, mismatch_histograms, ref_lengths):
+    for alignments in parsing_results:
+        for aln in alignments[1]:
+            hist_start = aln[1] // COV_WINDOW_MM
+            hist_end = min([aln[2], ref_lengths[aln[0]]])// COV_WINDOW_MM
+            for i in range(hist_start, hist_end + 1):
+                mismatch_histograms[aln[0]][i].append(aln[6])
+    
+def background_mm_hist(segments_by_read, mismatch_histograms, bg_mm, ref_lengths):
     MED_PER = 0.1
     MIN_READ = 5
     MAX_COV = 15
-
-    mismatch_histograms = defaultdict(list)
+    
     mm_hist_high = {}
 
     for chr_id, chr_len in ref_lengths.items():
-        mismatch_histograms[chr_id] = [[] for _ in range(chr_len // COV_WINDOW_MM + 2)]
         mm_hist_high[chr_id] = [0 for _ in range(chr_len // COV_WINDOW_MM + 2)]
-
+    
     for read in segments_by_read:
         for seg in read:
             if seg.is_clipped or seg.is_insertion:
@@ -430,7 +507,7 @@ def background_mm_hist(segments_by_read, bg_mm, ref_lengths):
             hist_end = min([seg.ref_end_ori, ref_lengths[seg.ref_id]])// COV_WINDOW_MM
             for i in range(hist_start, hist_end + 1):
                 mismatch_histograms[seg.ref_id][i].append(seg.mismatch_rate)
-
+                
     for chr_id, mm_rate in mismatch_histograms.items():
         for i, mm_list in enumerate(mm_rate):
             if not mm_list or len(mm_list) < MIN_READ:
@@ -520,29 +597,31 @@ def _calc_nx(lengths, norm_len, rate):
     return l50, n50
 
 
-def get_read_statistics(read_alignments):
-
+def get_read_statistics(parsing_results,segments_by_read):
     read_lengths = []
     alignment_lengths = []
     aln_error = []
     aln_mm = []
-
-    for read in read_alignments:
-        read_counted = False
+    
+    for alignments in parsing_results:
+        for aln in alignments[1]:
+            alignment_lengths.append(aln[4])
+            read_lengths.append(aln[3])
+            aln_error.append(aln[7])
+            aln_mm.append(aln[6])
+            
+    for read in segments_by_read.values():
+        read_lengths.append(read[0].read_length)
+        aln_error.append(read[0].error_rate)
+        aln_mm.append(read[0].mismatch_rate)
         for aln in read:
-            if aln.is_insertion or aln.is_clipped:
+            if aln.is_clipped or aln.is_insertion:
                 continue
-
             alignment_lengths.append(aln.segment_length)
-            if not read_counted:
-                read_lengths.append(aln.read_length)
-                aln_error.append(aln.error_rate)
-                aln_mm.append(aln.mismatch_rate)
-                read_counted = True
-
+            
     if not alignment_lengths:
         return None
-
+    
     reads_total_len = sum(read_lengths)
     alignment_total_len = sum(alignment_lengths)
     aln_rate = alignment_total_len / reads_total_len
@@ -550,7 +629,6 @@ def get_read_statistics(read_alignments):
     _l90, reads_n90 = _calc_nx(read_lengths, reads_total_len, 0.90)
     _l50, aln_n50 = _calc_nx(alignment_lengths, alignment_total_len, 0.50)
     _l50, aln_n90 = _calc_nx(alignment_lengths, alignment_total_len, 0.90)
-
     [error_25, error_50, error_75] = np.quantile(aln_error, [0.25, 0.50, 0.75])
     mm_25, mm_50, mm_75 = np.quantile(aln_mm, [0.25, 0.50, 0.75])
 
@@ -560,5 +638,4 @@ def get_read_statistics(read_alignments):
     logger.info(f"\tAlignments N50 / N90: {aln_n50} / {aln_n90}")
     logger.info(f"\tRead error rate (Q25 / Q50 / Q75): {error_25:.4f} / {error_50:.4f} / {error_75:.4f}")
     logger.info(f"\tRead mismatch rate (Q25 / Q50 / Q75): {mm_25:.4f} / {mm_50:.4f} / {mm_75:.4f}")
-
     return reads_n90

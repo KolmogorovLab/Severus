@@ -5,7 +5,7 @@ from collections import  defaultdict
 import logging
 import numpy as np 
 
-from severus.bam_processing import ReadSegment, add_read_qual, background_mm_rat
+from severus.bam_processing import ReadSegment, add_read_qual
 
 logger = logging.getLogger()
 
@@ -92,7 +92,7 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_po
         if abs(bp_len) < min_sv_size:
             return clipped_segs
         
-    if not seg_span_start or not seg_span_end:     
+    if not seg_span_start or not seg_span_end and [seg for seg in segments if not seg.is_insertion and not seg.is_clipped]:     
         for seg in segments:
             seg.is_pass = 'vntr_only'
             is_pass = 'vntr_only'
@@ -131,7 +131,7 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_po
             ins_end = ins_start + bp_len
             
             s2_new = ReadSegment(s1.align_start, ins_start, ins_end, vntr_strt, vntr_strt, bp_pos, bp_pos, s1.read_id,
-                                 s1.ref_id, s1.strand, s1.read_length, bp_len, s1.haplotype,
+                                 s1.ref_id, s1.strand, s1.read_length, s1.align_len, bp_len, s1.haplotype,
                                  s1.mapq, s1.genome_id, s1.mismatch_rate, True, s1.error_rate, None)
             s2_new.is_pass = is_pass
             if bp_len < len(ins_seq):
@@ -183,7 +183,9 @@ def check_spanning(new_read, vntr_loc):
     for seg in new_read:
         if seg.is_clipped:
             continue
-        if seg.ref_id == vntr_ref and seg.ref_start < vntr_strt and seg.ref_end > vntr_end:
+        if not seg.ins_pos:
+            continue
+        if seg.ref_id == vntr_ref and seg.ins_pos[0] < vntr_strt and seg.ins_pos[1] > vntr_end:
             return True
 
 def resolve_read_vntr(read, vntr_list, min_sv_size):
@@ -200,8 +202,8 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
     ins_pos = []
     for s in read:
         if s.is_insertion:
-            if not (s.ref_id,s.ref_start) in ins_pos:
-                ins_pos.append((s.ref_id, s.ref_start))
+            if not (s.ref_id,s.ref_end) in ins_pos:
+                ins_pos.append((s.ref_id, s.ref_end))
                 ins_segs.append(s)
             else:
                 seg_to_remove.append(s)
@@ -221,7 +223,6 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
             seg_in_vntr[ins_vntr[0]].append(ins_vntr[1])
         
     if len(split_segs) < 2:
-        new_read.append(split_segs[0])
         new_read += clipped_segs
     else:
         for s1, s2  in zip(split_segs[:-1], split_segs[1:]):
@@ -265,7 +266,7 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
         if not segments:
             s1 = bp[0]
             new_read.append(ReadSegment(s1.align_start, s1.read_start + 1, s1.read_start + bp_len, key[1], key[1], bp_pos, bp_pos, s1.read_id,
-                                        s1.ref_id, s1.strand, s1.read_length,bp_len, s1.haplotype, s1.mapq,
+                                        s1.ref_id, s1.strand, s1.read_length,s1.align_len, bp_len, s1.haplotype, s1.mapq,
                                         s1.genome_id, s1.mismatch_rate, True, s1.error_rate, s1.is_primary))
             new_read[-1].ins_seq = ins_seq
             if not check_spanning(read, key):
@@ -305,6 +306,8 @@ def remove_dedup_segments(segments_by_read):
 def resolve_vntr(segments_by_read, vntr_file, min_sv_size):
     vntr_list = read_vntr_file(vntr_file)
     for i, read in enumerate(segments_by_read):
+        if not read:
+            continue
         new_read = resolve_read_vntr(read, vntr_list, min_sv_size)
         if new_read:
             segments_by_read[i] = new_read
@@ -312,11 +315,12 @@ def resolve_vntr(segments_by_read, vntr_file, min_sv_size):
             segments_by_read[i] = []
 
 
-def update_segments_by_read(segments_by_read, ref_lengths, args):
+def update_segments_by_read(segments_by_read, mismatch_histograms, bg_mm, ref_lengths, args):
     remove_dedup_segments(segments_by_read)
-    bg_mm = background_mm_rat(segments_by_read)
+    bg_mm = float(np.median(bg_mm))
     if args.vntr_file:
         resolve_vntr(segments_by_read, args.vntr_file, args.sv_size)
     logger.info("Annotating reads")
-    add_read_qual(segments_by_read, ref_lengths, bg_mm, args)
+    add_read_qual(segments_by_read, ref_lengths, bg_mm, mismatch_histograms, args)
+
     
