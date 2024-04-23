@@ -961,12 +961,19 @@ def ins_to_tra (ins_list_pos, ins_list, bp1, bp2, dir_bp, dbs, ins_clusters, dou
     strt = bisect.bisect_left(ins_1, bp1.position - INS_WIN)
     end = bisect.bisect_left(ins_1, bp1.position + INS_WIN)
     flag = False
-    seglen = 0
-    med_seg_len = int(np.quantile([cn.seg_len[slen] for cn in bp2.connections if cn in bp1.connections],0.90))
-    seg_len = sorted([cn.seg_len[slen] for cn in bp2.connections if cn in bp1.connections])
     
-    if seg_len[-1] - seg_len[0] < MIN_DIFF:
-        seglen = med_seg_len
+    MAX_DEPTH = 1000
+    if len(bp1.connections) > MAX_DEPTH or len(bp2.connections) > MAX_DEPTH:
+        med_seg_len = int( np.quantile([cn.seg_len[slen] for cn in bp1.connections[:MAX_DEPTH]],0.90))
+    else:
+        med_seg_len = int( np.quantile([cn.seg_len[slen] for cn in bp2.connections if cn in bp1.connections],0.90))
+    
+    #seglen = 0
+    #med_seg_len = int(np.quantile([cn.seg_len[slen] for cn in bp2.connections if cn in bp1.connections],0.90))
+    #seg_len = sorted([cn.seg_len[slen] for cn in bp2.connections if cn in bp1.connections])
+    
+    #if seg_len[-1] - seg_len[0] < MIN_DIFF:
+    #    seglen = med_seg_len
     if strt == end:
         return []
     
@@ -1023,7 +1030,7 @@ def tra_to_ins(ins_list_pos, ins_list, bp1, bp2, dir_bp, dbs, ins_clusters, doub
     end = bisect.bisect_left(ins_1, bp1.position + INS_WIN)
     flag = False
     #seglen = 0
-    if len(bp1.connections) > MAX_DEPTH:
+    if len(bp1.connections) > MAX_DEPTH or len(bp2.connections) > MAX_DEPTH:
         med_seg_len = int( np.quantile([cn.seg_len[slen] for cn in bp1.connections[:MAX_DEPTH]],0.90))
     else:
         med_seg_len = int( np.quantile([cn.seg_len[slen] for cn in bp2.connections if cn in bp1.connections],0.90))
@@ -1145,6 +1152,7 @@ def match_long_ins(ins_clusters, double_breaks, min_sv_size, tra_vs_ins):
             continue
         if db.bp_1.ref_id == db.bp_2.ref_id and db.direction_1 > 0 and db.direction_2 < 0 and db.bp_2.position - db.bp_1.position < DEL_THR:
             continue
+        
         if db.is_dup:
             dup_to_ins(ins_list_pos, ins_list, dbs, min_sv_size, ins_clusters, double_breaks)
         else:
