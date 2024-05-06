@@ -27,7 +27,7 @@ MIN_SEGMENT_OVERLAP = 100
 MAX_SEGMENT_OVERLAP = 500
 MAX_CONNECTION= 1000
 MAX_UNALIGNED_LEN = 500
-COV_WINDOW = 500
+COV_WINDOW = 1000
 CHUNK_SIZE = 10000000
 
 class ReadConnection(object):
@@ -1022,7 +1022,7 @@ def tra_to_ins(ins_list_pos, ins_list, bp1, bp2, dir_bp, dbs, ins_clusters, doub
    
     INS_WIN = 2000
     total_supp_thr = 2
-    MAX_DEPTH = 1000
+    MAX_DEPTH = 1000000
     #MIN_DIFF = 50
     
     ins_1 = ins_list_pos[bp1.ref_id]
@@ -1030,6 +1030,7 @@ def tra_to_ins(ins_list_pos, ins_list, bp1, bp2, dir_bp, dbs, ins_clusters, doub
     end = bisect.bisect_left(ins_1, bp1.position + INS_WIN)
     flag = False
     #seglen = 0
+    db = dbs[0]
     if len(bp1.connections) > MAX_DEPTH or len(bp2.connections) > MAX_DEPTH:
         med_seg_len = int( np.quantile([cn.seg_len[slen] for cn in bp1.connections[:MAX_DEPTH]],0.90))
     else:
@@ -1988,6 +1989,7 @@ def complex_inv(double_breaks, coverage_histograms, min_sv_size, ind_id):
             
                 
 def foldback_inv(clusters, coverage_histograms, ind_id):
+
     inv_list_pos = defaultdict(list)
     inv_list_neg = defaultdict(list)
     FOLD_BACK_THR = 0.5
@@ -2003,7 +2005,6 @@ def foldback_inv(clusters, coverage_histograms, ind_id):
             inv_list_pos[db.bp_1.ref_id].append(cl)
         elif db.direction_1 == db.direction_2 == -1:
             inv_list_neg[db.bp_1.ref_id].append(cl)
-            
     for seq, pos_lis in inv_list_pos.items():
         neg_lis = inv_list_neg[seq]
         foldback_pairs = defaultdict(list)
@@ -2011,7 +2012,7 @@ def foldback_inv(clusters, coverage_histograms, ind_id):
             db = cl[0]
             if db.bp_2.position - db.bp_1.position > FOLD_BACK_DIST_THR:
                 continue
-            pos1 = db.bp_1.position // 500
+            pos1 = db.bp_1.position // COV_WINDOW
             cov1_0 = sum([coverage_histograms[(db.genome_id, hp, db.bp_1.ref_id)][pos1-1] for hp in HP])
             cov1_2 = sum(db.bp_1.spanning_reads[db.genome_id])
             cov2 = sum(db.bp_2.spanning_reads[db.genome_id])
@@ -2024,7 +2025,7 @@ def foldback_inv(clusters, coverage_histograms, ind_id):
             db = cl[0]
             if db.bp_2.position - db.bp_1.position > FOLD_BACK_DIST_THR:
                 continue
-            pos1 = db.bp_1.position // 500
+            pos1 = db.bp_1.position // COV_WINDOW
             cov1_0 = sum([coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos1-1] for hp in HP])
             cov1_2 = sum(db.bp_1.spanning_reads[db.genome_id])
             cov2 = sum(db.bp_2.spanning_reads[db.genome_id])
@@ -2053,8 +2054,8 @@ def foldback_inv(clusters, coverage_histograms, ind_id):
                 supp_pos = [db.supp for db in pos_ls]
                 supp_neg = [db.supp for db in neg_ls]
                 if abs(sum(supp_pos)- sum(supp_neg)) <= min(supp_pos + supp_neg):
-                    pos1 = neg_ls[0].bp_1.position//500
-                    pos2 = pos_ls[-1].bp_2.position//500
+                    pos1 = neg_ls[0].bp_1.position// COV_WINDOW
+                    pos2 = pos_ls[-1].bp_2.position//COV_WINDOW
                     seg_cov = int(np.median([sum([coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos] for hp in HP]) for pos in range(pos1,pos2)]))
                     seg2 = int(np.median([sum([coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos] for hp in HP]) for pos in range(pos2,pos2+5)]))
                     seg1 = int(np.median([sum([coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos] for hp in HP]) for pos in range(pos1-5,pos1)]))
@@ -2113,7 +2114,6 @@ def indel_clust(db_list):
 def conn_duplications(clusters, coverage_histograms):
     
     DUP_COV_THR = 0.5
-    COV_WINDOW = 500
     for ind, cl in enumerate(clusters.values()):
         db = cl[0]
         is_dup = False
@@ -2305,7 +2305,8 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
     cont_id  = list(control_id)[0] if control_id else '' 
     
     logger.info('Extracting clipped reads')
-
+    clipped_clusters = []
+    extract_clipped_end(segments_by_read)
     clipped_reads = get_clipped_reads(segments_by_read)
     clipped_clusters = cluster_clipped_ends(clipped_reads, args.bp_cluster_size,args.min_ref_flank, ref_lengths)
     
