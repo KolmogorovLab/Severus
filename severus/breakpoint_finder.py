@@ -193,6 +193,7 @@ def get_breakpoints(split_reads, ref_lengths, args):
     min_ref_flank = args.min_ref_flank 
     sv_size = args.min_sv_size
     MAX_SEGMENT_DIST= 1000
+    single_bps = []
     
     seq_breakpoints_l = defaultdict(list)
     seq_breakpoints_r = defaultdict(list)
@@ -228,8 +229,9 @@ def get_breakpoints(split_reads, ref_lengths, args):
         for conn in bp.connections:
             conn_list[conn].append(bp)
        
-    matched_bp, single_bp, bp_ls = match_breaks(conn_list)
-    
+    matched_bp, bp_ls = match_breaks(conn_list)
+    if args.single_bp:
+        single_bps = get_single_bps(bp_ls)
     double_breaks=[]
     for (bp_1 , bp_2), cl in matched_bp.items():
         db = get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads,bp_ls)
@@ -237,9 +239,15 @@ def get_breakpoints(split_reads, ref_lengths, args):
             double_breaks += db
     double_breaks = match_del(double_breaks)
     
-    return double_breaks, single_bp
+    return double_breaks, single_bps
 
-
+def get_single_bps(bp_ls):
+    single_bps = []
+    for bp, rcls in bp_ls.items():
+        if 2 not in rcls:
+            single_bps.append(bp)
+    return single_bps
+    
 def cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads, bp_dir):
     clusters = []
     cur_cluster = []
@@ -293,12 +301,10 @@ def cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads, bp
     return bp_list
             
 def match_breaks(conn_list):
-    single_bp = set()
     matched_bp = defaultdict(list)
     bp_ls = defaultdict(list)
     for rc, bp_list in conn_list.items():
         if len(bp_list) < 2:
-            single_bp.add(bp_list[0])
             bp_ls[bp_list[0]].append(1)
         elif len(bp_list) == 2:
             bp_list.sort(key=lambda bp: bp.position)
@@ -306,7 +312,7 @@ def match_breaks(conn_list):
             bp_ls[bp_list[0]].append(2)
             bp_ls[bp_list[1]].append(2)
         
-    return matched_bp , single_bp, bp_ls
+    return matched_bp , bp_ls
         
 def get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads, bp_ls):  
     unique_reads = defaultdict(set)
@@ -801,6 +807,11 @@ def get_single_bp(single_bp, clipped_clusters, double_breaks, bp_min_support, co
     MIN_DIST = 100
     PASS_2_FAIL = 0.4
     filtered_sbp = []
+    
+    for bps in clipped_clusters.values():
+        for bp in bps:
+            bp.connections = [(c,c) for c in bp.connections]
+            
     for sbp in single_bp:
         clipped_clusters[sbp.ref_id].append(sbp)
     
@@ -820,7 +831,7 @@ def get_single_bp(single_bp, clipped_clusters, double_breaks, bp_min_support, co
             ind = ind if not ind == 0 else 1
             if abs(posls[ind] - s_bp.position) < MIN_DIST or abs(posls[ind-1] - s_bp.position) < MIN_DIST:
                 continue
-            conn = [c[0].is_pass for c in s_bp.connections] + [c[1].is_pass for c in s_bp.connections]
+            conn = [c[0].is_pass for c in s_bp.connections] + [c[1].is_pass for c in s_bp.connections if not c[0] == c[1]]
             conn_count = Counter(conn)
             if conn_count['PASS'] < max([len(conn) * PASS_2_FAIL, bp_min_support]):
                 continue
@@ -830,10 +841,10 @@ def get_single_bp(single_bp, clipped_clusters, double_breaks, bp_min_support, co
             if len(cl) < bp_min_support:
                 continue
             for x in cl:
-                hp = x[0].haplotype if x.is_pass == 'PASS' else x[1].haplotype
-                unique_reads[(x.genome_id,hp)].add(x.read_id)
+                hp = x[0].haplotype if x[0].is_pass == 'PASS' else x[1].haplotype
+                unique_reads[(x[0].genome_id,hp)].add(x[0].read_id)
                 if x[0].is_pass == 'PASS' or x[1].is_pass == 'PASS':
-                    unique_reads_pass[(x.genome_id,hp)].add(x.read_id)
+                    unique_reads_pass[(x[0].genome_id,hp)].add(x[0].read_id)
             by_genome_id_pass = defaultdict(int)
             unique_read_keys = sorted(unique_reads, key=lambda k: len(unique_reads[k]), reverse=True)
             for key, values in unique_reads.items():

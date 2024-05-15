@@ -315,12 +315,12 @@ def resolve_vntr(segments_by_read, vntr_file, min_sv_size):
             segments_by_read[i] = []
 
 
-def update_segments_by_read(segments_by_read, mismatch_histograms, bg_mm, ref_lengths, args):
+def update_segments_by_read(segments_by_read, mismatch_histograms, bg_mm, ref_lengths,read_qual,read_qual_len, args):
     remove_dedup_segments(segments_by_read)
     bg_mm = float(np.median(bg_mm))
     if args.vntr_file:
         resolve_vntr(segments_by_read, args.vntr_file, args.sv_size)
     logger.info("Annotating reads")
-    add_read_qual(segments_by_read, ref_lengths, bg_mm, mismatch_histograms, args)
+    add_read_qual(segments_by_read, ref_lengths, bg_mm, mismatch_histograms,read_qual,read_qual_len, args)
 
     

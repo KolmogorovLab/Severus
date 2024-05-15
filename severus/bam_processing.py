@@ -357,7 +357,7 @@ def get_all_reads(bam_file, region, genome_id,sv_size,use_supplementary_tag):
 
 
 def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
-                           coverage_histograms, mismatch_histograms, n90ls, bg_mmls, args):
+                           coverage_histograms, mismatch_histograms, n90ls, bg_mmls,read_qual,read_qual_len, args):
 
     CHUNK_SIZE = 10000000
     sv_size = args.sv_size
@@ -381,19 +381,19 @@ def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
         for aln in alignments[0]:
             if aln:
                 segments_by_read[aln.read_id].append(aln)
-    n90, bg_mm = calc_read_qual(parsing_results, segments_by_read, mismatch_histograms, coverage_histograms, genome_id, ref_lengths, args)
+    n90, bg_mm = calc_read_qual(parsing_results, segments_by_read, mismatch_histograms, coverage_histograms, genome_id, ref_lengths, read_qual, read_qual_len, args)
     n90ls.append(n90)
     bg_mmls.append(bg_mm)
     
     return list(segments_by_read.values())
 
 
-def calc_read_qual(parsing_results,segments_by_read, mismatch_histograms, coverage_histograms, genome_id, ref_lengths, args):
+def calc_read_qual(parsing_results,segments_by_read, mismatch_histograms, coverage_histograms, genome_id, ref_lengths, read_qual, read_qual_len, args):
     bg_mm = background_mm_rat(parsing_results)
     update_mm_hist(parsing_results, mismatch_histograms, ref_lengths)
     n90 = get_read_statistics(parsing_results, segments_by_read)
     n90 = min(n90, args.min_aligned_length)
-    update_cov_hist(parsing_results, coverage_histograms, genome_id, ref_lengths, bg_mm, n90, args)
+    update_cov_hist(parsing_results, coverage_histograms, genome_id, ref_lengths, bg_mm, n90, read_qual, read_qual_len, args)
     return n90, bg_mm
 
 def init_hist(genome_ids, ref_lengths):
@@ -405,17 +405,22 @@ def init_hist(genome_ids, ref_lengths):
     return coverage_histograms
 
 
-def update_cov_hist(parsing_results, coverage_histograms, genome_id, ref_lengths, bg_mm, n90, args):
+def update_cov_hist(parsing_results, coverage_histograms, genome_id, ref_lengths, bg_mm, n90, read_qual, read_qual_len, args):
     for alignments in parsing_results:
         if alignments[1].size == 0:
             continue
         chr_id = list(ref_lengths.keys())[int(alignments[1][0][0])]
         for j in range(len(alignments[1])):
             if alignments[1][j][8] > args.min_mapping_quality and alignments[1][j][6] < bg_mm and alignments[1][j][3] > n90 and abs(alignments[1][j][3] - alignments[1][j][4]) < alignments[1][j][4]:
+                read_qual['PASS'] += 1
+                read_qual_len['PASS'] += alignments[1][j][4]
                 hist_start = alignments[1][j][1] // COV_WINDOW
                 hist_end = alignments[1][j][2]// COV_WINDOW
                 for i in range(hist_start, hist_end + 1):
-                    coverage_histograms[(genome_id, alignments[1][j][5], chr_id)][i] += 1    
+                    coverage_histograms[(genome_id, alignments[1][j][5], chr_id)][i] += 1
+            else:
+                read_qual['FAIL'] += 1
+                read_qual_len['FAIL'] += alignments[1][j][4]
 
 def update_coverage_hist(coverage_histograms,genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes, loh_out):
     
@@ -441,7 +446,7 @@ def update_coverage_hist(coverage_histograms,genome_ids, ref_lengths, segments_b
             extract_LOH(coverage_histograms, ref_lengths, control_genomes, target_genomes, loh_out)
         
 
-def add_read_qual(segments_by_read, ref_lengths, bg_mm, mismatch_histograms, args):
+def add_read_qual(segments_by_read, ref_lengths, bg_mm, mismatch_histograms,read_qual,read_qual_len, args):
     min_mapq = args.min_mapping_quality
     min_aligned_length = args.min_aligned_length
     write_segdups_out = args.write_segdups_out
@@ -455,7 +460,7 @@ def add_read_qual(segments_by_read, ref_lengths, bg_mm, mismatch_histograms, arg
             continue
         label_reads(alignments, min_mapq, bg_mm, mm_hist_high, min_aligned_length)
 
-    write_readqual(segments_by_read, args.outpath_readqual)
+    write_readqual(segments_by_read, args.outpath_readqual,read_qual,read_qual_len)
 
 
 def label_reads(read, min_mapq, bg_mm, mm_hist_high, min_aligned_length):
@@ -479,9 +484,7 @@ def label_reads(read, min_mapq, bg_mm, mm_hist_high, min_aligned_length):
         if not seg.is_pass:
             seg.is_pass = 'PASS'
 
-def write_readqual(segments_by_read, outpath):
-    read_qual = defaultdict(int)
-    read_qual_len = defaultdict(int)
+def write_readqual(segments_by_read, outpath, read_qual, read_qual_len):
     for read in segments_by_read:
         for seg in read:
             if seg.is_clipped or seg.is_insertion or 'vntr_only' in seg.is_pass:

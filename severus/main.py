@@ -14,7 +14,7 @@ import pysam
 import argparse
 import os
 from multiprocessing import Pool
-from collections import defaultdict
+from collections import defaultdict,Counter
 import logging
 
 from severus.build_graph import output_graphs
@@ -151,10 +151,24 @@ def main():
     args.sv_size = max(args.min_sv_size - MIN_SV_THR, MIN_SV_THR)
     
     if not shutil.which(SAMTOOLS_BIN):
-        logger.error("samtools not found")
+        logger.error("Error: samtools not found")
         return 1
+    if not len(set(args.control_bam)) == len(args.control_bam):
+        logger.error("Error: Duplicated bams are not allowed")
+        return 1
+    
+    if not len(set(args.target_bam)) == len(args.target_bam):
+        logger.error("Error: Duplicated bams are not allowed")
+        return 1
+        
     if len(control_genomes) > 1:
-        logger.error("only one control bam is allowed")
+        logger.error("Error: only one control bam is allowed")
+        return 1
+    
+    if control_genomes and control_genomes[0] in target_genomes:
+        logger.error("Error: Control bam also inputted as target bam")
+        return 1
+        
         
     if args.bp_min_support == 0:
         args.bp_min_support = 3
@@ -180,24 +194,40 @@ def main():
     args.outpath_readqual = os.path.join(args.out_dir, "read_qual.txt")
     
     segments_by_read = []
-    genome_ids = [os.path.basename(bam_file) for bam_file in all_bams]
     bam_files = defaultdict(list)
+    genome_ids = [os.path.basename(bam_file) for bam_file in all_bams]
+    
+    dups = [item for item, count in Counter(genome_ids).items() if count > 1]
+    if dups:
+        dup_ids = ','.join(dups)
+        logger.info(f"Warning: Dupicated bam name found for {dup_ids}")
+        genome_ids = all_bams
+        for bam_file in all_bams:
+            bam_files[bam_file] = bam_file
+            target_genomes = args.target_bam
+            control_genomes = args.control_bam
+    else:
+        for bam_file in all_bams:
+            genome_id = os.path.basename(bam_file)
+            bam_files[genome_id] = bam_file
+
     args.min_aligned_length = MIN_ALIGNED_LENGTH
     coverage_histograms = init_hist(genome_ids, ref_lengths)
     mismatch_histograms = init_mm_hist(ref_lengths)
     n90 = [MIN_ALIGNED_LENGTH]
+    read_qual = defaultdict(int)
+    read_qual_len = defaultdict(int)
     bg_mm = []
     for bam_file in all_bams:
-        genome_id = os.path.basename(bam_file)
-        bam_files[genome_id] = bam_file
+        genome_id = os.path.basename(bam_file) if not dups else bam_file
         logger.info(f"Parsing reads from {genome_id}")
         segments_by_read_bam = get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
-                                                      coverage_histograms, mismatch_histograms, n90, bg_mm,args)
+                                                      coverage_histograms, mismatch_histograms, n90, bg_mm,read_qual,read_qual_len,args)
         segments_by_read += segments_by_read_bam
 
     args.min_aligned_length = min(n90)
     logger.info('Computing read quality') 
-    update_segments_by_read(segments_by_read, mismatch_histograms, bg_mm, ref_lengths, args)
+    update_segments_by_read(segments_by_read, mismatch_histograms, bg_mm, ref_lengths,read_qual,read_qual_len, args)
     
     logger.info('Computing coverage histogram')
     update_coverage_hist(coverage_histograms,genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes, args.write_log_out)
