@@ -14,7 +14,7 @@ NUM_HAPLOTYPES = 3
 class ReadSegment(object):
     __slots__ = ("align_start", "read_start", "read_end", "ref_start", "ref_end","ref_start_ori", "ref_end_ori", "read_id", "ref_id",
                  "strand", "read_length",'align_len','segment_length', "haplotype", "mapq", "genome_id",
-                 'mismatch_rate', 'is_pass', "is_insertion", "is_clipped", 'error_rate', 'ins_seq', 'is_primary', 'ins_pos')
+                 'mismatch_rate', 'is_pass', "is_insertion", "is_clipped", 'error_rate', 'ins_seq', 'is_primary', 'ins_pos', 'bp_pos')
     def __init__(self, align_start, read_start, read_end, ref_start, ref_end,ref_start_ori, ref_end_ori, read_id, ref_id,
                  strand, read_length,align_len,segment_length, haplotype, mapq, genome_id,
                  mismatch_rate, is_insertion, error_rate, is_primary):
@@ -42,12 +42,23 @@ class ReadSegment(object):
         self.ins_seq = None
         self.is_primary = is_primary
         self.ins_pos = None
+        self.bp_pos = None
     def __str__(self):
         return "".join(["read_start=", str(self.read_start), " read_end=", str(self.read_end), " ref_start=", str(self.ref_start),
                          " ref_end=", str(self.ref_end), " read_id=", str(self.read_id), " ref_id=", str(self.ref_id), " strand=", str(self.strand),
                          " read_length=", str(self.read_length), " haplotype=", str(self.haplotype),
                          " mapq=", str(self.mapq), "mismatch_rate=", str(self.mismatch_rate), " read_qual=", str(self.is_pass), " genome_id=", str(self.genome_id)])
-
+    def get_pos(self, bp_pos):
+        if bp_pos == "right":
+            ref_bp = self.ref_end if self.strand == 1 else self.ref_start
+            ref_bp_ori = self.ref_end_ori if self.strand == 1 else self.ref_start_ori
+            sign = 1 if self.strand == 1 else -1
+        elif bp_pos == "left":
+            ref_bp = self.ref_start if self.strand == 1 else self.ref_end
+            ref_bp_ori = self.ref_start_ori if self.strand == 1 else self.ref_end_ori
+            sign = -1 if self.strand == 1 else 1
+        return ref_bp, ref_bp_ori, sign
+    
 def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
     """
     Parses cigar and generate ReadSegment structure with alignment coordinates
