@@ -486,16 +486,47 @@ def match_breakends(double_breaks):
         for cl in bp2list:
             for db in cl[2]:
                 db.bp_2.connections = conn    
-        
-def double_breaks_filter(double_breaks, min_reads, control_id, resolve_overlaps, sv_size):
+
+
+def check_db(cl, conn_1, ind):
 
     PASS_2_FAIL_RAT = 0.5
     CONN_2_SUPP_RAT = 0.3
     CHR_CONN = 2
-    COV_THR = 3
     MIN_MAPQ = 30
+    db = cl[0]
+    if db.bp_1.ref_id == db.bp_2.ref_id and db.bp_1.position > db.bp_2.position:
+        return 'FAIL_MAP_CONS'
+    conn_pass_1 =[cn for cn in conn_1 if cn[ind].is_pass == 'PASS']
+    conn_count_1 = Counter([cn[ind].is_pass for cn in conn_1])
+    supp_read = sum([db.supp for db in cl])
+    
+    if conn_count_1['PASS'] < len(conn_1) * PASS_2_FAIL_RAT:
+        return 'FAIL_MAP_CONS'
+    if supp_read < conn_count_1['PASS'] * CONN_2_SUPP_RAT:
+        return 'FAIL_CONN_CONS'
+    conn_ref_1 = Counter([cn[ind].ref_id for cn in conn_pass_1])
+    if len(conn_ref_1) > CHR_CONN:
+        return 'FAIL_CONN_CONS'
+    qual_list = []
+    for db in cl:
+        qual_list += [db.bp_1.qual, db.bp_2.qual]
+    vcf_qual = np.median(qual_list)
+    for db in cl:
+        db.vcf_qual = vcf_qual
+    if vcf_qual < MIN_MAPQ:
+        return 'FAIL_MAP_CONS'
+    
+    else:
+        return ''
+    
+        
+def double_breaks_filter(double_breaks, single_bps, min_reads, control_id, resolve_overlaps, sv_size):
+
+    COV_THR = 3
     NUM_HAPLOTYPES = [0,1,2]
     MAX_STD = 25
+    MIN_DIST = 50000
     
     clusters = defaultdict(list) 
     for br in double_breaks:
@@ -507,54 +538,53 @@ def double_breaks_filter(double_breaks, min_reads, control_id, resolve_overlaps,
             continue
         conn_1 = db.bp_1.connections
         conn_2 = db.bp_2.connections#
-        conn_pass_1 =[cn for cn in conn_1 if cn[0].is_pass == 'PASS']
-        conn_pass_2 =[cn for cn in conn_2 if cn[1].is_pass == 'PASS']#
-        conn_count_1 = Counter([cn[0].is_pass for cn in conn_1])
-        conn_count_2 = Counter([cn[1].is_pass for cn in conn_2])#
-        supp_read = sum([db.supp for db in cl])
-        if conn_count_1['PASS'] < len(conn_1) * PASS_2_FAIL_RAT or conn_count_2['PASS'] < len(conn_2) * PASS_2_FAIL_RAT:
-            for db1 in cl:
-                db1.is_pass = 'FAIL_MAP_CONS'
-            continue#
-        if supp_read < conn_count_1['PASS'] * CONN_2_SUPP_RAT or supp_read < conn_count_2['PASS'] * CONN_2_SUPP_RAT:
-            for db1 in cl:
-                db1.is_pass = 'FAIL_CONN_CONS'
-            continue#    
-        conn_ref_1 = Counter([cn[0].ref_id for cn in conn_pass_1])
-        conn_ref_2 = Counter([cn[1].ref_id for cn in conn_pass_2])
-        if len(conn_ref_1) > CHR_CONN or len(conn_ref_2) > CHR_CONN:
-            for db1 in cl:
-                db1.is_pass = 'FAIL_CONN_CONS'
-            continue#
-        qual_list = []
-        for db in cl:
-            qual_list += [db.bp_1.qual, db.bp_2.qual]
-        vcf_qual = np.median(qual_list)
-        if vcf_qual < MIN_MAPQ:
-            for db in cl:
-                db.is_pass = 'FAIL_MAP_CONS'
-        for db in cl:
-            db.vcf_qual = vcf_qual
+        fail1 = check_db(cl, conn_1, 0)
+        fail2 = check_db(cl, conn_2, 1)
+        if fail1 or fail2 and 0 < db.length < MIN_DIST:
+            if fail1:
+                for db1 in cl:
+                    db1.is_pass = fail1
+            else:
+                for db1 in cl:
+                    db1.is_pass = fail1
             
-            
-        conn_ins = [cn for cn in conn_pass_1 if cn in conn_pass_2]
-        has_ins = []
-        for c in conn_ins:
-            s1,s2 = sorted(c, key=lambda x:(x.align_start, x.read_start))
-            dist = s2.read_start - s1.read_end
-            has_ins.append(dist)
+        elif not fail1 and fail2:
+            db.bp_1.pos2 = db.bp_2.unique_name()
+            for db1 in cl:
+                db1.bp_2 = db.bp_1
+                db1.is_single = True
+                single_bps.append(db1)
+        elif not fail2 and fail1:
+            db.bp_2.pos2 = db.bp_1.unique_name()
+            for db1 in cl:
+                db1.bp_1 = db.bp_2
+                db1.is_single = True
+                single_bps.append(db1)
+        elif fail1 and fail2:
+            for db1 in cl:
+                db1.is_pass = fail1
+                
+        if not fail1 or not fail2:
+            conn_ins = [cn for cn in conn_1 if cn in conn_2 and cn[0].is_pass == 'PASS' and cn[1].is_pass == 'PASS']
+            has_ins = []
+            for c in conn_ins:
+                s1,s2 = sorted(c, key=lambda x:(x.align_start, x.read_start))
+                dist = s2.read_start - s1.read_end
+                has_ins.append(dist)
             has_ins_len = int(np.median(has_ins))
-        if has_ins_len >= sv_size and np.std(has_ins) < MAX_STD:
-            cn = conn_ins[np.argmin(np.array(has_ins) - db.has_ins)]
-            s1,s2 = sorted(cn, key=lambda x:(x.align_start, x.read_start))
-            for db1 in cl:
-                db1.has_ins = (s1, s2, has_ins_len)
+            if has_ins_len >= sv_size and np.std(has_ins) < MAX_STD:
+                cn = conn_ins[np.argmin(np.array(has_ins) - db.has_ins)]
+                s1,s2 = sorted(cn, key=lambda x:(x.align_start, x.read_start))
+                for db1 in cl:
+                    db1.has_ins = (s1, s2, has_ins_len)
     
     if resolve_overlaps:
         resolve_ovlp(clusters) 
-    ## report all the events not just pass    
+       
     if  control_id:
         for cl in clusters.values():
+            if cl[0].is_single:
+                continue
             if not control_id in [db1.genome_id for db1 in cl]:
                 haplotype1 = list(set(db1.haplotype_1 for db1 in cl))
                 haplotype1 = haplotype1 if not haplotype1 == [0] else NUM_HAPLOTYPES
@@ -570,14 +600,17 @@ def double_breaks_filter(double_breaks, min_reads, control_id, resolve_overlaps,
                     for db1 in cl:
                         db1.is_pass = 'FAIL_LOWCOV_NORMAL'
     
+    double_breaks = [db for db in double_breaks if not db.is_single]
+    
     match_haplotypes(double_breaks)
+    return double_breaks
 
 
 def resolve_ovlp(clusters):
     MIN_SIZE = 50
     for cl in clusters.values():
         db = cl[0]
-        if not db.is_pass == 'PASS':
+        if not db.is_pass == 'PASS' or db.is_single:
             continue
         conn_1 = [c for c in db.bp_1.connections if c in db.bp_2.connections]
         overlap = []
@@ -875,8 +908,9 @@ def get_single_bp(single_bp, clipped_clusters, double_breaks, bp_min_support, co
 def filter_single_bp(single_bps, cont_id, control_vaf, vaf_thr):
     sbp_list = []
     QUAL_THR = 30
+    VAF_THR = 0.25
     match_haplotypes(single_bps)
-    annotate_mut_type(single_bps, cont_id, control_vaf, vaf_thr)
+    annotate_mut_type(single_bps, cont_id, control_vaf, VAF_THR)
     for sbp in single_bps:
         if sbp.vaf_pass == 'PASS' and sbp.vcf_qual > QUAL_THR and sbp.is_pass == 'PASS':
             sbp_list.append(sbp)
@@ -889,6 +923,8 @@ def filter_single_bp(single_bps, cont_id, control_vaf, vaf_thr):
     for cl in clusters.values():
         for db in cl:
             db.vcf_id = sv_id + str(t)
+            db.vcf_sv_type = 'BND'
+            db.length = 0
             t+=1
     return sbp_list
 
@@ -1018,9 +1054,9 @@ def tra_to_ins(ins_list_pos, ins_list, bp1, bp2, dir_bp, dbs, ins_clusters, doub
         #    continue
         flag = True
         if bp2.dir_1 == -1:
-            tra_pos = bp1.ref_id + ':' + str(bp2.position)+ '-'  + str(bp2.position + ins.length)
+            tra_pos = bp2.ref_id + ':' + str(bp2.position)+ '-'  + str(bp2.position + ins.length)
         else:
-            tra_pos = bp1.ref_id + ':'+ str(bp2.position - ins.length) +  '-' + str(bp2.position)
+            tra_pos = bp2.ref_id + ':'+ str(bp2.position - ins.length) +  '-' + str(bp2.position)
             
         for ins in ins_cl:
             gen_id_1[(ins.genome_id, ins.haplotype_1)].append(ins)
@@ -1296,8 +1332,6 @@ def filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segmen
     if single_bp:
         db_list += single_bps
     
-    if args.vntr_file:
-        add_vntr_annot(db_list, args)
     db_list = filter_germline_db(db_list)
     return db_list
 
@@ -1307,23 +1341,85 @@ def check_vntr(db, vntr_list):
         strt = bisect.bisect_right(tr_reg[2], db.bp_1.position)
         end = bisect.bisect_left(tr_reg[3], db.bp_2.position)
         if strt - end == 1:
-            return True
+            return strt
         
 def add_vntr_annot(double_breaks, args):
     vntr_list = read_vntr_file(args.vntr_file)
+    add_sv_type(double_breaks)
     clusters = defaultdict(list)
+    vntr_clusters = defaultdict(list)
+    MERGE_THR = 150
+    MERGE_RAT = 0.25
     for br in double_breaks:
         if br.vcf_sv_type == 'DEL' or br.vcf_sv_type == 'INS':
             clusters[br.to_string()].append(br)
     
     for cl in clusters.values():
-        if check_vntr(cl[0], vntr_list):
+        vntr = check_vntr(cl[0], vntr_list)
+        if vntr:
+            vntr_clusters[(cl[0].bp_1.ref_id, vntr)].append(cl)
             for db in cl:
                 db.vntr = True
+            if cl[0].vcf_sv_type == 'DEL':
+                pass_conn = [1 for (a,b) in cl[0].bp_1.connections if not a.is_pass == b.is_pass == 'vntr_only']
+                if len(pass_conn) < 2:
+                    for db in cl:
+                        db.is_pass = 'FAIL_VNTR'
+            else:
+                pass_conn = [1 for a in cl[0].bp_1.connections if not a.is_pass == 'vntr_only']
+                if len(pass_conn) < 2:
+                    for db in cl:
+                        db.is_pass = 'FAIL_VNTR'
+    
+    for vntr_cls in vntr_clusters.values():
+        if len(vntr_cls) > 3:
+            for cl in vntr_cls:
+                for db in cl:
+                    db.is_pass = 'FAIL_COMPLEX_VNTR'
+        elif len(vntr_cls) > 1:
+            dbs_type = defaultdict(list)
+            for cl in vntr_cls:
+                dbs_type[cl[0].vcf_sv_type].append(cl)
+            for key, del_dbs in dbs_type.items():
+                if len(del_dbs) > 1:
+                    del_dbs.sort(key=lambda s: s[0].length)
+                    clusters = []
+                    cur_cluster = []
+                    for cl in del_dbs:
+                        if cur_cluster and cl[0].length - cur_cluster[-1][0].length > max(MERGE_THR, cl[0].length * MERGE_RAT):
+                            clusters.append(cur_cluster)
+                            cur_cluster = [cl]
+                        else:
+                            cur_cluster.append(cl)
+                    if cur_cluster:
+                        clusters.append(cur_cluster)
+                    for cl in clusters:
+                        if len(cl) > 1:
+                            new_len = int(np.mean([c[0].length for c in cl]))
+                            by_genome_id = defaultdict(list)
+                            bp_1 = cl[0][0].bp_1
+                            bp_2 = cl[0][0].bp_2
+                            if key == 'DEL':
+                                bp_2.position = bp_1.position + new_len
+                            for c in cl:
+                                for db in c:
+                                    by_genome_id[(db.genome_id, db.haplotype_1)].append(db)
+                            for dbs in by_genome_id.values():
+                                dbs[0].bp_1 = bp_1
+                                dbs[0].bp_2 = bp_2
+                                dbs[0].length = new_len
+                                dbs[0].prec = 0
+                                dbs[0].supp = sum([db.supp for db in dbs])
+                                read_ids = []
+                                for db in dbs:
+                                    read_ids += db.supp_read_ids
+                                dbs[0].supp_read_ids = list(set(read_ids))
+                                for db in dbs[1:]:
+                                    db.is_pass = 'FAIL_VNTR'
     
 def get_phasingblocks(hb_vcf):
-    MIN_BLOCK_LEN = 10000
-    MIN_SNP = 10
+#    MIN_BLOCK_LEN = 10000
+#    MIN_SNP = 10
     
     vcf = pysam.VariantFile(hb_vcf)
     haplotype_blocks = defaultdict(list)
@@ -1335,9 +1431,9 @@ def get_phasingblocks(hb_vcf):
 
     phased_lengths = []
     for (chr_id, block_name), coords in haplotype_blocks.items():
-        if max(coords) - min(coords) > MIN_BLOCK_LEN and len(coords) >= MIN_SNP:
-            phased_lengths.append(max(coords) - min(coords))
-            id_list[chr_id].append(block_name)
+        #if max(coords) - min(coords) > MIN_BLOCK_LEN and len(coords) >= MIN_SNP:
+        phased_lengths.append(max(coords) - min(coords))
+        id_list[chr_id].append(block_name)
 
     total_phased = sum(phased_lengths)
     _l50, n50 = _calc_nx(phased_lengths, total_phased, 0.50) 
@@ -2286,21 +2382,21 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
         single_bps = []
     
     logger.info('Starting compute_bp_coverage')
+    if args.vntr_file:
+        add_vntr_annot(double_breaks + ins_clusters, args)
     get_coverage_parallel(bam_files, genome_ids, thread_pool, args.min_mapping_quality, double_breaks + ins_clusters + single_bps)
 
         
     logger.info('Filtering breakpoints')
-    double_breaks_filter(double_breaks, args.bp_min_support, cont_id, args.resolve_overlaps, args.sv_size)
+    double_breaks = double_breaks_filter(double_breaks, single_bps, args.bp_min_support, cont_id, args.resolve_overlaps, args.sv_size)
     double_breaks.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position, b.direction_1))
     
     if args.single_bp and single_bps:
         single_bps = filter_single_bp(single_bps, cont_id, args.control_vaf, args.vaf_thr)
-    
     insertion_filter(ins_clusters, args.bp_min_support, cont_id)
     ins_clusters.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position))
    
     double_breaks +=  ins_clusters
-    
     annotate_mut_type(double_breaks, cont_id, args.control_vaf, args.vaf_thr)
         
     logger.info('Writing breakpoints')

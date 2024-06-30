@@ -74,7 +74,7 @@ def filter_vntr_only_segments(split_segs, vntr_list):
                     return True
      
 def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_pos, split_seg_vntr, min_sv_size, ins_seq):
-    
+    BP_TOL = 500
     seg_span_start=[]
     seg_span_end=[]
     is_pass = ''
@@ -83,9 +83,9 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_po
         ins_seq = "<DUP>"
         
     for seg in segments:
-        if not seg_span_start and seg.ref_start <= vntr_strt:
+        if not seg_span_start and seg.ref_start <= vntr_strt-BP_TOL:
             seg_span_start.append(seg)
-        elif seg.ref_end >= vntr_end:
+        elif seg.ref_end >= vntr_end+BP_TOL:
             seg_span_end = [seg]
     
     if not seg_span_start and not seg_span_end:
@@ -177,6 +177,7 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_po
 
 
 def check_spanning(new_read, vntr_loc):
+    BP_TOL = 500
     vntr_strt = vntr_loc[1]
     vntr_end = vntr_loc[2]
     vntr_ref = vntr_loc[0]
@@ -185,7 +186,7 @@ def check_spanning(new_read, vntr_loc):
             continue
         if not seg.ins_pos:
             continue
-        if seg.ref_id == vntr_ref and seg.ins_pos[0] < vntr_strt and seg.ins_pos[1] > vntr_end:
+        if seg.ref_id == vntr_ref and seg.ins_pos[0] < vntr_strt - BP_TOL and seg.ins_pos[1] > vntr_end + BP_TOL:
             return True
 
 def resolve_read_vntr(read, vntr_list, min_sv_size):
