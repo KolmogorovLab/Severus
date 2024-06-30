@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-
+from severus.__version__ import __version__
 from collections import defaultdict
 from datetime import datetime
 import sys
@@ -54,6 +54,8 @@ class vcf_format(object):
             return f"STRANDS={self.strands[0]}{self.strands[1]};"
         
     def has_ins(self):
+        if self.sv_type == 'INS':
+            return ""
         if self.ins_len and self.ins_len_seq:
             return f"INSLEN={self.ins_len};INSSEQ={self.ins_len_seq};"
         elif self.ins_len:
@@ -82,6 +84,8 @@ class vcf_format(object):
         else:
             return ""
     def end_pos(self):
+        if self.alt == '.N':
+            return ''
         if self.sv_type == 'BND':
             if self.mate_id:
                 return f"MATE_ID={self.mate_id};"
@@ -242,7 +246,8 @@ def db_2_vcf(double_breaks, no_ins, sample_ids):
           
         sample = '\t'.join([s.sample() for s in sample_list.values()])
         sample2 = '\t'.join([s.sample() for s in sample_list2.values()])
-            
+        
+        has_ins = 0 if not db.ins_seq else len(db.ins_seq)
         if sv_type == "BND" and not db.is_single:
             if db.bp_2.dir_1 == 1 and db.bp_1.dir_1 == 1:
                 alt1 = 'N]' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + ']'
@@ -261,21 +266,22 @@ def db_2_vcf(double_breaks, no_ins, sample_ids):
             ID2 = ID + '_2'
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID1, sv_type, alt1, db.length, db.vcf_qual, 
                                                      sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type,db.cluster_id,
-                                                     db.has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, ID2,vntr, db.tra_pos))#
+                                                     has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, ID2,vntr, db.tra_pos))#
             vcf_list.append(vcf_format(db.bp_2.ref_id, db.bp_2.position, db.haplotype_1, ID2, sv_type, alt2, db.length, db.vcf_qual, 
                                                      sv_pass, db.bp_1.ref_id, db.bp_1.position, db.mut_type, db.cluster_id,
-                                                     db.has_ins, db.ins_seq,db.sv_type, db.prec, phaseset, strands,sample2, gen_type2, ID1,vntr, db.tra_pos))
+                                                     has_ins, db.ins_seq,db.sv_type, db.prec, phaseset, strands,sample2, gen_type2, ID1,vntr, db.tra_pos))
         elif db.is_single:
             alt= '.N' if db.direction_1 == -1 else 'N.'
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, alt, db.length, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type, db.cluster_id,
-                                                 db.has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.tra_pos))
+                                                 has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.bp_1.pos2))
+            vcf_list[-1].pos2 = db.bp_1.pos2
             
         else:
         
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, sv_type, db.length, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type, db.cluster_id,
-                                                 db.has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.tra_pos))#
+                                                 has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.tra_pos))#
         
         if sv_type == 'INS':
             if not no_ins:
@@ -288,9 +294,10 @@ def db_2_vcf(double_breaks, no_ins, sample_ids):
 
           
 def write_vcf_header(ref_lengths, outfile, sample_list):
+
     sample = '\t'.join(sample_list)
     outfile.write("##fileformat=VCFv4.2\n")
-    outfile.write('##source=Severusv0.1.2\n')
+    outfile.write('##source=Severus v'+ __version__ + '\n')
     outfile.write('##CommandLine= '+ " ".join(sys.argv[1:]) +'\n')
     filedate = str(datetime.now()).split(' ')[0]
     outfile.write('##fileDate='+filedate+'\n')#
