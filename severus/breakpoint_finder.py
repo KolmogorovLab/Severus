@@ -1294,7 +1294,10 @@ def get_sv_type(db):
     if db.sv_type == 'tandem_duplication':
         return 'DUP'
     if db.bp_2.is_insertion or db.bp_1.is_insertion:
-        return 'INS'
+        if db.ins_seq == '<DUP>':
+            return 'DUP'
+        else:
+            return 'INS'
     if not db.bp_1.ref_id == db.bp_2.ref_id:
         return 'BND'
     if db.direction_1 == db.direction_2:
@@ -1351,7 +1354,7 @@ def add_vntr_annot(double_breaks, args):
     MERGE_THR = 150
     MERGE_RAT = 0.25
     for br in double_breaks:
-        if br.vcf_sv_type == 'DEL' or br.vcf_sv_type == 'INS':
+        if br.vcf_sv_type in ['DEL', 'INS', 'DUP']:
             clusters[br.to_string()].append(br)
     
     for cl in clusters.values():

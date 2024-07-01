@@ -112,7 +112,7 @@ class vcf_format(object):
         return f"{self.precision()};SVTYPE={self.sv_type};{self.svlen()}{self.end_pos()}{self.trapos()}{self.strands_vcf()}{self.add_vntr()}{self.detailedtype()}{self.has_ins()}MAPQ={self.qual}{self.HP_inf()}{self.clusterid()}"
     
     def to_vcf(self):
-        if self.ins_seq:
+        if self.sv_type == 'INS':
             return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t{self.ins_seq}\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:hVAF:DR:DV\t{self.sample}\n"
         elif not self.sv_type == self.alt:
             return f"{self.chrom}\t{self.pos}\t{self.ID}\tN\t{self.alt}\t{self.qual}\t{self.Filter}\t{self.info()}\tGT:GQ:VAF:hVAF:DR:DV\t{self.sample}\n"
@@ -188,6 +188,9 @@ def db_2_vcf(double_breaks, no_ins, sample_ids):
         for db in db_clust:
             if new_pass:
                 db.is_pass = 'PASS'
+            if db.ins_seq == '<DUP>':
+                db.ins_seq = ''
+                db.has_ins = ''
             db_list[db.genome_id].append(db)
             
         sv_type = db.vcf_sv_type
@@ -206,7 +209,6 @@ def db_2_vcf(double_breaks, no_ins, sample_ids):
         strands = (dir1, dir2)
         if db.is_single:
             strands = (dir1)
-        
         
         ID = db.vcf_id
         vntr = db.vntr
