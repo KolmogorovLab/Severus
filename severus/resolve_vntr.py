@@ -4,6 +4,7 @@ import bisect
 from collections import  defaultdict
 import logging
 import numpy as np 
+import gzip
 
 from severus.bam_processing import ReadSegment, add_read_qual
 
@@ -14,20 +15,24 @@ def read_vntr_file(vntr_file): ## Add check for chromosome names
     BP_TOL = 25
     vntr_list = defaultdict(list)
     vntrs = []
-    with open(vntr_file)as f:
-        for line in f:
-            vntrs.append(line.strip().split())
-        for tr in vntrs:
-            if not vntr_list[tr[0]]:
-                vntr_list[tr[0]].append([int(tr[1])])
-                vntr_list[tr[0]].append([int(tr[2])])
-                vntr_list[tr[0]].append([int(tr[1]) - BP_TOL])
-                vntr_list[tr[0]].append([int(tr[2]) + BP_TOL])
-            else:
-                vntr_list[tr[0]][0].append(int(tr[1]))
-                vntr_list[tr[0]][1].append(int(tr[2]))
-                vntr_list[tr[0]][2].append(int(tr[1]) - BP_TOL)
-                vntr_list[tr[0]][3].append(int(tr[2]) + BP_TOL)
+    if vntr_file.endswith('.bed'):
+        f = open(vntr_file)
+    else:
+        f = gzip.open(vntr_file,'rt')
+        
+    for line in f:
+        vntrs.append(line.strip().split())
+    for tr in vntrs:
+        if not vntr_list[tr[0]]:
+            vntr_list[tr[0]].append([int(tr[1])])
+            vntr_list[tr[0]].append([int(tr[2])])
+            vntr_list[tr[0]].append([int(tr[1]) - BP_TOL])
+            vntr_list[tr[0]].append([int(tr[2]) + BP_TOL])
+        else:
+            vntr_list[tr[0]][0].append(int(tr[1]))
+            vntr_list[tr[0]][1].append(int(tr[2]))
+            vntr_list[tr[0]][2].append(int(tr[1]) - BP_TOL)
+            vntr_list[tr[0]][3].append(int(tr[2]) + BP_TOL)
     return vntr_list
 
 
@@ -71,7 +76,7 @@ def filter_vntr_only_segments(split_segs, vntr_list):
             if strt - end == 1:
                 vntr_len = tr_reg[1][end] - tr_reg[0][end]
                 if s1.segment_length > vntr_len * OVERLAP_THR:
-                    return True
+                    s1.is_pass = 'vntr_only'
      
 def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_pos, split_seg_vntr, min_sv_size, ins_seq):
     BP_TOL = 500
@@ -213,8 +218,7 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
         else:
             split_segs.append(s)
             
-    if filter_vntr_only_segments(split_segs, vntr_list):
-        return new_read
+    filter_vntr_only_segments(split_segs, vntr_list)
 
     for ins in ins_segs:
         ins_vntr = resolve_vntr_ins(ins, vntr_list)

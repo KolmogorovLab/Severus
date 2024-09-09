@@ -63,6 +63,7 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
     """
     Parses cigar and generate ReadSegment structure with alignment coordinates
     """
+
     CIGAR_MATCH = [0, 7, 8]
     #CIGAR_MM = 8
     CIGAR_DEL = 2
@@ -89,6 +90,8 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
     indel = [b for a, b in cigar if a in [CIGAR_INS, CIGAR_DEL]]
     num_of_mismatch = nm - sum(indel)
     total_segment_length = sum([b for a, b in cigar if a not in CIGAR_CLIP + [CIGAR_DEL]])
+    if total_segment_length == 0:
+        return [[], []] 
     mm_rate = int(num_of_mismatch * K_MM / total_segment_length)
     error_rate = int(nm * K_MM/ total_segment_length)
     read_length = sum([k[1] for k in cigar if k[0] != CIGAR_DEL])
@@ -276,20 +279,32 @@ def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq):
     region_start, region_end = max(0, poslist[0]-3), poslist[-1]+3
     aln_file = pysam.AlignmentFile(bam_file, "rb")
     cov_list = defaultdict(list)
+    BUFF = 50
     for pos in poslist:
-        cov_list[(ref_id, pos)] = [0,0,0]
+        cov_list[(ref_id, pos)] = [0,0,0,0,0]
     for aln in aln_file.fetch(ref_id, region_start, region_end,  multiple_iterators=True):
-        if not aln.is_secondary and not aln.is_unmapped and aln.mapping_quality > min_mapq:
-            
-            strt = bisect.bisect_right(poslist, aln.reference_start)
-            end = bisect.bisect_left(poslist, aln.reference_end)
-            if not strt == end:
-                if aln.has_tag('HP'):
-                    hp = aln.get_tag('HP')
-                else:
-                    hp = 0
-                for pos in poslist[strt:end]:
-                    cov_list[(ref_id, pos)][hp]+=1
+        if not aln.is_unmapped:
+            if aln.is_secondary:
+                strt = bisect.bisect_left(poslist, aln.reference_start)
+                end = bisect.bisect_right(poslist, aln.reference_end)
+                if not strt == end:
+                    for pos in poslist[strt:end]:
+                        if abs(aln.reference_start - pos) <= BUFF:
+                            cov_list[(ref_id, pos)][4]+=1
+                            
+                        elif abs(aln.reference_end - pos) <= BUFF:
+                            cov_list[(ref_id, pos)][3]+=1
+                            
+            elif aln.mapping_quality > min_mapq:
+                strt = bisect.bisect_right(poslist, aln.reference_start)
+                end = bisect.bisect_left(poslist, aln.reference_end)
+                if not strt == end:
+                    if aln.has_tag('HP'):
+                        hp = aln.get_tag('HP')
+                    else:
+                        hp = 0
+                    for pos in poslist[strt:end]:
+                        cov_list[(ref_id, pos)][hp]+=1
     return cov_list
 
 

@@ -91,7 +91,7 @@ class vcf_format(object):
                 return f"MATE_ID={self.mate_id};"
             else:
                 return ""
-        elif self.sv_type == 'DEL' or self.sv_type == 'DUP':
+        elif self.sv_type == 'DEL' or self.sv_type == 'DUP' or self.sv_type == 'INV':
             return  f"END={self.pos2};"
         else:
             return ""
@@ -211,7 +211,7 @@ def db_2_vcf(double_breaks, no_ins, sample_ids):
             strands = (dir1)
         
         ID = db.vcf_id
-        vntr = db.vntr
+        vntr = True if db.vntr else None
         
         if db.genotype == 'hom':
             gen_type1 = ''
@@ -278,7 +278,13 @@ def db_2_vcf(double_breaks, no_ins, sample_ids):
                                                  sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type, db.cluster_id,
                                                  has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.bp_1.pos2))
             vcf_list[-1].pos2 = db.bp_1.pos2
-            
+        elif sv_type == 'INV':
+            if db.direction_1 == -1:
+                continue
+            pos1 , pos2 = int(min(db.sv_type)), int(max(db.sv_type))
+            vcf_list.append(vcf_format(db.bp_1.ref_id, pos1, db.haplotype_1, ID, sv_type, sv_type, pos2-pos1, db.vcf_qual, 
+                                                 sv_pass, db.bp_2.ref_id, pos2, db.mut_type, db.cluster_id,
+                                                 has_ins, db.ins_seq, 'reciprocal_inversion', db.prec, phaseset, strands,sample, gen_type1, None,vntr, None))            
         else:
         
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, sv_type, db.length, db.vcf_qual, 

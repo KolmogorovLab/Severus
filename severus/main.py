@@ -126,6 +126,7 @@ def main():
     parser.add_argument("--output-read-ids", dest='output_read_ids', action = "store_true", help = 'to output supporting read ids')
     parser.add_argument("--between-junction-ins", dest='ins_seq', action = "store_true", help = 'reports unmapped sequence between breakpoints')
     parser.add_argument("--use-supplementary-tag", dest='use_supplementary_tag', action = "store_true", help = 'Uses haplotype tag in supplementary alignments')
+    parser.add_argument("--PON", dest='pon_file', metavar="path", help = 'Uses PON data')
     
     
     args = parser.parse_args()
@@ -135,8 +136,8 @@ def main():
         args.control_bam = []
         args.only_germline = True
     all_bams = args.target_bam + args.control_bam
-    target_genomes = list(set(os.path.basename(b) for b in args.target_bam))
-    control_genomes = list(set(os.path.basename(b) for b in args.control_bam))
+    target_genomes = list(set(args.target_bam))
+    control_genomes = list(set(args.control_bam))
 
     if not os.path.isdir(args.out_dir):
         os.makedirs(args.out_dir)
@@ -169,11 +170,14 @@ def main():
         logger.error("Error: Control bam also inputted as target bam")
         return 1
         
+    if not (args.vntr_file.endswith('.bed') or args.vntr_file.endswith('.bed.gz')):
+        logger.error("Error: VNTR annotation file should be in bed or bed.gz format")
+        return 1
         
     if args.bp_min_support == 0:
         args.bp_min_support = 3
     else:
-        args.vaf_thr = 0        
+        args.vaf_thr = 0
 
     #TODO: check that all bams have the same reference
     first_bam = all_bams[0]
@@ -199,17 +203,17 @@ def main():
     
     dups = [item for item, count in Counter(genome_ids).items() if count > 1]
     if dups:
-        dup_ids = ','.join(dups)
-        logger.info(f"Warning: Dupicated bam name found for {dup_ids}")
         genome_ids = all_bams
         for bam_file in all_bams:
             bam_files[bam_file] = bam_file
-            target_genomes = args.target_bam
-            control_genomes = args.control_bam
+        target_genomes = args.target_bam
+        control_genomes = args.control_bam
     else:
         for bam_file in all_bams:
             genome_id = os.path.basename(bam_file)
             bam_files[genome_id] = bam_file
+        target_genomes = [os.path.basename(bam_file) for bam_file in args.target_bam]
+        control_genomes = [os.path.basename(bam_file) for bam_file in args.control_bam]
 
     args.min_aligned_length = MIN_ALIGNED_LENGTH
     coverage_histograms = init_hist(genome_ids, ref_lengths)
