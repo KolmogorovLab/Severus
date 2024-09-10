@@ -23,6 +23,7 @@ If you use Severus, please cite https://www.medrxiv.org/content/10.1101/2024.03.
 * [Overview of the Severus algorithm](#overview-of-the-severus-algorithm)
 * [Preparing phased and haplotagged alignments](#preparing-phased-and-haplotagged-alignments)
 * [Generating VNTR annotation](#generating-vntr-annotation)
+* [Generating PoN file](#generating-pon-file)
 * [Additional Fields in the vcf](#additional-fields-in-the-vcf)
 * [Breakpoint Graphs](#breakpoint-graphs)
 
@@ -49,14 +50,16 @@ conda activate severus_env
 
 ## Quick Usage
 
-Single sample SV calling
+Single sample SV calling (Tumor-only)
 
 ```
 severus --target-bam phased_tumor.bam --out-dir severus_out -t 16 --phasing-vcf phased.vcf \
-    --vntr-bed ./vntrs/human_GRCh38_no_alt_analysis_set.trf.bed
+    --vntr-bed ./vntrs/human_GRCh38_no_alt_analysis_set.trf.bed --PON ./pon/PoN_1000G_hg38.tsv.gz
 ```
+We are currently providing two PoN files for GRCh38 and chm13 which are generated using [1000G data](https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1KG_ONT_VIENNA/release/v1.0/). 
+If you use any of these please cite [this paper](https://www.biorxiv.org/content/10.1101/2024.04.18.590093v1) . To generate a PoN file please see [below](#generating-pon-file)
 
-Single sample somatic SV calling
+Single sample somatic SV calling (Tumor/Normal pair)
 
 ```
 severus --target-bam phased_tumor.bam --control-bam phased_normal.bam --out-dir severus_out \
@@ -378,7 +381,7 @@ Alignments to highly repetitive regions are often ambigous and leads false posit
 
 In the example above, alignment led two deletion inside a vntr. Severus combines two deletions and transform them into a single longer deletion.
 
-VNTR annotation file for the most commonly used genomes are generated using [findTandemRepeats](https://github.com/PacificBiosciences/pbsv/tree/master/annotations) and provided in the [vntrs](../vntrs) folder .
+VNTR annotation file for the most commonly used genomes are generated using [findTandemRepeats](https://github.com/PacificBiosciences/pbsv/tree/master/annotations) and provided in the [vntrs](vntrs) folder .
 
 To generate VNTR annotation file for a new genome using [findTandemRepeats](https://github.com/PacificBiosciences/pbsv/tree/master/annotations):
 
@@ -386,6 +389,9 @@ To generate VNTR annotation file for a new genome using [findTandemRepeats](http
 findTandemRepeats --merge <REF>.fa <REF>.trf.bed
 
 ```
+## Generating PoN file
+
+To improve the computation time, Severus requires a summary text file generated using the vcf file. To generate a PoN data from a multisample vcf file please see [the script](scripts/pon_from_vcf.py) 
 
 ## Additional fields in the vcf
 
