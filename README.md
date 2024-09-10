@@ -391,7 +391,9 @@ findTandemRepeats --merge <REF>.fa <REF>.trf.bed
 ```
 ## Generating PoN file
 
-To improve the computation time, Severus requires a summary text file generated using the vcf file. To generate a PoN data from a multisample vcf file please see [the script](scripts/pon_from_vcf.py) 
+To improve the computation time, Severus requires a summary text file generated using the vcf file. To generate a PoN data from a multisample vcf file please see [the script](scripts/pon_from_vcf.py).
+
+The PoN files provided in the [pon](pon) directory are generated using [Delly results from the 1000 Genomes project](https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1KG_ONT_VIENNA/release/v1.0/). If you use any of the provided files, [please cite](https://www.biorxiv.org/content/10.1101/2024.04.18.590093v1). 
 
 ## Additional fields in the vcf
 
