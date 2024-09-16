@@ -670,7 +670,6 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
     ins_clusters = []
     
     for seq, ins_pos in ins_list.items():
-     
         clipped_to_remove = []
         clusters = []
         cur_cluster = []
@@ -678,6 +677,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
         clipped_clusters_seq = clipped_clusters[seq]
         clipped_clusters_seq.sort(key=lambda x:x.position)
         clipped_clusters_pos = [bp.position for bp in clipped_clusters_seq]
+        
         for rc in ins_pos:
             if cur_cluster and rc.ref_end - cur_cluster[-1].ref_end > CLUST_LEN:
                 cur_cluster.sort(key=lambda x:x.segment_length)
@@ -693,9 +693,10 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
                 cur_cluster = [rc]
             else:
                 cur_cluster.append(rc)
+                
         if cur_cluster:
             clusters.append(cur_cluster)
-    
+            
         for cl in clusters:
             unique_reads_pass = defaultdict(set)
             unique_reads = defaultdict(set)
@@ -706,29 +707,22 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
                 unique_reads_read[(x.genome_id, x.haplotype)].add(x.read_id)
                 if x.is_pass == 'PASS':
                     unique_reads_pass[(x.genome_id, x.haplotype)].add(x)#
-                    
             by_genome_id_pass = defaultdict(int)
-            
             for key, values in unique_reads.items():
                 if unique_reads_pass[key]:
                     by_genome_id_pass[key[0]] += len(set([red.read_id for red in unique_reads_pass[key]]))
-                    
             if not by_genome_id_pass.values() or max(by_genome_id_pass.values()) < MIN_FULL_READ_SUPP:
                 continue
-            
             pos_list = [x.ref_end_ori for reads in unique_reads_pass.values() for x in reads]
             pos_list.sort()
             s_len = [x.segment_length for reads in unique_reads_pass.values() for x in reads]
             ins_length = int(np.median(s_len))
-            
             if ins_length * (len(s_len) + 1) < abs(pos_list[-1] - pos_list[0]):
                 continue
-            
             if max(pos_list) - min(pos_list) > 2 * sv_size:
                 prec = 0
             elif np.std(s_len) / np.mean(s_len) > CV_THR:
                 prec = 0
-                
             position = int(np.median(pos_list))
             mapq = int(np.median([x.mapq for x in cl if x.is_pass == 'PASS']))
             
@@ -741,9 +735,9 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
                 continue
             
             if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank:
-                cl = add_clipped_end(ins_length, position, clipped_clusters_pos, clipped_clusters_seq, by_genome_id_pass,unique_reads_pass)
-                if cl:
-                    clipped_to_remove.append(cl)
+                cl2 = add_clipped_end(ins_length, position, clipped_clusters_pos, clipped_clusters_seq, by_genome_id_pass,unique_reads_pass)
+                if cl2:
+                    clipped_to_remove.append(cl2)
                 if not by_genome_id_pass.values() or not max(by_genome_id_pass.values()) >= min_reads:
                     continue#
                 for key, unique_reads in unique_reads.items():
@@ -981,7 +975,7 @@ def add_clipped_end(ins_length,position, clipped_clusters_pos, clipped_clusters_
     if ind < len(clipped_clusters_pos)-1 and abs(clipped_clusters_pos[ind] - position) < sv_diff:
         cl = clipped_clusters_seq[ind]
     elif ind > 0 and abs(clipped_clusters_pos[ind - 1] - position) < sv_diff:
-        cl = clipped_clusters_seq[ind - 1]
+        cl= clipped_clusters_seq[ind - 1]
         
     if cl:
         cl.pos2.append(position)
@@ -991,7 +985,7 @@ def add_clipped_end(ins_length,position, clipped_clusters_pos, clipped_clusters_
                 
         for key, values in unique_reads_pass.items():
             if unique_reads_pass[key]:
-                by_genome_id_pass[key[0]] = len(unique_reads_pass[key])
+                by_genome_id_pass[key[0]] += len(unique_reads_pass[key])
                 
     return cl
 
@@ -1401,6 +1395,7 @@ def check_vntr(db, vntr_list):
             return (tr_reg[2][strt-1], tr_reg[3][strt-1])
         
 def add_vntr_annot(double_breaks, args):
+   
     vntr_list = read_vntr_file(args.vntr_file)
     add_sv_type(double_breaks)
     clusters = defaultdict(list)
@@ -1408,7 +1403,7 @@ def add_vntr_annot(double_breaks, args):
     MERGE_THR = 150
     MERGE_RAT = 0.25
     for br in double_breaks:
-        if br.vcf_sv_type in ['DEL', 'INS', 'DUP']:
+        if br.bp_1.ref_id == br.bp_2.ref_id and not br.direction_1 == br.direction_2:
             clusters[br.to_string()].append(br)
     
     for cl in clusters.values():
@@ -1417,7 +1412,7 @@ def add_vntr_annot(double_breaks, args):
             vntr_clusters[(cl[0].bp_1.ref_id, vntr)].append(cl)
             for db in cl:
                 db.vntr = vntr
-            if cl[0].vcf_sv_type == 'DEL':
+            if cl[0].vcf_sv_type == 'BND':
                 pass_conn = [1 for (a,b) in cl[0].bp_1.connections if not a.is_pass == b.is_pass == 'vntr_only']
                 if len(pass_conn) < 2:
                     for db in cl:
@@ -1456,7 +1451,7 @@ def add_vntr_annot(double_breaks, args):
                             by_genome_id = defaultdict(list)
                             bp_1 = cl[0][0].bp_1
                             bp_2 = cl[0][0].bp_2
-                            if key == 'DEL':
+                            if key == 'BND':
                                 bp_2.position = bp_1.position + new_len
                             for c in cl:
                                 for db in c:
@@ -1465,6 +1460,7 @@ def add_vntr_annot(double_breaks, args):
                                 dbs[0].bp_1 = bp_1
                                 dbs[0].bp_2 = bp_2
                                 dbs[0].length = new_len
+                                dbs[0].vntr = cl[0][0].vntr
                                 dbs[0].prec = 0
                                 dbs[0].supp = sum([db.supp for db in dbs])
                                 read_ids = []
@@ -1824,7 +1820,7 @@ def add_pon(db_clust, pon_ls):
                 len_diff = abs(pon_ls[2][ind] - db.bp_2.position)
                 
             sum_diff = abs(pon_ls[0][ind] - db.bp_1.position) + len_diff
-            sum_CI = pon_ls[1][ind] + pon_ls[3][ind] +  max(db.bp_1.CI, db.bp_2.CI)
+            sum_CI = max(pon_ls[1][ind], pon_ls[3][ind]) +  max(db.bp_1.CI, db.bp_2.CI)
             if (len_diff <= MAX_LEN_DIFF and sum_diff <= VNTR_CLUST_LEN) or sum_diff <= sum_CI + max_diff:
                 mut_type = 'germline'
                 break
