@@ -61,6 +61,7 @@ def main():
     MIN_REF_FLANK = 10000
     MAX_GENOMIC_LEN = 2000000
     MIN_ALIGNED_LENGTH = 7000
+    MAX_SEGMENT_DIST = 1000
 
     #breakpoint
     BP_CLUSTER_SIZE = 50
@@ -125,6 +126,7 @@ def main():
     parser.add_argument("--ins-to-tra", dest='tra_to_ins', action = "store_false", help = 'converts insertions to translocations if mapping is known')
     parser.add_argument("--output-read-ids", dest='output_read_ids', action = "store_true", help = 'to output supporting read ids')
     parser.add_argument("--between-junction-ins", dest='ins_seq', action = "store_true", help = 'reports unmapped sequence between breakpoints')
+    parser.add_argument("--max-unmapped-seq", dest='max_segment_dist',default=MAX_SEGMENT_DIST, metavar="int", type=int, help = 'maximum length of unmapped sequence between two mapped segments (if --between-junction-ins is selected the unmapped sequnce will be reported in the vcf)'')')
     parser.add_argument("--use-supplementary-tag", dest='use_supplementary_tag', action = "store_true", help = 'Uses haplotype tag in supplementary alignments')
     parser.add_argument("--PON", dest='pon_file', metavar="path", help = 'Uses PON data')
     

@@ -305,7 +305,7 @@ def write_vcf_header(ref_lengths, outfile, sample_list):
 
     sample = '\t'.join(sample_list)
     outfile.write("##fileformat=VCFv4.2\n")
-    outfile.write('##source=Severus v'+ __version__ + '\n')
+    outfile.write('##source=Severus_v'+ __version__ + '\n')
     outfile.write('##CommandLine= '+ " ".join(sys.argv[1:]) +'\n')
     filedate = str(datetime.now()).split(' ')[0]
     outfile.write('##fileDate='+filedate+'\n')#
@@ -314,7 +314,7 @@ def write_vcf_header(ref_lengths, outfile, sample_list):
     outfile.write('##ALT=<ID=DEL,Description="Deletion">\n')
     outfile.write('##ALT=<ID=INS,Description="Insertion">\n')
     outfile.write('##ALT=<ID=DUP,Description="Duplication">\n')
-    outfile.write('##ALT=<ID=INV,Description="Inversion">\n')
+    outfile.write('##ALT=<ID=INV,Description="Reciprocal Inversion">\n')
     outfile.write('##ALT=<ID=BND,Description="Breakend">\n')#
 
     outfile.write('##FILTER=<ID=PASS,Description="All filters passed">\n')
@@ -327,7 +327,6 @@ def write_vcf_header(ref_lengths, outfile, sample_list):
     outfile.write("##INFO=<ID=IMPRECISE,Number=0,Type=Flag,Description=\"SV with imprecise breakpoints coordinates and length\">\n")
     outfile.write("##INFO=<ID=SVTYPE,Number=1,Type=String,Description=\"Type of structural variant\">\n")
     outfile.write("##INFO=<ID=SVLEN,Number=1,Type=Integer,Description=\"Length of the SV\">\n")
-    outfile.write("##INFO=<ID=CHR2,Number=1,Type=String,Description=\"Chromosome for END coordinate\">\n")
     outfile.write("##INFO=<ID=END,Number=1,Type=Integer,Description=\"End position of the SV\">\n")
     outfile.write("##INFO=<ID=STRANDS,Number=1,Type=String,Description=\"Breakpoint strandedness\">\n")
     outfile.write("##INFO=<ID=DETAILED_TYPE,Number=1,Type=String,Description=\"Detailed type of the SV\">\n")

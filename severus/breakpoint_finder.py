@@ -194,7 +194,6 @@ def get_breakpoints(split_reads, ref_lengths, args):
     min_reads = args.bp_min_support
     min_ref_flank = args.min_ref_flank 
     sv_size = args.min_sv_size
-    MAX_SEGMENT_DIST= 7000
     MAX_CONN = 7
     single_bps = []
     
@@ -212,9 +211,9 @@ def get_breakpoints(split_reads, ref_lengths, args):
         
     for read_segments in split_reads:
         read_segments.sort(key=lambda x:(x.align_start, x.read_start))
-        read_segments = [r for r in read_segments if r.is_pass == 'PASS' or r.segment_length >= MAX_SEGMENT_DIST]
+        read_segments = [r for r in read_segments if r.is_pass == 'PASS' or r.segment_length >= args.max_segment_dist]
         for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
-            if s2.read_start - s1.read_end < MAX_SEGMENT_DIST:
+            if s2.read_start - s1.read_end < args.max_segment_dist:
                 _add_double(s1, s2)
           
     all_breaks = []
@@ -243,7 +242,7 @@ def get_breakpoints(split_reads, ref_lengths, args):
         db = get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads,bp_ls)
         if db:
             double_breaks += db
-    double_breaks = match_del(double_breaks)
+    double_breaks = match_del(double_breaks, args.resolve_overlaps)
     
     return double_breaks, single_bps
 
@@ -390,7 +389,7 @@ def get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads, bp_ls):
     return db_list
     
 
-def match_del(double_breaks):
+def match_del(double_breaks, resolve_overlaps):
     DEL_THR = 20000
     CLUSTER_SIZE = 50
 
@@ -401,6 +400,9 @@ def match_del(double_breaks):
         if db.bp_1.ref_id == db.bp_2.ref_id and db.bp_1.dir_1 == 1 and db.bp_2.dir_1 == -1 and db.length <= DEL_THR:
             clusters[db.to_string()].append(db)
             
+    if resolve_overlaps:
+        resolve_ovlp(clusters) 
+        
     for cl in clusters.values():
         db = cl[0]
         db_list[db.bp_1.ref_id].append((db.bp_1.position, cl))
@@ -506,13 +508,15 @@ def check_db(cl, conn_1, ind):
     CHR_CONN = 2
     MIN_MAPQ = 30
     db = cl[0]
+    
     if db.bp_1.ref_id == db.bp_2.ref_id and db.bp_1.position > db.bp_2.position:
         return 'FAIL_MAP_CONS'
+    
     conn_pass_1 =[cn for cn in conn_1 if cn[ind].is_pass == 'PASS']
     conn_count_1 = Counter([cn[ind].is_pass for cn in conn_1])
     supp_read = sum([db.supp for db in cl])
     ind2 = db.direction_1 if ind == 0 else db.direction_2
-    ind2  = 3 if ind2 == -1 else 4
+    ind2  = 4 if ind2 == -1 else 3
     sec = [db.bp_1.spanning_reads[db.genome_id][ind2] if ind == 0 else db.bp_2.spanning_reads[db.genome_id][ind2] for db in cl]
     
     if max(supp_read * SEC_TO_PR,2) <= sum(sec):
@@ -581,7 +585,7 @@ def double_breaks_filter(double_breaks, single_bps, min_reads, control_id, resol
             if fail2 == 'FAIL_CONN_CONS' and db.bp_2.qual >= MIN_QUAL:
                 add_single_bp(cl, 1, single_bps)
                 
-            if not 'FAIL_CONN_CONS' in [fail1, fail2]:
+            else:
                 for db1 in cl:
                     db1.is_pass = fail1
                 
@@ -598,9 +602,6 @@ def double_breaks_filter(double_breaks, single_bps, min_reads, control_id, resol
                 s1,s2 = sorted(cn, key=lambda x:(x.align_start, x.read_start))
                 for db1 in cl:
                     db1.has_ins = (s1, s2, has_ins_len)
-    
-    if resolve_overlaps:
-        resolve_ovlp(clusters) 
        
     if  control_id:
         for cl in clusters.values():
@@ -725,31 +726,29 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
                 prec = 0
             position = int(np.median(pos_list))
             mapq = int(np.median([x.mapq for x in cl if x.is_pass == 'PASS']))
-            
             ins_seq_loc = [i for i , x in enumerate(cl) if x.ins_seq and ':' not in x.ins_seq]
             if not ins_seq_loc:
                 ins_seq_loc = [i for i , x in enumerate(cl) if x.ins_seq]
-                
             ins_seq = cl[int(np.median(ins_seq_loc))].ins_seq
             if ins_length < sv_size:
                 continue
             
             if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank:
-                cl2 = add_clipped_end(ins_length, position, clipped_clusters_pos, clipped_clusters_seq, by_genome_id_pass,unique_reads_pass)
+                cl2 = add_clipped_end(ins_length, position, clipped_clusters_pos, clipped_clusters_seq, by_genome_id_pass,unique_reads_pass, unique_reads)
                 if cl2:
                     clipped_to_remove.append(cl2)
                 if not by_genome_id_pass.values() or not max(by_genome_id_pass.values()) >= min_reads:
                     continue#
-                for key, unique_reads in unique_reads.items():
+                for key, unique_read in unique_reads.items():
                     #unique_reads = unique_reads_pass[key]
                     bp_1 = Breakpoint(seq, position, -1, mapq, max(pos_list) - min(pos_list))
-                    bp_1.read_ids = [x.read_id for x in unique_reads]
-                    bp_1.connections = unique_reads
+                    bp_1.read_ids = [x.read_id for x in unique_read]
+                    bp_1.connections = unique_read
                     bp_3 = Breakpoint(seq, position, 1, mapq, max(pos_list) - min(pos_list))
                     bp_3.is_insertion = True
                     bp_3.insertion_size = ins_length
                     supp = len(unique_reads_read[key])
-                    supp_reads = [s.read_id for s in unique_reads]
+                    supp_reads = [s.read_id for s in unique_read]
                     genome_id = key[0]
                     
                     db_1 = DoubleBreak(bp_1, -1, bp_3, 1, genome_id, key[1], key[1], supp, supp_reads, ins_length)
@@ -967,7 +966,7 @@ def filter_single_bp(single_bps, cont_id, control_vaf, vaf_thr, min_supp):
             t+=1
     return sbp_list
 
-def add_clipped_end(ins_length,position, clipped_clusters_pos, clipped_clusters_seq, by_genome_id_pass, unique_reads_pass):
+def add_clipped_end(ins_length,position, clipped_clusters_pos, clipped_clusters_seq, by_genome_id_pass, unique_reads_pass, unique_reads):
     
     ind = bisect.bisect_left(clipped_clusters_pos, position)
     cl = []
@@ -980,12 +979,15 @@ def add_clipped_end(ins_length,position, clipped_clusters_pos, clipped_clusters_
     if cl:
         cl.pos2.append(position)
         for x in cl.connections:
+            unique_reads[(x.genome_id,x.haplotype)].add(x)
             if x.is_pass == 'PASS':
                 unique_reads_pass[(x.genome_id,x.haplotype)].add(x)
+                
                 
         for key, values in unique_reads_pass.items():
             if unique_reads_pass[key]:
                 by_genome_id_pass[key[0]] += len(unique_reads_pass[key])
+        
                 
     return cl
 
