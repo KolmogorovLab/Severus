@@ -627,11 +627,9 @@ def build_breakpoint_graph(genomic_segments, adj_segments,
             
             
 def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, control_genomes, ref_lengths, args):
-    keys = ['germline', 'somatic']
+    keys = ['germline', 'somatic'] if control_genomes or args.pon_file else ['germline']
     
     for key in keys:
-        if not key in list(db_list.keys()):
-            continue
         double_breaks = db_list[key]
         
         sub_fol = "all_SVs" if key == 'germline' else 'somatic_SVs'

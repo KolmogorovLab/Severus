@@ -1354,11 +1354,13 @@ def get_sv_type(db):
     if db.sv_type == 'DEL':
         db.sv_type = ''
         return 'DEL'
+    if db.vcf_sv_type:
+        return db.vcf_sv_type
     else:
         return 'BND'        
 
 def filter_germline_db(double_breaks):
-    db_list = defaultdict(list) 
+    db_list = defaultdict(list)
     for db in double_breaks:
         db_list['germline'].append(db)
         if db.mut_type == 'somatic':
@@ -1377,7 +1379,6 @@ def filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segmen
             db_list.append(db)
         
     cluster_db(db_list, coverage_histograms, min_sv_size)
-    add_sv_type(db_list)
     
     if ins_seq:
         add_insseq(db_list, segments_by_read, bam_files, thread_pool)
@@ -1566,6 +1567,7 @@ def get_genomic_segments(double_breaks, coverage_histograms, hb_vcf, key_type, r
     if key_type == 'germline' and hb_points:
         add_phaseset_id(double_breaks, hb_points)
         cluster_inversions(double_breaks, coverage_histograms, min_sv_size)
+        add_sv_type(double_breaks)
         
     clusters = defaultdict(list)
     for br in double_breaks:
