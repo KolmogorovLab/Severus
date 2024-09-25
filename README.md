@@ -103,6 +103,11 @@ along with complexSV clusters and additional information about SVs. See [below][
 --vntr-bed        path to bed file for tandem repeat regions (must be ordered)
 --phasing-vcf     path to vcf file used for phasing (if using haplotype specific SV calling)
 ```
+#### For Tumor-only runs
+
+```
+--PON             path to the panel of normal file (e.g. ./pon/PoN_1000G_hg38.tsv.gz)
+```
 
 ### Optional parameters
 
