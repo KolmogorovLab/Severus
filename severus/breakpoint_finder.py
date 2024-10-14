@@ -86,7 +86,7 @@ class DoubleBreak(object):
         self.is_pass = 'PASS'
         self.ins_seq = None
         self.is_dup = None
-        self.mut_type = 'germline'
+        self.mut_type = None
         self.has_ins = 0
         self.subgraph_id = []
         self.sv_type = None
@@ -657,6 +657,45 @@ def resolve_ovlp(clusters):
             db.bp_2.position += ovlp
         db.length = abs(db.bp_2.position - db.bp_1.position) if db.length else 0
 
+def check_insseq(conn):
+    MIN_SIM = 0.7
+    LEN_TOL = 50
+    
+    cl = [c for c in conn if c.ins_seq]
+    pos = np.median([c.ref_end_ori for c in cl if c.is_pass == 'PASS'])
+    seg_len = np.median([c.segment_length for c in cl if c.is_pass == 'PASS'])
+    score = 0
+    ins_seq_pos = 0
+    
+    for i,c in enumerate(cl):
+        ns = abs(c.ref_end_ori - pos) + abs(c.segment_length - seg_len)
+        if score == 0 or score > ns:
+            score = ns
+            ins_seq_pos = i
+            
+    ins_seq = cl[ins_seq_pos].ins_seq
+    kmers = set()
+    new_cl = []
+    
+    for kmer in iter_kmers(ins_seq):
+        kmers.add(kmer)
+    min_score = len(kmers)* MIN_SIM
+    for c in cl:
+        seq1 = c.ins_seq
+        score = 0      
+        for kmer in iter_kmers(seq1):
+            if kmer in kmers:
+                score += 1
+        diff = max(abs(len(seq1)- len(ins_seq)), LEN_TOL)
+        if score > min_score - diff:
+            new_cl.append(c)
+    return new_cl, ins_seq
+
+def iter_kmers(seq):
+    KMER = 6
+    SKIP = 1
+    for i in range(0, len(seq) - KMER, SKIP):
+        yield seq[i:i + KMER]
               
 def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
 
@@ -698,7 +737,10 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
         if cur_cluster:
             clusters.append(cur_cluster)
             
-        for cl in clusters:
+        for o_cl in clusters:
+            cl, ins_seq = check_insseq(o_cl)
+            if not cl:
+                continue
             unique_reads_pass = defaultdict(set)
             unique_reads = defaultdict(set)
             unique_reads_read = defaultdict(set)
@@ -726,10 +768,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
                 prec = 0
             position = int(np.median(pos_list))
             mapq = int(np.median([x.mapq for x in cl if x.is_pass == 'PASS']))
-            ins_seq_loc = [i for i , x in enumerate(cl) if x.ins_seq and ':' not in x.ins_seq]
-            if not ins_seq_loc:
-                ins_seq_loc = [i for i , x in enumerate(cl) if x.ins_seq]
-            ins_seq = cl[int(np.median(ins_seq_loc))].ins_seq
+            
             if ins_length < sv_size:
                 continue
             
@@ -812,9 +851,36 @@ def insertion_filter(ins_list, min_reads, control_id):
                         ins1.is_pass = 'FAIL_LOWCOV_NORMAL'
     
     match_haplotypes(ins_list)
+    match_small_ins(ins_list, control_id)
 
+def match_small_ins(ins_clusters, control_id):
+    MERGE_THR = 2000
+    MIN_SIM = 0.7
+    ins_ls = defaultdict(list)
+    for ins in ins_clusters:
+        ins_ls[ins.bp_1.ref_id].append(ins)
     
-
+    for insls in ins_ls.values():
+        clusters = defaultdict(list)
+        for ins in insls:
+            clusters[ins.to_string()].append(ins)
+            
+        for ins1, ins2 in zip(list(clusters.values())[:-1], list(clusters.values())[1:]):
+            if ins2[0].bp_1.position - ins1[0].bp_1.position < MERGE_THR:
+                ins_seq1 = ins1[0].ins_seq
+                ins_seq2 = ins2[0].ins_seq
+                kmers1 = set()
+                kmers2 = set()
+                for kmer in iter_kmers(ins_seq1):
+                    kmers1.add(kmer)
+                for kmer in iter_kmers(ins_seq2):
+                    kmers2.add(kmer)
+                min_score = min(len(kmers1), len(kmers2)) * MIN_SIM
+                if len(kmers1.intersection(kmers2)) >= min_score:
+                    to_fail = ins1 if len(ins_seq1) <= len(ins_seq2) else ins2
+                    for ins in to_fail:
+                        ins.is_pass = 'FAIL_MERGED'
+                    
 def get_clipped_reads(segments_by_read):
     clipped_reads = defaultdict(list)
     for read in segments_by_read:
@@ -1317,7 +1383,7 @@ def annotate_mut_type(double_breaks, control_id, control_vaf, vaf_thr, min_supp,
         for db in db_clust:
             db.vaf_pass = vaf_pass
         
-        if control_id:
+        if control_id and not db.mut_type:
             add_mut_type(db_list, control_id, control_vaf)
             
         if pon_file:
