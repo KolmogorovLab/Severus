@@ -274,7 +274,7 @@ def db_2_vcf(double_breaks, no_ins, sample_ids):
                                                      has_ins, db.ins_seq,db.sv_type, db.prec, phaseset, strands,sample2, gen_type2, ID1,vntr, db.tra_pos))
         elif db.is_single:
             alt= '.N' if db.direction_1 == -1 else 'N.'
-            vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, alt, db.length, db.vcf_qual, 
+            vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, 'sBND', alt, db.length, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type, db.cluster_id,
                                                  has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.bp_1.pos2))
             vcf_list[-1].pos2 = db.bp_1.pos2

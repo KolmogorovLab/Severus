@@ -1630,8 +1630,9 @@ def get_genomic_segments(double_breaks, coverage_histograms, hb_vcf, key_type, r
     if hb_vcf:
         hb_points = get_phasingblocks(hb_vcf)
     
-    if key_type == 'germline' and hb_points:
-        add_phaseset_id(double_breaks, hb_points)
+    if key_type == 'germline':
+        if hb_points:
+            add_phaseset_id(double_breaks, hb_points)
         cluster_inversions(double_breaks, coverage_histograms, min_sv_size)
         add_sv_type(double_breaks)
         
