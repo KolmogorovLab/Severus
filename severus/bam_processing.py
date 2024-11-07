@@ -284,7 +284,7 @@ def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq):
     if not ref_id in ref_lengths.keys():
         return cov_list
     
-    region_end = min(region_end, ref_lengths[ref_id])
+    #region_end = min(region_end, ref_lengths[ref_id])
         
     for aln in aln_file.fetch(ref_id, region_start, region_end,  multiple_iterators=True):
         if not aln.is_unmapped:
