@@ -172,7 +172,7 @@ def main():
         logger.error("Error: Control bam also inputted as target bam")
         return 1
         
-    if not (args.vntr_file.endswith('.bed') or args.vntr_file.endswith('.bed.gz')):
+    if args.vntr_file and not (args.vntr_file.endswith('.bed') or args.vntr_file.endswith('.bed.gz')):
         logger.error("Error: VNTR annotation file should be in bed or bed.gz format")
         return 1
         
@@ -240,4 +240,4 @@ def main():
 
     double_breaks = call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_files, genome_ids, control_genomes, thread_pool, args)
     
-    output_graphs(double_breaks, coverage_histograms, thread_pool, target_genomes, control_genomes, ref_lengths, args)
+    output_graphs(double_breaks, coverage_histograms, thread_pool, target_genomes, control_genomes, genome_ids, ref_lengths, args)

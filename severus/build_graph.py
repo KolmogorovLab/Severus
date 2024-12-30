@@ -8,7 +8,7 @@ import numpy as np
 import plotly
 import plotly.graph_objects as go
 
-from severus.breakpoint_finder import get_genomic_segments, cluster_indels
+from severus.breakpoint_finder import get_genomic_segments, cluster_indels, output_readids
 from severus.vcf_output import write_to_vcf
 
 logger = logging.getLogger()
@@ -626,7 +626,7 @@ def build_breakpoint_graph(genomic_segments, adj_segments,
     return graph, adj_clusters, db_to_cl
             
             
-def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, control_genomes, ref_lengths, args):
+def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, control_genomes, genome_ids, ref_lengths, args):
     keys = ['germline', 'somatic'] if control_genomes or args.pon_file else ['germline']
     
     for key in keys:
@@ -658,6 +658,8 @@ def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, con
         components_list = []
         if key == 'germline':
             components_list = cluster_indels(double_breaks)
+            if args.output_read_ids:
+                    output_readids(double_breaks, genome_ids, open(os.path.join(args.out_dir,"read_ids.csv"), "w"))
         logger.info("\tPreparing graph")
         graph, adj_clusters, db_to_cl = build_breakpoint_graph(genomic_segments, adj_segments, components_list, target_genomes, control_genomes)
         html_plot(graph, adj_clusters, db_to_cl, out_folder)

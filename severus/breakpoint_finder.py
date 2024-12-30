@@ -33,7 +33,7 @@ CHUNK_SIZE = 10000000
         
 class Breakpoint(object):
     __slots__ = ("ref_id", "position","dir_1", "spanning_reads", "connections", 'prec',
-                 "read_ids", "pos2", 'id', "is_insertion", "insertion_size", "qual", "CI")
+                 "read_ids", "pos2", 'id', "is_insertion", "insertion_size", "qual", "CI", "is_single")
     def __init__(self, ref_id, ref_position, dir_1, qual, CI):
         self.ref_id = ref_id
         self.position = ref_position
@@ -48,6 +48,7 @@ class Breakpoint(object):
         self.qual = qual
         self.prec = 1
         self.CI = CI
+        self.is_single = None
 
     def fancy_name(self):
         if not self.is_insertion:
@@ -194,7 +195,6 @@ def get_breakpoints(split_reads, ref_lengths, args):
     min_reads = args.bp_min_support
     min_ref_flank = args.min_ref_flank 
     sv_size = args.min_sv_size
-    MAX_CONN = 7
     single_bps = []
     
     seq_breakpoints_l = defaultdict(list)
@@ -227,17 +227,22 @@ def get_breakpoints(split_reads, ref_lengths, args):
         if bps:
             all_breaks += bps
     
+    merge_bps(all_breaks)
+    
     conn_list = defaultdict(list)
     for bp in all_breaks:
+        if bp.is_single:
+            continue
         for conn in bp.connections:
             conn_list[conn].append(bp)
        
     matched_bp, bp_ls, bp_counts = match_breaks(conn_list)
-    if args.single_bp:
-        single_bps = get_single_bps(bp_ls)
+    single_bps = get_single_bps(bp_ls, bp_counts)
     double_breaks=[]
     for (bp_1 , bp_2), cl in matched_bp.items():
-        if bp_counts[bp_1] > MAX_CONN or bp_counts[bp_2] > MAX_CONN:
+        if bp_1.is_single or bp_2.is_single:
+            bp_1.is_single = True
+            bp_2.is_single = True
             continue
         db = get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads,bp_ls)
         if db:
@@ -246,11 +251,31 @@ def get_breakpoints(split_reads, ref_lengths, args):
     
     return double_breaks, single_bps
 
-def get_single_bps(bp_ls):
+def merge_bps(all_breaks):
+    MIN_DIFF = 50
+    all_breaks.sort(key=lambda x:(x.dir_1, x.ref_id, x.position))
+    for i,j in zip(all_breaks[:-1], all_breaks[1:]):
+        if abs(i.position - j.position) < MIN_DIFF and i.ref_id == j.ref_id:
+            j.connections += i.connections
+            i.is_single = True
+    
+    
+def get_single_bps(bp_ls, bp_counts):
+    SINGLE_PAIR_RAT = 0.33
+    MAX_CONN = 7
     single_bps = []
     for bp, rcls in bp_ls.items():
         if 2 not in rcls:
             single_bps.append(bp)
+            bp.is_single = True
+        elif 1 in rcls:
+            if sum([1 for a in rcls if a == 1]) > len(rcls)*SINGLE_PAIR_RAT:
+                single_bps.append(bp)
+                bp.is_single = True
+            elif bp_counts[bp] > MAX_CONN:
+                single_bps.append(bp)
+                bp.is_single = True
+                
     return single_bps
     
 def cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads, bp_dir):
@@ -676,7 +701,7 @@ def check_insseq(conn):
     ins_seq = cl[ins_seq_pos].ins_seq
     kmers = set()
     new_cl = []
-    
+    ### Salute to Sniffles2 
     for kmer in iter_kmers(ins_seq):
         kmers.add(kmer)
     min_score = len(kmers)* MIN_SIM
@@ -915,7 +940,8 @@ def cluster_clipped_ends(clipped_reads, clust_len, min_ref_flank, ref_lengths):
                 bp_list[seq].append(bp)
                 
     return bp_list
-
+        
+        
 def get_single_bp(single_bp, clipped_clusters, double_breaks, bp_min_support, cont_id,min_ref_flank, ref_lengths):
     MIN_DIST = 100
     PASS_2_FAIL = 0.4
@@ -934,11 +960,18 @@ def get_single_bp(single_bp, clipped_clusters, double_breaks, bp_min_support, co
         db_pos[db.bp_2.ref_id].append(db.bp_2.position)
     
     for seq, sbp_ls in clipped_clusters.items():
+        sbp_ls.sort(key=lambda k:k.position)
+        for i,j in zip(sbp_ls[:-1], sbp_ls[1:]):
+            if abs(i.position - j.position) < MIN_DIST and i.dir_1 == j.dir_1:
+                j.connections += i.connections
+                i.is_single = False
         posls = db_pos[seq]
         posls += [min_ref_flank, ref_lengths[seq] - min_ref_flank]
         posls = list(set(posls))
         posls.sort()
         for s_bp in sbp_ls:
+            if not s_bp.is_single:
+                continue
             ind = bisect.bisect_left(posls, s_bp.position)
             ind = ind if not ind == len(posls) else ind-1
             ind = ind if not ind == 0 else 1
@@ -1572,7 +1605,7 @@ def add_phaseset_id(double_breaks, id_list):
         id1 = id_list[db.bp_1.ref_id][ind_1-1] if 0 < ind_1 < len(id_list[db.bp_1.ref_id]) else 0
         id2 = id_list[db.bp_2.ref_id][ind_2-1] if 0 < ind_2 < len(id_list[db.bp_2.ref_id]) else 0
         db.phaseset_id = (id1, id2)
-    
+
 def segment_coverage(histograms, genome_id, ref_id, ref_start, ref_end, haplotype):
     hist_start = ref_start // COV_WINDOW
     hist_end = ref_end // COV_WINDOW
@@ -1813,8 +1846,7 @@ def calc_gen_segments(double_breaks,coverage_histograms,ref_lengths, min_ref_fla
                 else:
                     pos2 = db.bp_2.position - max_genomic_length
                     hp2 = db.haplotype_2
-                db_segments[db].append((genome_name, ref_name, pos2, db.bp_2.position, (hp2, db.haplotype_2), db.haplotype_2))        
-
+                db_segments[db].append((genome_name, ref_name, pos2, db.bp_2.position, (hp2, db.haplotype_2), db.haplotype_2))
     
 def get_insertionreads(segments_by_read):
     ins_list_all = defaultdict(list)
@@ -2626,9 +2658,5 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
     output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
     
     double_breaks = filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segments_by_read, bam_files, thread_pool, args)
-    
-    
-    if args.output_read_ids:
-            output_readids(double_breaks['germline'], genome_ids, open(os.path.join(args.out_dir,"read_ids.csv"), "w"))
     
     return double_breaks

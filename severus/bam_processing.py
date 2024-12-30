@@ -116,13 +116,15 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
         read_inf = np.array([ref_ind, read.reference_start, read.reference_end,read_length,total_segment_length, haplotype,mm_rate, error_rate, read.mapping_quality], dtype = int)
         if cigar[0][0] in CIGAR_CLIP and cigar[0][1] > MIN_CLIPPED_LENGTH:
             pos = read.reference_start if strand == 1 else read.reference_end
+            st = -1 if strand == 1 else 1
             read_segments.append(ReadSegment(0, 0, 0, 0, pos, 0, pos, read.query_name,
-                                        read.reference_name, strand, read_length, total_segment_length, cigar[0][1], haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, None))
+                                        read.reference_name, st, read_length, total_segment_length, cigar[0][1], haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, None))
             read_segments[-1].is_clipped = True
         if cigar[-1][0] in CIGAR_CLIP and cigar[-1][1] > MIN_CLIPPED_LENGTH:
             pos = read.reference_start if strand == -1 else read.reference_end
+            st = 1 if strand == 1 else -1
             read_segments.append(ReadSegment(0, 0, 0, 0, pos, 0, pos, read.query_name,
-                                        read.reference_name, strand, read_length, total_segment_length, cigar[0][1], haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, None))
+                                        read.reference_name, st, read_length, total_segment_length, cigar[-1][1], haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, None))
             read_segments[-1].is_clipped = True
             
         return [read_segments, read_inf]
@@ -188,14 +190,16 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
             read_segments = [seg for seg in read_segments if seg.is_insertion]
             read_inf = np.array([ref_ind,  read.reference_start, read.reference_end,read_length,total_segment_length, haplotype,mm_rate, error_rate, read.mapping_quality], dtype = int)
             if cigar[0][0] in CIGAR_CLIP and cigar[0][1] > MIN_CLIPPED_LENGTH:
-                pos = read.reference_start if strand == 1 else read.reference_end
+                pos = read.reference_start if strand == -1 else read.reference_end
+                st = -1 if strand == 1 else 1
                 read_segments.append(ReadSegment(0, 0, 0, 0, pos, 0, pos, read.query_name,
-                                            read.reference_name, strand, read_length, total_segment_length, cigar[0][1], haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, None))
+                                            read.reference_name, st, read_length, total_segment_length, cigar[0][1], haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, None))
                 read_segments[-1].is_clipped = True
             if cigar[-1][0] in CIGAR_CLIP and cigar[-1][1] > MIN_CLIPPED_LENGTH:
                 pos = read.reference_start if strand == -1 else read.reference_end
+                st = 1 if strand == 1 else -1
                 read_segments.append(ReadSegment(0, 0, 0, 0, pos, 0, pos, read.query_name,
-                                            read.reference_name, strand, read_length, total_segment_length, cigar[0][1], haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, None))
+                                            read.reference_name, st, read_length, total_segment_length, cigar[-1][1], haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, None))
                 read_segments[-1].is_clipped = True
             
     return [read_segments, read_inf]
@@ -259,15 +263,19 @@ def extract_clipped_end(segments_by_read):
         s2 = read2[-1]
         if s1.read_start > MIN_CLIPPED_LENGTH:
             pos = s1.ref_start if s1.strand == 1 else s1.ref_end
+            st = -1 if s1.strand == 1 else 1
             read.append(ReadSegment(0, 0, s1.read_start, pos, pos, pos, pos, s1.read_id,
-                                    s1.ref_id, 1, s1.read_length, s1.align_len, s1.segment_length, s1.haplotype, s1.mapq, s1.genome_id, s1.mismatch_rate, False, s1.error_rate, None))
+                                    s1.ref_id, st, s1.read_length, s1.align_len, s1.segment_length, s1.haplotype, s1.mapq, s1.genome_id, s1.mismatch_rate, False, s1.error_rate, None))
             read[-1].is_clipped = True
+            read[-1].is_pass = 'PASS'
         end_clip_length = s2.read_length - s2.read_end
         if end_clip_length > MIN_CLIPPED_LENGTH:
             pos = s2.ref_end if s2.strand == 1 else s2.ref_start
+            st = 1 if s2.strand == 1 else -1
             read.append(ReadSegment(s2.read_end, s2.read_end, s2.read_length, pos, pos, pos, pos, s2.read_id,
-                                    s2.ref_id, -1, s2.read_length, s2.align_len, s2.segment_length, s2.haplotype, s2.mapq, s2.genome_id, s2.mismatch_rate, False, s2.error_rate, None))
+                                    s2.ref_id, st, s2.read_length, s2.align_len, s2.segment_length, s2.haplotype, s2.mapq, s2.genome_id, s2.mismatch_rate, False, s2.error_rate, None))
             read[-1].is_clipped = True
+            read[-1].is_pass = 'PASS'
         read.sort(key=lambda s: s.read_start)
         
 def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq):
