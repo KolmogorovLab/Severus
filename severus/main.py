@@ -60,7 +60,6 @@ def main():
     MIN_MAPQ = 10
     MIN_REF_FLANK = 10000
     MAX_GENOMIC_LEN = 2000000
-    MIN_ALIGNED_LENGTH = 7000
     MAX_SEGMENT_DIST = 1000
 
     #breakpoint
@@ -129,9 +128,11 @@ def main():
     parser.add_argument("--max-unmapped-seq", dest='max_segment_dist',default=MAX_SEGMENT_DIST, metavar="int", type=int, help = 'maximum length of unmapped sequence between two mapped segments (if --between-junction-ins is selected the unmapped sequnce will be reported in the vcf)'')')
     parser.add_argument("--use-supplementary-tag", dest='use_supplementary_tag', action = "store_true", help = 'Uses haplotype tag in supplementary alignments')
     parser.add_argument("--PON", dest='pon_file', metavar="path", help = 'Uses PON data')
-    
+    parser.add_argument("--low-quality", dest='multisample', action = "store_true", help = 'Uses set of parameters optimized for the analysis with lower quality')
     
     args = parser.parse_args()
+    
+    MIN_ALIGNED_LENGTH = 7000 if not args.multisample else 5000
     
     args.only_germline = False
     if args.control_bam is None:
@@ -231,7 +232,7 @@ def main():
                                                       coverage_histograms, mismatch_histograms, n90, bg_mm,read_qual,read_qual_len,args)
         segments_by_read += segments_by_read_bam
 
-    args.min_aligned_length = min(n90)
+    args.min_aligned_length = min(n90) if not args.multisample else MIN_ALIGNED_LENGTH
     logger.info('Computing read quality') 
     update_segments_by_read(segments_by_read, mismatch_histograms, bg_mm, ref_lengths,read_qual,read_qual_len, args)
     

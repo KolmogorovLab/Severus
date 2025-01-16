@@ -668,7 +668,7 @@ def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, con
         output_clusters_info(adj_clusters, out_cluster_list)
         
         logger.info("\tWriting vcf")
-        write_to_vcf(double_breaks, all_ids, out_folder, key, ref_lengths, args.no_ins)
+        write_to_vcf(double_breaks, all_ids, out_folder, key, ref_lengths, args.no_ins, args.multisample)
         
             
         

@@ -284,7 +284,7 @@ def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq):
     cov_list = defaultdict(list)
     BUFF = 50
     for pos in poslist:
-        cov_list[(ref_id, pos)] = [0,0,0,0,0]
+        cov_list[(ref_id, pos)] = [0,0,0,0,0,0]
     
     with pysam.AlignmentFile(bam_file, "rb") as a:
         ref_lengths = dict(zip(a.references, a.lengths))
@@ -301,6 +301,7 @@ def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq):
                 end = bisect.bisect_right(poslist, aln.reference_end)
                 if not strt == end:
                     for pos in poslist[strt:end]:
+                        cov_list[(ref_id, pos)][5]+=1
                         if abs(aln.reference_start - pos) <= BUFF:
                             cov_list[(ref_id, pos)][4]+=1
                             
@@ -416,10 +417,10 @@ def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
 
 
 def calc_read_qual(parsing_results,segments_by_read, mismatch_histograms, coverage_histograms, genome_id, ref_lengths, read_qual, read_qual_len, args):
-    bg_mm = background_mm_rat(parsing_results)
+    bg_mm = background_mm_rat(parsing_results, args.multisample)
     update_mm_hist(parsing_results, mismatch_histograms, ref_lengths)
     n90 = get_read_statistics(parsing_results, segments_by_read)
-    n90 = min(n90, args.min_aligned_length)
+    n90 = min(n90, args.min_aligned_length) if not args.multisample else args.min_aligned_length
     update_cov_hist(parsing_results, coverage_histograms, genome_id, ref_lengths, bg_mm, n90, read_qual, read_qual_len, args)
     return n90, bg_mm
 
@@ -485,13 +486,14 @@ def add_read_qual(segments_by_read, ref_lengths, bg_mm, mismatch_histograms,read
     for alignments in segments_by_read:
         if not alignments:
             continue
-        label_reads(alignments, min_mapq, bg_mm, mm_hist_high, min_aligned_length)
+        label_reads(alignments, min_mapq, bg_mm, mm_hist_high, min_aligned_length, args.multisample)
 
     write_readqual(segments_by_read, args.outpath_readqual,read_qual,read_qual_len)
 
 
-def label_reads(read, min_mapq, bg_mm, mm_hist_high, min_aligned_length):
+def label_reads(read, min_mapq, bg_mm, mm_hist_high, min_aligned_length, multisample):
     MIN_ALIGNED_RATE = 0.5
+    MIN_ALIGNED_LEN = min_aligned_length if multisample else 2000
 
     for seg in read:
         if seg.mapq < min_mapq:
@@ -503,7 +505,7 @@ def label_reads(read, min_mapq, bg_mm, mm_hist_high, min_aligned_length):
     aligned_len = sum([seg.read_end - seg.read_start for seg in read if not seg.is_clipped]) if seg_ins else read[0].align_len
     aligned_ratio = aligned_len/read[0].read_length
 
-    if aligned_ratio < MIN_ALIGNED_RATE:
+    if aligned_ratio < MIN_ALIGNED_RATE or aligned_len < MIN_ALIGNED_LEN:
         for seg in read:
             seg.is_pass += '_LOW_ALIGNED_LEN'#
 
@@ -527,8 +529,9 @@ def write_readqual(segments_by_read, outpath, read_qual, read_qual_len):
 
 
 
-def background_mm_rat(parsing_results):
+def background_mm_rat(parsing_results, multisample):
     COV_WINDOW_BG_MM = 2000
+    QT = 0.95 if not multisample else 0.975
     mm_list = []
     for alignments in parsing_results:
         for aln in alignments[1]:
@@ -539,7 +542,7 @@ def background_mm_rat(parsing_results):
                 continue
             n_mm = ((seg.ref_end - seg.ref_start) // COV_WINDOW_BG_MM) +1
             mm_list += [seg.mismatch_rate] * n_mm
-    bg_mm = np.quantile(mm_list, 0.95)
+    bg_mm = np.quantile(mm_list, QT)
     return bg_mm
 
 def init_mm_hist(ref_lengths):
