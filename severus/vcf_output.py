@@ -291,7 +291,7 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample):
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID1, sv_type, alt1, db.length, db.vcf_qual, 
                                                      sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type,db.cluster_id,
                                                      has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, ID2,vntr, db.tra_pos, low_cov))#
-            vcf_list.append(vcf_format(db.bp_2.ref_id, db.bp_2.position, db.haplotype_1, ID2, sv_type, alt2, db.length, db.vcf_qual, 
+            vcf_list.append(vcf_format(db.bp_2.ref_id, db.bp_2.position, db.haplotype_2, ID2, sv_type, alt2, db.length, db.vcf_qual, 
                                                      sv_pass, db.bp_1.ref_id, db.bp_1.position, db.mut_type, db.cluster_id,
                                                      has_ins, db.ins_seq,db.sv_type, db.prec, phaseset, strands,sample2, gen_type2, ID1,vntr, db.tra_pos, low_cov))
         elif db.is_single:
@@ -361,9 +361,10 @@ def write_vcf_header(ref_lengths, outfile, sample_list):
     outfile.write("##INFO=<ID=MATE_ID,Number=1,Type=String,Description=\"MATE ID for breakends\">\n")
     outfile.write("##INFO=<ID=INSIDE_VNTR,Number=1,Type=String,Description=\"True if an indel is inside a VNTR\">\n")
     outfile.write("##INFO=<ID=ALINGED_POS,Number=1,Type=String,Description=\"Position in the reference\">\n")
+    outfile.write("##INFO=<ID=LOW_COV_IN,Number=1,Type=String,Description=\"Samples that has low coverage in that region\">\n")
 
     outfile.write("##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n")
-    outfile.write("##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotyping quality\">\n")
+    #outfile.write("##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotyping quality\">\n")
     outfile.write("##FORMAT=<ID=DR,Number=1,Type=Integer,Description=\"Number of reference reads\">\n")
     outfile.write("##FORMAT=<ID=DV,Number=1,Type=Integer,Description=\"Number of variant reads\">\n")
     outfile.write("##FORMAT=<ID=VAF,Number=1,Type=Float,Description=\"Variant allele frequency\">\n")
