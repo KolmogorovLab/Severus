@@ -129,8 +129,9 @@ along with complexSV clusters and additional information about SVs. See [below][
 --single-bp             to add hanging breakpoints 
 --output-read-ids       outputs read IDs for support reads
 --use-supplementary-tag to use HP tag in supplementary alignments. Need to be added if HiPhase or LongPhase is used for haplotagging.
+--low-quality           to use more strict settings if one of the samples has a lower quality
 ```
-
+ 
 ## Benchmarking Severus and other SV callers
 
 For the details of benchmarking and complete results, please check https://www.medrxiv.org/content/10.1101/2024.03.22.24304756v1
@@ -145,11 +146,11 @@ Severus and Sniffles2 performed similarly, with CuteSV running a bit behind.
 
 |SV Caller | TP   | FN  | FP  | Precision | Recall | F1 score |
 |----------|------|-----|-----|-----------|--------|----------|
-|Severus   | 9568 |	302 | 216 |	  **0.98** |**0.97**| **0.97** |
-|Sniffles2 | 9603 |	277 | 305 |	   0.97    |   0.97 |	  0.97 |
-|cuteSV    | 9530 |	465	| 530 |	   0.95    |   0.95 |     0.95 |
+|Severus|9282|364|556|0.943|0.962|**0.953**|
+|sniffles2|9324|322|622|0.937|0.967|0.952|
+|cuteSV|9291|355|915|0.910|0.963|0.936|
 
-### Somatic benchmarking results COLO829
+### Somatic benchmarking results COLO829s
 
 We compared the performance of existing somatic SV callers [nanomonSV](https://github.com/friend1ws/nanomonsv), [SAVANA](https://github.com/cortes-ciriano-lab/savana) 
 and [sniffles2](https://github.com/fritzsedlazeck/Sniffles) in mosaic mode using COLO829 cell line data against multi-platform 
@@ -159,19 +160,19 @@ and highest recall on the ONT dataset, with nanomonsv having highest precision.
 
 |Technology|Caller|TP|FN|FP|Precision|Recall|F1|
 |----------|------|--|--|--|--------|-------|--|
-|PacBio|Severus|59|10|20|0.75|**0.86**|**0.80**|
-|PacBio|SAVANA|56|14|78|0.42|0.80|0.55|
-|PacBio|nanomonsv|51|17|15|**0.77**|0.75|0.76|
-|PacBio|Sniffles2|49|20|249|0.16|0.71|0.27|
+|PacBio|Severus|59|9|23|0.720|0.868|**0.787**|
+|PacBio|SAVANA|54|14|80|0.403|0.794|0.535|
+|PacBio|nanomonsv|51|17|15|0.773|0.750|0.761|
+|PacBio|Sniffles2|36|32|203|0.151|0.529|0.235|
 |-----|
-|ONT|Severus|54|14|24|0.69|**0.79**|0.74|
-|ONT|SAVANA|51|18|14|0.78|0.74|**0.76**|
-|ONT|nanomonsv|45|25|11|**0.80**|0.64|0.71|
-|ONT|Sniffles2|36|32|262|0.12|0.53|0.20|
+|ONT_R10|Severus|59|9|16|0.787|0.868|**0.825**|
+|ONT_R10|SAVANA|57|11|26|0.687|0.838|0.755|
+|ONT_R10|nanomonsv|50|18|11|0.820|0.735|0.775|
+|ONT_R10|Sniffles2|37|31|369|0.091|0.544|0.156|
 |-----|
-|Illumina|SvABA|48|20|10|0.83|0.71|0.76|
-|Illumina|GRIPSS|55|13|0|**1.00**|**0.81**|**0.89**|
-|Illumina|manta|46|22|7|0.87|0.68|0.76|
+|Illumina|SvABA|48|20|10|0.828|0.706|0.762|
+|Illumina|GRIPSS*|55|13|0|1.000|0.809|**0.894**|
+|Illumina|manta|46|22|7|0.868|0.676|0.760|
 
 ### Somatic Benchmarking results: Tumor/Normal Cell line pairs
 
