@@ -14,7 +14,7 @@ NUM_HAPLOTYPES = 3
 class ReadSegment(object):
     __slots__ = ("align_start", "read_start", "read_end", "ref_start", "ref_end","ref_start_ori", "ref_end_ori", "read_id", "ref_id",
                  "strand", "read_length",'align_len','segment_length', "haplotype", "mapq", "genome_id",
-                 'mismatch_rate', 'is_pass', "is_insertion", "is_clipped", 'error_rate', 'ins_seq', 'is_primary', 'ins_pos', 'bp_pos')
+                 'mismatch_rate', 'is_pass', "is_insertion", "is_clipped", 'error_rate', 'ins_seq', 'is_primary', 'ins_pos', 'bp_pos', "ID")
     def __init__(self, align_start, read_start, read_end, ref_start, ref_end,ref_start_ori, ref_end_ori, read_id, ref_id,
                  strand, read_length,align_len,segment_length, haplotype, mapq, genome_id,
                  mismatch_rate, is_insertion, error_rate, is_primary):
@@ -43,6 +43,7 @@ class ReadSegment(object):
         self.is_primary = is_primary
         self.ins_pos = None
         self.bp_pos = None
+        self.ID = None
     def __str__(self):
         return "".join(["read_start=", str(self.read_start), " read_end=", str(self.read_end), " ref_start=", str(self.ref_start),
                          " ref_end=", str(self.ref_end), " read_id=", str(self.read_id), " ref_id=", str(self.ref_id), " strand=", str(self.strand),
@@ -80,7 +81,7 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
     ref_start = read.reference_start
     read_segments =[]
     cigar = read.cigartuples
-    
+    ID = ','.join([str(ref_ind), str(read.reference_start), str(read.reference_end)])
     is_primary = None
     if not read.is_supplementary:
         is_primary = True
@@ -153,8 +154,9 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
                 read_segments.append(ReadSegment(align_start, del_start, del_end, ref_start, ref_end, ref_start, ref_end, read.query_name,
                                                  read.reference_name, strand, read_length,total_segment_length,read_aligned,
                                                  haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, is_primary))
+                read_segments[-1].ID = ID
                 read_start = read_end+1
-                ref_start = ref_end+op_len+1
+                ref_start = ref_end+op_len
                 read_aligned = 0
                 ref_aligned = 0
 
@@ -181,6 +183,7 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
         read_segments.append(ReadSegment(align_start, read_start, read_end, ref_start, ref_end, ref_start, ref_end, read.query_name,
                                          read.reference_name, strand, read_length,total_segment_length,read_aligned, haplotype,
                                          read.mapping_quality, genome_id, mm_rate, False, error_rate, is_primary))
+        read_segments[-1].ID = ID
     merge_short_seg(read_segments)
     
         
@@ -283,6 +286,7 @@ def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq):
     aln_file = pysam.AlignmentFile(bam_file, "rb")
     cov_list = defaultdict(list)
     BUFF = 50
+    BUFF2 = 5
     for pos in poslist:
         cov_list[(ref_id, pos)] = [0,0,0,0,0,0]
     
@@ -318,6 +322,7 @@ def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq):
                         hp = 0
                     for pos in poslist[strt:end]:
                         cov_list[(ref_id, pos)][hp]+=1
+                
     return cov_list
 
 

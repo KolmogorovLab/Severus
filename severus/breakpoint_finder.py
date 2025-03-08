@@ -549,14 +549,18 @@ def check_db(cl, conn_1, ind):
     if db.bp_1.ref_id == db.bp_2.ref_id and db.bp_1.position > db.bp_2.position:
         return 'FAIL_MAP_CONS'
     genome_ids = list(set([db.genome_id for db in cl]))
+    if ind == 0:
+        inread = [1 for r1, r2 in conn_1[:min(10, len(conn_1))] if r1.ID == r2.ID]
+        if inread:
+            for db in cl:
+                db.bp_1.spanning_reads[db.genome_id][db.haplotype_1] = max(0, db.bp_1.spanning_reads[db.genome_id][db.haplotype_1] - db.supp)
+                db.bp_2.spanning_reads[db.genome_id][db.haplotype_2] = max(0, db.bp_2.spanning_reads[db.genome_id][db.haplotype_2] - db.supp)
     conn_pass_1 =[cn for cn in conn_1 if cn[ind].is_pass == 'PASS']
     conn_count_1 = Counter([cn[ind].is_pass for cn in conn_1])
     supp_read = sum([db.supp for db in cl])
     ind2 = db.direction_1 if ind == 0 else db.direction_2
     ind2  = 4 if ind2 == -1 else 3
     sec = [db.bp_1.spanning_reads[genome_id][ind2] if ind == 0 else db.bp_2.spanning_reads[genome_id][ind2] for genome_id in genome_ids]
-    #sec_2 = [db.bp_1.spanning_reads[genome_id][5] if ind == 0 else db.bp_2.spanning_reads[genome_id][5] for genome_id in genome_ids]
-    #pr = sum([sum(db.bp_1.spanning_reads[genome_id][0:2]) if ind == 0 else sum(db.bp_2.spanning_reads[genome_id][0:2]) for genome_id in genome_ids])
     
     if max(supp_read * SEC_TO_PR,2) <= sum(sec):
         return 'FAIL_SEC_CONS' 
@@ -1391,17 +1395,25 @@ def get_insseq(bam_file,ref_id, pos, val):
 def calc_vaf(db_list):
     for db1 in db_list.values():
         db = db1[0]
-        span_bp1 = sum(db.bp_1.spanning_reads[db.genome_id])
-        span_bp2 = sum(db.bp_2.spanning_reads[db.genome_id])
         DV = 0
-        DR = int(np.mean([span_bp1, span_bp2])) if not db.bp_2.is_insertion else span_bp1
         for db in db1:
             if db.is_pass == 'FAIL_MERGED_HP':
                 continue
-            DR1 = int(np.median([db.bp_1.spanning_reads[db.genome_id][db.haplotype_1], db.bp_2.spanning_reads[db.genome_id][db.haplotype_2]])) if not db.bp_2.is_insertion else db.bp_1.spanning_reads[db.genome_id][db.haplotype_1]
+            
+            if db.bp_2.is_insertion:
+                DR1 = max([0,db.bp_1.spanning_reads[db.genome_id][db.haplotype_1] - db.supp])
+            else:
+                DR1 = int(np.mean([db.bp_1.spanning_reads[db.genome_id][db.haplotype_1], db.bp_2.spanning_reads[db.genome_id][db.haplotype_2]])) 
             DV1 = db.supp
             db.hvaf =  DV1 / (DV1 + DR1) if DV1 > 0 else 0
             DV += DV1
+        span_bp1 = sum(db.bp_1.spanning_reads[db.genome_id])
+        span_bp2 = sum(db.bp_2.spanning_reads[db.genome_id])
+        
+        DR = int(np.mean([span_bp1, span_bp2]))
+        if db.bp_2.is_insertion:
+            DR = max([0,span_bp1 - DV])
+            
         vaf =  DV / (DV + DR) if DV > 0 else 0
         for db in db1:
             db.DR = DR
@@ -1450,10 +1462,8 @@ def annotate_mut_type(double_breaks, control_id, control_vaf, vaf_thr, min_supp,
     for db_clust in clusters.values():
         vaf_pass = 'FAIL'
         db_list = defaultdict(list)
-        
         for db in db_clust:
             db_list[db.genome_id].append(db)
-        
         calc_gentype(db_list)
         calc_vaf(db_list)
         vaf_list = [db.vaf for db in db_clust]
@@ -2140,9 +2150,11 @@ def match_haplotypes(double_breaks):
                         
 def cluster_db(db_list, coverage_histograms, min_sv_size):
     clusters = defaultdict(list)
+    bp_pos_ls = defaultdict(list)
+    LEN_THR = 5000
     for br in db_list:
         br.subgraph_id = []
-        if br.bp_1.is_insertion or not br.is_pass == 'PASS':
+        if br.bp_2.is_insertion or not br.is_pass == 'PASS':
             continue
         clusters[br.to_string()].append(br)
     
@@ -2156,8 +2168,16 @@ def cluster_db(db_list, coverage_histograms, min_sv_size):
         clusters = defaultdict(list) 
         for br in db_list:
             clusters[br.to_string()].append(br)
-        conn_duplications(clusters, coverage_histograms)
-        conn_del(clusters, coverage_histograms)
+        for cl in clusters.values():
+            if cl[0].length <= LEN_THR:
+                bp_pos_ls[cl[0].bp_1.ref_id].append(cl[0].bp_1.position)
+                bp_pos_ls[cl[0].bp_2.ref_id].append(cl[0].bp_2.position)
+        
+        for key, value in bp_pos_ls.items():
+            bp_pos_ls[key]= sorted(list(set(value)))
+            
+        conn_duplications(clusters, coverage_histograms, bp_pos_ls)
+        conn_del(clusters, coverage_histograms, bp_pos_ls)
         conn_inter(clusters, ind_id)
          
 def cluster_inversions(double_breaks, coverage_histograms, min_sv_size):
@@ -2329,14 +2349,14 @@ def foldback_inv(clusters, coverage_histograms, ind_id):
 
     inv_list_pos = defaultdict(list)
     inv_list_neg = defaultdict(list)
-    FOLD_BACK_THR = 0.5
     FOLD_BACK_DIST_THR = 50000
     MINSIZE = 100000
+    INV_THR = 5000
     t = 0
     HP = [0,1,2]
     for cl in clusters.values():
         db = cl[0]
-        if db.sv_type:
+        if db.sv_type or db.vcf_sv_type == 'INV':
             continue
         if db.direction_1 == db.direction_2 == 1:
             inv_list_pos[db.bp_1.ref_id].append(cl)
@@ -2344,33 +2364,41 @@ def foldback_inv(clusters, coverage_histograms, ind_id):
             inv_list_neg[db.bp_1.ref_id].append(cl)
     for seq, pos_lis in inv_list_pos.items():
         neg_lis = inv_list_neg[seq]
+        neg_lis_pos = [n[0].bp_1.position for n in neg_lis]
         foldback_pairs = defaultdict(list)
         for ind, cl in enumerate(pos_lis):
             db = cl[0]
             if db.bp_2.position - db.bp_1.position > FOLD_BACK_DIST_THR:
                 continue
-            pos1 = db.bp_1.position // COV_WINDOW
-            cov1_0 = sum([coverage_histograms[(db.genome_id, hp, db.bp_1.ref_id)][pos1-1] for hp in HP])
-            cov1_2 = sum(db.bp_1.spanning_reads[db.genome_id])
-            cov2 = sum(db.bp_2.spanning_reads[db.genome_id])
-            thr = int(db.supp * FOLD_BACK_THR)
-            if cov1_0 > cov1_2 + thr and  cov1_2 > cov2 + thr:
-                foldback_pairs['pos'].append(ind)
-                for db in pos_lis[ind]:
-                    db.sv_type = 'foldback'
+            ind2 = bisect.bisect_left(neg_lis_pos, db.bp_2.position)
+            ind1 = bisect.bisect_left(neg_lis_pos, db.bp_1.position - INV_THR)
+            
+            if ind1 == ind2:
+                if ind1 == len(neg_lis) or ind1 == 0:
+                    foldback_pairs['pos'].append(ind)
+                    for db in pos_lis[ind]:
+                        db.sv_type = 'foldback'
+                elif abs(neg_lis[ind1][0].bp_2.position - db.bp_2.position) >= FOLD_BACK_DIST_THR:
+                    foldback_pairs['pos'].append(ind)
+                    for db in pos_lis[ind]:
+                        db.sv_type = 'foldback'
+        pos_lis_pos = [n[0].bp_1.position for n in pos_lis]   
         for ind, cl in enumerate(neg_lis):
             db = cl[0]
             if db.bp_2.position - db.bp_1.position > FOLD_BACK_DIST_THR:
                 continue
-            pos1 = db.bp_1.position // COV_WINDOW
-            cov1_0 = sum([coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos1-1] for hp in HP])
-            cov1_2 = sum(db.bp_1.spanning_reads[db.genome_id])
-            cov2 = sum(db.bp_2.spanning_reads[db.genome_id])
-            thr = int(db.supp * FOLD_BACK_THR)
-            if cov2 > cov1_2 + thr and  cov1_2 > cov1_0 + thr:
-                foldback_pairs['neg'].append(ind)
-                for db in neg_lis[ind]:
-                    db.sv_type = 'foldback'
+            ind2 = bisect.bisect_left(pos_lis_pos, db.bp_2.position)
+            ind1 = bisect.bisect_left(pos_lis_pos, db.bp_1.position - INV_THR)
+            if ind1 == ind2:
+                if ind1 == len(pos_lis) or ind1 == 0:
+                    foldback_pairs['neg'].append(ind)
+                    for db in neg_lis[ind]:
+                        db.sv_type = 'foldback'
+                elif abs(pos_lis[ind1][0].bp_2.position - db.bp_2.position) >= FOLD_BACK_DIST_THR:
+                    foldback_pairs['neg'].append(ind)
+                    for db in neg_lis[ind]:
+                        db.sv_type = 'foldback'
+                    
         if len(foldback_pairs) == 2:
             pos_ls = []
             neg_ls = []
@@ -2400,29 +2428,32 @@ def foldback_inv(clusters, coverage_histograms, ind_id):
                         t+=1
                         for db in all_ls:
                             db.sv_type = 'BFB_foldback'
-                            db.gr_id = 'BFB' +  str(ind_id)+ '_' + str(t)                        
+                            db.gr_id = 'BFB' +  str(ind_id)+ '_' + str(t)            
 
 def cluster_indels(double_breaks):
     by_genome = defaultdict(list)
     DEL_THR = 10000
-    components_list = []
+    clusters = defaultdict(list)
+    t_id = 0
     for db in double_breaks:
-        if db.vcf_sv_type == 'DEL' or db.vcf_sv_type =='DUP' and db.length < DEL_THR:
-            by_genome[(db.genome_id, db.mut_type, db.bp_1.ref_id)].append(db)
-    for db_list in by_genome.values():
-        components_list += indel_clust(db_list)
+        if db.vcf_sv_type == 'DEL' or db.vcf_sv_type =='DUP' or db.vcf_sv_type == 'INS' and db.length < DEL_THR:
+            clusters[db.to_string()].append(db)
         
-    return components_list
+    by_genome = defaultdict(list)
+    for cl in clusters.values():
+        gen_id = sorted(list(set([db.genome_id for db in cl])))
+        gen_id = ','.join(gen_id)
+        by_genome[(gen_id, db.bp_1.ref_id)] += cl
+    for d_breaks in by_genome.values():
+        t_id = indel_clust(d_breaks, t_id)
     
   
-def indel_clust(db_list):
+def indel_clust(db_list, t_id):
     DIFF_THR = 20000
     SIZE_THR = 5
     LEN_THR = 2
     cur_cluster = []
     clusters = []
-    components_list = []
-    junction_type = defaultdict(int)
     for db in db_list:
         if cur_cluster and db.bp_1.position - cur_cluster[-1].bp_1.position > DIFF_THR:
             if len(cur_cluster) > SIZE_THR:
@@ -2440,15 +2471,12 @@ def indel_clust(db_list):
                 t+=1
                 sum_len +=db1.length
         if t > SIZE_THR and sum_len * LEN_THR > (cl[-1].bp_1.position - cl[0].bp_1.position):
-            sv_type = defaultdict(int)
+            t_id+=1
             for db in cl:
-                sv_type[db.vcf_sv_type]+=1
-                jtype = 'TH' if str(db.direction_1) + str(db.direction_2) == '-11' else 'HT'
-                junction_type[jtype] +=1
-            components_list.append((sv_type, junction_type,'indel', 1, cl, cl[0].genome_id))
-    return components_list
-            
-def conn_duplications(clusters, coverage_histograms):
+                db.sv_type = 'INDEL_clust' + str(t_id)
+    return t_id
+
+def conn_duplications(clusters, coverage_histograms, bp_pos_ls):
     
     DUP_COV_THR = 0.5
     for ind, cl in enumerate(clusters.values()):
@@ -2460,21 +2488,26 @@ def conn_duplications(clusters, coverage_histograms):
             db.sv_type = 'tandem_duplication'
             continue
         if db.direction_1 == -1 and db.direction_2 == 1:
-            pos1 = db.bp_1.position // COV_WINDOW
-            pos2 = db.bp_2.position // COV_WINDOW
-            max_pos = len(coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)])
-            cov1 = coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][max(pos1-5,0):pos1]
-            cov1 += coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)][pos2:min(pos2+5,max_pos)]
-            cov1 = int(np.median(cov1))
-            cov3 = int(np.median(coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos1:min(pos2+1, max_pos)]))
-            if cov3 > cov1 + db.supp * DUP_COV_THR:
+            ind1 = bisect.bisect_right(bp_pos_ls[db.bp_1.ref_id], db.bp_1.position)
+            ind2 = bisect.bisect_left(bp_pos_ls[db.bp_1.ref_id], db.bp_2.position)
+            if ind1 == ind2:
                 is_dup = True
-            svtype = 'tandem_duplication' if is_dup else 'Templated_ins'
+            else:
+                pos1 = db.bp_1.position // COV_WINDOW
+                pos2 = db.bp_2.position // COV_WINDOW
+                max_pos = len(coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)])
+                cov1 = coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][max(pos1-5,0):pos1]
+                cov1 += coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)][pos2:min(pos2+5,max_pos)]
+                cov1 = int(np.median(cov1))
+                cov3 = int(np.median(coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos1:min(pos2+1, max_pos)]))
+                if cov3 > cov1 + db.supp * DUP_COV_THR:
+                    is_dup = True
+            svtype = 'tandem_duplication' if is_dup else ''
             for db in cl:
                 db.is_dup = is_dup
                 db.sv_type = svtype
-
-def conn_del(clusters, coverage_histograms):
+                
+def conn_del(clusters, coverage_histograms, bp_pos_ls):
     DEL_THR = 10000
     DEL_COV_THR = 1.5
     for ind, cl in enumerate(clusters.values()):
@@ -2486,16 +2519,22 @@ def conn_del(clusters, coverage_histograms):
                 for db in cl:
                     db.sv_type = 'DEL'
             else:
-                pos1 = db.bp_1.position // COV_WINDOW
-                pos2 = db.bp_2.position // COV_WINDOW
-                max_pos = len(coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)])
-                cov1 = coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][max(pos1-5,0):pos1]
-                cov1 += coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)][pos2:min(pos2+5,max_pos)]
-                cov1 = int(np.median(cov1))
-                cov3 = int(np.median(coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos1:min(pos2+1, max_pos)]))
-                if cov3 < cov1 - db.supp * DEL_COV_THR:
+                ind1 = bisect.bisect_right(bp_pos_ls[db.bp_1.ref_id], db.bp_1.position)
+                ind2 = bisect.bisect_left(bp_pos_ls[db.bp_1.ref_id], db.bp_2.position)
+                if ind1 == ind2:
                     for db in cl:
                         db.sv_type = 'DEL'
+                else:
+                    pos1 = db.bp_1.position // COV_WINDOW
+                    pos2 = db.bp_2.position // COV_WINDOW
+                    max_pos = len(coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)])
+                    cov1 = coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][max(pos1-5,0):pos1]
+                    cov1 += coverage_histograms[(db.genome_id, db.haplotype_2, db.bp_2.ref_id)][pos2:min(pos2+5,max_pos)]
+                    cov1 = int(np.median(cov1))
+                    cov3 = int(np.median(coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos1:min(pos2+1, max_pos)]))
+                    if cov3 < cov1 - db.supp * DEL_COV_THR:
+                        for db in cl:
+                            db.sv_type = 'DEL'
             
 def conn_inter(clusters, ind_id):
     intra_chr_cl = defaultdict(list)

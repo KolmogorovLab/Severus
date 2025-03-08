@@ -72,7 +72,7 @@ class vcf_format(object):
             return ""
     def trapos(self):
         if self.tra_pos:
-            return f"ALINGED_POS={self.tra_pos};"
+            return f"ALIGNED_POS={self.tra_pos};"
         else:
             return ""
     def clusterid(self):
@@ -360,7 +360,7 @@ def write_vcf_header(ref_lengths, outfile, sample_list):
     outfile.write("##INFO=<ID=INSSEQ,Number=1,Type=String,Description=\"Insertion sequence between breakpoints\">\n")
     outfile.write("##INFO=<ID=MATE_ID,Number=1,Type=String,Description=\"MATE ID for breakends\">\n")
     outfile.write("##INFO=<ID=INSIDE_VNTR,Number=1,Type=String,Description=\"True if an indel is inside a VNTR\">\n")
-    outfile.write("##INFO=<ID=ALINGED_POS,Number=1,Type=String,Description=\"Position in the reference\">\n")
+    outfile.write("##INFO=<ID=ALIGNED_POS,Number=1,Type=String,Description=\"Position in the reference\">\n")
     outfile.write("##INFO=<ID=LOW_COV_IN,Number=1,Type=String,Description=\"Samples that has low coverage in that region\">\n")
 
     outfile.write("##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n")

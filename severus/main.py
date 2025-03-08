@@ -128,7 +128,9 @@ def main():
     parser.add_argument("--max-unmapped-seq", dest='max_segment_dist',default=MAX_SEGMENT_DIST, metavar="int", type=int, help = 'maximum length of unmapped sequence between two mapped segments (if --between-junction-ins is selected the unmapped sequnce will be reported in the vcf)'')')
     parser.add_argument("--use-supplementary-tag", dest='use_supplementary_tag', action = "store_true", help = 'Uses haplotype tag in supplementary alignments')
     parser.add_argument("--PON", dest='pon_file', metavar="path", help = 'Uses PON data')
-    parser.add_argument("--low-quality", dest='multisample', action = "store_true", help = 'Uses set of parameters optimized for the analysis with lower quality')
+    parser.add_argument("--low-quality", dest='multisample', action = "store_true", help = 'Uses set of parameters optimized for the analysis with lower quality') 
+    parser.add_argument("--target-sample", dest='target_name', default = '', help = 'Sample name for the target bams', nargs="+")
+    parser.add_argument("--control-sample", dest='control_name', default = '', help = 'Sample name for the control bam', nargs="+")
     
     args = parser.parse_args()
     
@@ -176,7 +178,11 @@ def main():
     if args.vntr_file and not (args.vntr_file.endswith('.bed') or args.vntr_file.endswith('.bed.gz')):
         logger.error("Error: VNTR annotation file should be in bed or bed.gz format")
         return 1
-        
+    
+    if args.target_name and not len(args.target_name) == len(target_genomes):
+        logger.error("Error: Provide a unique sample name for each sample")
+        return 1
+    
     if args.bp_min_support == 0:
         args.bp_min_support = 3
     else:
@@ -200,23 +206,31 @@ def main():
         
     args.outpath_readqual = os.path.join(args.out_dir, "read_qual.txt")
     
+    
+        
     segments_by_read = []
     bam_files = defaultdict(list)
-    genome_ids = [os.path.basename(bam_file) for bam_file in all_bams]
+    if not args.target_name:
+        args.target_name = [os.path.basename(bam_file) for bam_file in args.target_bam]
+    if not args.control_name:
+        args.control_name = [os.path.basename(bam_file) for bam_file in args.control_bam]
+        
+    genome_ids = args.target_name + args.control_name
     
     dups = [item for item, count in Counter(genome_ids).items() if count > 1]
     if dups:
+        logger.info("Duplicated bam names")
         genome_ids = all_bams
         for bam_file in all_bams:
             bam_files[bam_file] = bam_file
         target_genomes = args.target_bam
         control_genomes = args.control_bam
     else:
-        for bam_file in all_bams:
-            genome_id = os.path.basename(bam_file)
+        for i, bam_file in enumerate(all_bams):
+            genome_id = genome_ids[i]
             bam_files[genome_id] = bam_file
-        target_genomes = [os.path.basename(bam_file) for bam_file in args.target_bam]
-        control_genomes = [os.path.basename(bam_file) for bam_file in args.control_bam]
+        target_genomes = args.target_name
+        control_genomes = args.control_name
 
     args.min_aligned_length = MIN_ALIGNED_LENGTH
     coverage_histograms = init_hist(genome_ids, ref_lengths)
@@ -225,8 +239,8 @@ def main():
     read_qual = defaultdict(int)
     read_qual_len = defaultdict(int)
     bg_mm = []
-    for bam_file in all_bams:
-        genome_id = os.path.basename(bam_file) if not dups else bam_file
+    for i, bam_file in enumerate(all_bams):
+        genome_id = genome_ids[i]
         logger.info(f"Parsing reads from {genome_id}")
         segments_by_read_bam = get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
                                                       coverage_histograms, mismatch_histograms, n90, bg_mm,read_qual,read_qual_len,args)
