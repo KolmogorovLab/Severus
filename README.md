@@ -8,7 +8,7 @@ Severus is a somatic structural variation (SV) caller for long reads (both PacBi
 supports multiple tumor samples, and produces accurate and complete somatic and germline calls. Severus takes
 advantage of long-read phasing and uses the breakpoint graph framework to model complex chromosomal rearrangements.
 
-If you use Severus, [please cite](https://www.nature.com/articles/s41587-025-02618-8)
+Refer to [our paper](https://www.nature.com/articles/s41587-025-02618-8) for further details and citation.
 
 For the haplotype-specific copy number analysis check [Wakhan](https://github.com/KolmogorovLab/Wakhan). 
 </p>
