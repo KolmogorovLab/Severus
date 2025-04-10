@@ -165,8 +165,8 @@ class vcf_sample(object):
         self.GT = GT
     
     def sample(self):
-        if self.DV == self.DR == 0:
-            return "./.:0:0,0,0:0:0"
+        if self.DV == 0:
+            return f"./.:0:0,0,0:{self.DR}:0"
         self.call_genotype()
         return f"{self.GT}:{self.vaf:.2f}:{self.hVAF()}:{self.DR}:{self.DV}"
     
@@ -256,8 +256,8 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample):
         sample_list = defaultdict(list)
         sample_list2 = defaultdict(list)
         for sample_id in sample_ids:
-            sample_list[sample_id] = vcf_sample(0,0,0,0,0)
-            sample_list2[sample_id] = vcf_sample(0,0,0,0,0)
+            sample_list[sample_id] = vcf_sample(sum(db.bp_1.spanning_reads[sample_id]),0,0,0,0)
+            sample_list2[sample_id] = vcf_sample(sum(db.bp_2.spanning_reads[sample_id]),0,0,0,0)
         for db1 in db_list.values():
             hVaf1 = [0.0, 0.0, 0.0]
             hVaf2 = [0.0, 0.0, 0.0]
@@ -393,7 +393,7 @@ def write_germline_vcf(vcf_list, outfile,ref_lengths):
     outfile.close()
     
     
-def write_to_vcf(double_breaks, all_ids, outpath, out_key, ref_lengths, no_ins, multisample):
+def write_to_vcf(double_breaks, all_ids, outpath, out_key, ref_lengths, no_ins, multisample):            
     vcf_list = db_2_vcf(double_breaks, no_ins, all_ids, multisample)
     key = 'somatic' if out_key == 'somatic' else 'all'
     sample_ids = [target_id.replace('.bam' , '') for target_id in all_ids]

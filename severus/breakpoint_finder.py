@@ -284,7 +284,7 @@ def cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads, bp
     clusters = []
     cur_cluster = []
     bp_list = []
-    min_supp = 2
+    min_supp = min(2, min_reads)
     bp_pos.sort(key=lambda bp: (get_pos(bp, bp_dir)[2], get_pos(bp, bp_dir)[0]))
     for rc in bp_pos:
         if cur_cluster and get_pos(rc,bp_dir)[0] - get_pos(cur_cluster[-1], bp_dir)[0] > clust_len:
@@ -607,9 +607,8 @@ def multisample_filter(clusters):
             for db in cl:
                 db.is_pass = 'FAIL_MULTISAMPLE'          
                 
-def double_breaks_filter(double_breaks, single_bps, min_reads, control_id, resolve_overlaps, sv_size, multisample):
+def double_breaks_filter(double_breaks, single_bps, min_reads, control_id, resolve_overlaps, sv_size, multisample, cov_thr):
 
-    COV_THR = 3
     NUM_HAPLOTYPES = [0,1,2]
     MAX_STD = 25
     MIN_QUAL = 55
@@ -674,7 +673,7 @@ def double_breaks_filter(double_breaks, single_bps, min_reads, control_id, resol
                     span_bp1 += cl[0].bp_1.spanning_reads[control_id][i]
                 for i in haplotype2:    
                     span_bp2 += cl[0].bp_2.spanning_reads[control_id][i]
-                if span_bp1 <= COV_THR and span_bp2 <= COV_THR:
+                if span_bp1 <= cov_thr and span_bp2 <= cov_thr:
                     for db1 in cl:
                         db1.is_pass = 'FAIL_LOWCOV_NORMAL'
     if multisample:
@@ -1975,6 +1974,7 @@ def add_pon(db_clust, pon_ls):
             if (len_diff <= MAX_LEN_DIFF and sum_diff <= VNTR_CLUST_LEN) or sum_diff <= sum_CI + max_diff:
                 mut_type = 'germline'
                 break
+
     for db in db_clust:
         db.mut_type = mut_type
     
@@ -2690,7 +2690,7 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
 
         
     logger.info('Filtering breakpoints')
-    double_breaks = double_breaks_filter(double_breaks, single_bps, args.bp_min_support, cont_id, args.resolve_overlaps, args.sv_size, args.multisample)
+    double_breaks = double_breaks_filter(double_breaks, single_bps, args.bp_min_support, cont_id, args.resolve_overlaps, args.sv_size, args.multisample, args.cov_thr)
     double_breaks.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position, b.direction_1))
     if args.single_bp and single_bps:
         single_bps = filter_single_bp(single_bps, cont_id, args.control_vaf, args.vaf_thr, args.bp_min_support)

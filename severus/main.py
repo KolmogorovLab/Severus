@@ -68,6 +68,7 @@ def main():
     MIN_SV_THR = 10
     VAF_THR = 0.05
     CONTROL_VAF = 0.01
+    CONTROL_COV_THR = 3
     
 
     SAMTOOLS_BIN = "samtools"
@@ -117,6 +118,7 @@ def main():
     parser.add_argument("--phasing-vcf", dest="phase_vcf", metavar="path", help="path to vcf file used for phasing (if using haplotype specific SV calling)[None]")
     parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
     parser.add_argument("--TIN-ratio", dest='control_vaf', metavar="float", type=float, default = CONTROL_VAF, help = 'Tumor in normal ratio[{CONTROL_VAF}]')
+    parser.add_argument("--control-cov-thr", dest='cov_thr', metavar="float", type=int, default = CONTROL_COV_THR, help = 'Min normal coverage[{CONTROL_COV_THR}]')
     parser.add_argument("--vaf-thr", dest='vaf_thr', metavar="float", type=float, default = VAF_THR, help = 'Tumor in normal ratio[{CONTROL_VAF}]')
     parser.add_argument("--write-collapsed-dup", dest='write_segdup', action = "store_true", help = 'outputs a bed file with identified collapsed duplication regions')
     parser.add_argument("--no-ins-seq", dest='no_ins', action = "store_true", help = 'do not output insertion sequences to the vcf file')
