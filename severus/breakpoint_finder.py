@@ -1477,7 +1477,13 @@ def annotate_mut_type(double_breaks, control_id, control_vaf, vaf_thr, min_supp,
             add_mut_type(db_list, control_id, control_vaf)
             
         if pon_file:
-            add_pon(db_clust, pon_list[db_clust[0].bp_1.ref_id])
+            pon_ls = pon_list[db_clust[0].bp_1.ref_id]
+            if not db_clust[0].bp_1.ref_id == db_clust[0].bp_2.ref_id:
+                pon_ls = pon_list[(db_clust[0].bp_1.ref_id,db_clust[0].bp_2.ref_id)]
+                if not pon_ls:
+                    continue
+                pon_ls = list(zip(*sorted(zip(pon_ls[0],pon_ls[1], pon_ls[2], pon_ls[3], pon_ls[4]))))
+            add_pon(db_clust, pon_ls)
 
 def add_sv_type(double_breaks):
     clusters = defaultdict(list) 
@@ -1941,19 +1947,28 @@ def extract_pon(pon_file, ref_lengths):
             pon_list[chr1][2].append(int(pos1) + int(pos2))
             pon_list[chr1][3].append(int(ci2))
             pon_list[chr1][4].append(chr1)
-        else:
+        elif chr1 == chr2:
             pon_list[chr1][0].append(int(pos1))
             pon_list[chr1][1].append(int(ci1))
             pon_list[chr1][2].append(int(pos2))
             pon_list[chr1][3].append(int(ci2))
             pon_list[chr1][4].append(chr2)
-            if not chr1 == chr2:
-                pon_list[chr2][0].append(int(pos2))
-                pon_list[chr2][1].append(int(ci2))
-                pon_list[chr2][2].append(int(pos1))
-                pon_list[chr2][3].append(int(ci1))
-                pon_list[chr2][4].append(chr1)
-        
+        else:
+            if not (chr1, chr2) in pon_list.keys():
+                pon_list[(chr1, chr2)] = [[],[],[],[], []]
+            if not (chr2, chr1) in pon_list.keys():
+                pon_list[(chr2, chr1)] = [[],[],[],[],[]]
+            pon_list[(chr2, chr1)][0].append(int(pos2))
+            pon_list[(chr2, chr1)][1].append(int(ci2))
+            pon_list[(chr2, chr1)][2].append(int(pos1))
+            pon_list[(chr2, chr1)][3].append(int(ci1))
+            pon_list[(chr2, chr1)][4].append(chr1)
+            pon_list[(chr1, chr2)][0].append(int(pos1))
+            pon_list[(chr1, chr2)][1].append(int(ci1))
+            pon_list[(chr1, chr2)][2].append(int(pos2))
+            pon_list[(chr1, chr2)][3].append(int(ci2))
+            pon_list[(chr1, chr2)][4].append(chr2)
+           
     return pon_list
     
 def add_pon(db_clust, pon_ls):
@@ -1964,7 +1979,7 @@ def add_pon(db_clust, pon_ls):
     MAX_LEN_DIFF = 50
     db = db_clust[0]
     mut_type = 'somatic'
-    pos1, pos2 = db.bp_1.position - db.bp_1.CI - BUFF, db.bp_1.position + db.bp_1.CI + BUFF
+    pos1, pos2 = db.bp_1.position - db.bp_1.CI - BUFF, db.bp_1.position + db.bp_1.CI + BUFF  
     if db.vntr:
         pos1, pos2 = db.vntr[0] - VNTR_BUFF, db.vntr[1] + VNTR_BUFF
     min_pos = bisect.bisect_left(pon_ls[0], pos1)
