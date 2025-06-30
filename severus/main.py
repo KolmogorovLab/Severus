@@ -253,8 +253,8 @@ def main():
     update_segments_by_read(segments_by_read, mismatch_histograms, bg_mm, ref_lengths,read_qual,read_qual_len, args)
     
     logger.info('Computing coverage histogram')
-    update_coverage_hist(coverage_histograms,genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes, args.write_log_out)
+    median_cov = update_coverage_hist(coverage_histograms,genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes, args.write_log_out)
 
-    double_breaks = call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_files, genome_ids, control_genomes, thread_pool, args)
+    double_breaks = call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_files, genome_ids, control_genomes, thread_pool, median_cov, args)
     
     output_graphs(double_breaks, coverage_histograms, thread_pool, target_genomes, control_genomes, genome_ids, ref_lengths, args)

@@ -1091,12 +1091,15 @@ def check_normal_cov(single_bps, control_id):
                 for db1 in cl:
                     db1.is_pass = 'FAIL_LOWCOV_NORMAL'
 
-def filter_single_bp(single_bps, cont_id, control_vaf, vaf_thr, min_supp):
+def filter_single_bp(single_bps, cont_id, control_vaf, vaf_thr, min_supp, median_cov, pon_file, ref_lengths):
     sbp_list = []
-    QUAL_THR = 55
-    VAF_THR = 0.25
+    QUAL_THR = 40
+    VAF_THR = 0.1
+    MIN_SUPP = 0.25
+    min_supp = max([min_supp, median_cov * MIN_SUPP])
     match_haplotypes(single_bps)
-    annotate_mut_type(single_bps, cont_id, control_vaf, VAF_THR, min_supp, '','')
+    annotate_mut_type(single_bps, cont_id, control_vaf, VAF_THR, min_supp, pon_file, ref_lengths)
+        
     if cont_id:
         check_normal_cov(single_bps, cont_id)
     for sbp in single_bps:
@@ -1482,7 +1485,7 @@ def annotate_mut_type(double_breaks, control_id, control_vaf, vaf_thr, min_supp,
                 pon_ls = pon_list[(db_clust[0].bp_1.ref_id,db_clust[0].bp_2.ref_id)]
                 if not pon_ls:
                     continue
-                pon_ls = list(zip(*sorted(zip(pon_ls[0],pon_ls[1], pon_ls[2], pon_ls[3], pon_ls[4]))))
+            pon_ls = list(zip(*sorted(zip(*pon_ls))))
             add_pon(db_clust, pon_ls)
 
 def add_sv_type(double_breaks):
@@ -1665,8 +1668,12 @@ def add_phaseset_id(double_breaks, id_list):
     for db in double_breaks:
         ind_1 = bisect.bisect_left(id_list[db.bp_1.ref_id], db.bp_1.position)
         ind_2 = bisect.bisect_left(id_list[db.bp_2.ref_id], db.bp_2.position)
-        id1 = id_list[db.bp_1.ref_id][ind_1-1] if 0 < ind_1 < len(id_list[db.bp_1.ref_id]) else 0
-        id2 = id_list[db.bp_2.ref_id][ind_2-1] if 0 < ind_2 < len(id_list[db.bp_2.ref_id]) else 0
+        
+        ind_1 = ind_1-1 if ind_1 < len(id_list[db.bp_1.ref_id]) and abs(db.bp_1.position - id_list[db.bp_1.ref_id][ind_1]) < abs(db.bp_1.position - id_list[db.bp_1.ref_id][ind_1]) else ind_1
+        ind_2 = ind_2-1 if ind_2 < len(id_list[db.bp_2.ref_id]) and abs(db.bp_2.position - id_list[db.bp_2.ref_id][ind_2]) < abs(db.bp_2.position - id_list[db.bp_2.ref_id][ind_2]) else ind_2
+                                   
+        id1 = id_list[db.bp_1.ref_id][ind_1] if 0 < ind_1 < len(id_list[db.bp_1.ref_id]) else 0
+        id2 = id_list[db.bp_2.ref_id][ind_2] if 0 < ind_2 < len(id_list[db.bp_2.ref_id]) else 0
         db.phaseset_id = (id1, id2)
 
 def segment_coverage(histograms, genome_id, ref_id, ref_start, ref_end, haplotype):
@@ -1720,7 +1727,7 @@ def get_ref_adj(genomic_segments, ref_adj):
     return adj_segments
 
 
-def get_genomic_segments(double_breaks, coverage_histograms, hb_vcf, key_type, ref_lengths, min_ref_flank, max_genomic_length, min_sv_size):
+def get_genomic_segments(double_breaks, coverage_histograms, hb_vcf, key_type, ref_lengths, max_genomic_length, min_sv_size):
     hb_points = []
     
     if hb_vcf:
@@ -1744,12 +1751,12 @@ def get_genomic_segments(double_breaks, coverage_histograms, hb_vcf, key_type, r
     db_segments = defaultdict(list)
     ref_adj = defaultdict(list)
     for d_breaks in by_genome.values():
-        calc_gen_segments(d_breaks, coverage_histograms,ref_lengths, min_ref_flank, max_genomic_length, db_segments, ref_adj)
+        calc_gen_segments(d_breaks, coverage_histograms,ref_lengths, max_genomic_length, db_segments, ref_adj)
     genomic_segments = get_segments_coverage(db_segments, coverage_histograms, max_genomic_length)
     adj_segments = get_ref_adj(genomic_segments, ref_adj)
     return (genomic_segments, adj_segments)
 
-def calc_gen_segments(double_breaks,coverage_histograms,ref_lengths, min_ref_flank, max_genomic_length, db_segments, ref_adj):
+def calc_gen_segments(double_breaks,coverage_histograms,ref_lengths, max_genomic_length, db_segments, ref_adj):
 
     bp1_list = defaultdict(list)
     bp2_list = defaultdict(list)
@@ -1781,7 +1788,7 @@ def calc_gen_segments(double_breaks,coverage_histograms,ref_lengths, min_ref_fla
                 ref_adj[ref_name,2].append((ps[0], ps[3][0]))
         s_bp = list(set(s_bp))
         s_bp.sort(key=lambda x: (x[0],x[1]))
-        s_bp = [(min_ref_flank, 0, 0,(0,0,0,0,0))] + s_bp + [(ref_lengths[ref_name] - min_ref_flank, 0, 0,(0,0,0,0,0))]
+        s_bp = [(0, 0, 0,(0,0,0,0,0))] + s_bp + [(ref_lengths[ref_name] +1000, 0, 0,(0,0,0,0,0))]
         pos_ls = [s[0] for s in s_bp if not s[1] == -1]
         neg_ls = [s[0] for s in s_bp if not s[1] == 1]
         pos_bp = [s[3] for s in s_bp if not s[1] == -1]
@@ -1979,6 +1986,7 @@ def add_pon(db_clust, pon_ls):
     MAX_LEN_DIFF = 50
     db = db_clust[0]
     mut_type = 'somatic'
+    
     pos1, pos2 = db.bp_1.position - db.bp_1.CI - BUFF, db.bp_1.position + db.bp_1.CI + BUFF  
     if db.vntr:
         pos1, pos2 = db.vntr[0] - VNTR_BUFF, db.vntr[1] + VNTR_BUFF
@@ -1989,11 +1997,12 @@ def add_pon(db_clust, pon_ls):
         for ind in range(min_pos, max_pos):
             if not pon_ls[4][ind] == db.bp_2.ref_id:
                 continue
-            if db.bp_1.ref_id == db.bp_2.ref_id:
+            if db.is_single:
+                len_diff = 0
+            elif db.bp_1.ref_id == db.bp_2.ref_id:
                 len_diff = abs(pon_ls[2][ind] - pon_ls[0][ind] - db.length)
             else:
                 len_diff = abs(pon_ls[2][ind] - db.bp_2.position)
-                
             sum_diff = abs(pon_ls[0][ind] - db.bp_1.position) + len_diff
             sum_CI = max(pon_ls[1][ind], pon_ls[3][ind]) +  max(db.bp_1.CI, db.bp_2.CI)
             if (len_diff <= MAX_LEN_DIFF and sum_diff <= VNTR_CLUST_LEN) or sum_diff <= sum_CI + max_diff:
@@ -2365,10 +2374,11 @@ def foldback_inv(clusters, coverage_histograms, ind_id):
     inv_list_pos = defaultdict(list)
     inv_list_neg = defaultdict(list)
     FOLD_BACK_DIST_THR = 50000
-    MINSIZE = 100000
     INV_THR = 5000
-    t = 0
-    HP = [0,1,2]
+    MIN_SEG_LEN = 2000
+    MAX_DEPTH = 1000
+    MIN_SV = 150
+    MIN_SPANN = 2
     for cl in clusters.values():
         db = cl[0]
         if db.sv_type or db.vcf_sv_type == 'INV':
@@ -2380,7 +2390,6 @@ def foldback_inv(clusters, coverage_histograms, ind_id):
     for seq, pos_lis in inv_list_pos.items():
         neg_lis = inv_list_neg[seq]
         neg_lis_pos = [n[0].bp_1.position for n in neg_lis]
-        foldback_pairs = defaultdict(list)
         for ind, cl in enumerate(pos_lis):
             db = cl[0]
             if db.bp_2.position - db.bp_1.position > FOLD_BACK_DIST_THR:
@@ -2388,15 +2397,26 @@ def foldback_inv(clusters, coverage_histograms, ind_id):
             ind2 = bisect.bisect_left(neg_lis_pos, db.bp_2.position)
             ind1 = bisect.bisect_left(neg_lis_pos, db.bp_1.position - INV_THR)
             
-            if ind1 == ind2:
+            if not ind1 == ind2:
+                continue
+            
+            if len(db.bp_1.connections) > MAX_DEPTH or len(db.bp_2.connections) > MAX_DEPTH:
+                med_seg_len = int( np.quantile([cn[1].segment_length for cn in db.bp_1.connections[:MAX_DEPTH]],0.90))
+                med_seg_len2 = int( np.median([cn[0].segment_length for cn in db.bp_1.connections[:MAX_DEPTH]]))
+                sum_next_conn = sum([1 for cn in db.bp_1.connections[:MAX_DEPTH] if cn[0].segment_length - med_seg_len2 > MIN_SV])
+            else:
+                med_seg_len = int( np.quantile([cn[1].segment_length for cn in db.bp_2.connections if cn in db.bp_1.connections],0.90))
+                med_seg_len2 = int( np.median([cn[0].segment_length for cn in db.bp_2.connections if cn in db.bp_1.connections]))
+                sum_next_conn = sum([1 for cn in db.bp_2.connections if cn in db.bp_1.connections and cn[0].segment_length - med_seg_len2 > MIN_SV])
+                
+            if med_seg_len > min(MIN_SEG_LEN, db.length) and sum_next_conn > MIN_SPANN:
                 if ind1 == len(neg_lis) or ind1 == 0:
-                    foldback_pairs['pos'].append(ind)
                     for db in pos_lis[ind]:
                         db.sv_type = 'foldback'
                 elif abs(neg_lis[ind1][0].bp_2.position - db.bp_2.position) >= FOLD_BACK_DIST_THR:
-                    foldback_pairs['pos'].append(ind)
                     for db in pos_lis[ind]:
                         db.sv_type = 'foldback'
+                        
         pos_lis_pos = [n[0].bp_1.position for n in pos_lis]   
         for ind, cl in enumerate(neg_lis):
             db = cl[0]
@@ -2404,46 +2424,27 @@ def foldback_inv(clusters, coverage_histograms, ind_id):
                 continue
             ind2 = bisect.bisect_left(pos_lis_pos, db.bp_2.position)
             ind1 = bisect.bisect_left(pos_lis_pos, db.bp_1.position - INV_THR)
-            if ind1 == ind2:
+            
+            if not ind1 == ind2:
+                continue
+            
+            if len(db.bp_1.connections) > MAX_DEPTH or len(db.bp_2.connections) > MAX_DEPTH:
+                med_seg_len = int( np.quantile([cn[0].segment_length for cn in db.bp_1.connections[:MAX_DEPTH]],0.90))
+                med_seg_len2 = int( np.median([cn[1].segment_length for cn in db.bp_1.connections[:MAX_DEPTH]]))
+                sum_next_conn = sum([1 for cn in db.bp_1.connections[:MAX_DEPTH] if cn[1].segment_length - med_seg_len2 > MIN_SV])
+            else:
+                med_seg_len = int( np.quantile([cn[0].segment_length for cn in db.bp_2.connections if cn in db.bp_1.connections],0.90))
+                med_seg_len2 = int( np.median([cn[1].segment_length for cn in db.bp_2.connections if cn in db.bp_1.connections]))
+                sum_next_conn = sum([1 for cn in db.bp_2.connections if cn in db.bp_1.connections and cn[1].segment_length - med_seg_len2 > MIN_SV])
+                
+            if med_seg_len > min(MIN_SEG_LEN, db.length) and sum_next_conn > MIN_SPANN:
                 if ind1 == len(pos_lis) or ind1 == 0:
-                    foldback_pairs['neg'].append(ind)
                     for db in neg_lis[ind]:
                         db.sv_type = 'foldback'
                 elif abs(pos_lis[ind1][0].bp_2.position - db.bp_2.position) >= FOLD_BACK_DIST_THR:
-                    foldback_pairs['neg'].append(ind)
                     for db in neg_lis[ind]:
                         db.sv_type = 'foldback'
-                    
-        if len(foldback_pairs) == 2:
-            pos_ls = []
-            neg_ls = []
-            all_ls = [db for ind in foldback_pairs['pos'] for db in pos_lis[ind]] + [db for ind in foldback_pairs['neg'] for db in neg_lis[ind]]
-            all_ls.sort(key=lambda b:b.bp_1.position)
-            neg = True
-            for i, db in enumerate(all_ls):
-                if neg:
-                    if db.bp_1.dir_1 == -1:
-                        neg_ls.append(db)
-                    elif i == len(all_ls) -1 or all_ls[i+1].bp_1.dir_1 == 1:
-                        neg = False
-                        pos_ls.append(db)
-                else:
-                    if db.bp_1.dir_1 == 1:
-                        pos_ls.append(db)
-            if pos_ls and neg_ls and pos_ls[-1].bp_2.position - neg_ls[0].bp_1.position > MINSIZE:
-                supp_pos = [db.supp for db in pos_ls]
-                supp_neg = [db.supp for db in neg_ls]
-                if abs(sum(supp_pos)- sum(supp_neg)) <= min(supp_pos + supp_neg):
-                    pos1 = neg_ls[0].bp_1.position// COV_WINDOW
-                    pos2 = pos_ls[-1].bp_2.position//COV_WINDOW
-                    seg_cov = int(np.median([sum([coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos] for hp in HP]) for pos in range(pos1,pos2)]))
-                    seg2 = int(np.median([sum([coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos] for hp in HP]) for pos in range(pos2,pos2+5)]))
-                    seg1 = int(np.median([sum([coverage_histograms[(db.genome_id, db.haplotype_1, db.bp_1.ref_id)][pos] for hp in HP]) for pos in range(pos1-5,pos1)]))
-                    if seg_cov > max(seg1,seg2) * 1.5 and abs(seg1 - seg2) >= min(seg1,seg2)*0.75:
-                        t+=1
-                        for db in all_ls:
-                            db.sv_type = 'BFB_foldback'
-                            db.gr_id = 'BFB' +  str(ind_id)+ '_' + str(t)            
+                        
 
 def cluster_indels(double_breaks):
     by_genome = defaultdict(list)
@@ -2707,7 +2708,7 @@ def output_readids(double_breaks, genome_ids, out_stream):
         out_stream.write(line)
         out_stream.write("\n")
                             
-def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_files, genome_ids, control_id, thread_pool, args):
+def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_files, genome_ids, control_id, thread_pool, median_cov, args):
     
     if args.write_alignments:
         outpath_alignments = os.path.join(args.out_dir, "read_alignments")
@@ -2747,7 +2748,7 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
     double_breaks = double_breaks_filter(double_breaks, single_bps, args.bp_min_support, cont_id, args.resolve_overlaps, args.sv_size, args.multisample, args.cov_thr)
     double_breaks.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position, b.direction_1))
     if args.single_bp and single_bps:
-        single_bps = filter_single_bp(single_bps, cont_id, args.control_vaf, args.vaf_thr, args.bp_min_support)
+        single_bps = filter_single_bp(single_bps, cont_id, args.control_vaf, args.vaf_thr, args.bp_min_support, median_cov, args.pon_file, ref_lengths)
     insertion_filter(ins_clusters, args.bp_min_support, cont_id)
     ins_clusters.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position))
    

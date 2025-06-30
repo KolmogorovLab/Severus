@@ -137,7 +137,7 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_po
             
             s2_new = ReadSegment(s1.align_start, ins_start, ins_end, vntr_strt, vntr_strt, bp_pos, bp_pos, s1.read_id,
                                  s1.ref_id, s1.strand, s1.read_length, s1.align_len, bp_len, s1.haplotype,
-                                 s1.mapq, s1.genome_id, s1.mismatch_rate, True, s1.error_rate, None)
+                                 s1.mapq, s1.genome_id, s1.mismatch_rate, True, s1.error_rate, None, s1.PS)
             s2_new.is_pass = is_pass
             if bp_len < len(ins_seq):
                 s2_new.ins_seq = ins_seq[:bp_len]
@@ -272,7 +272,7 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
             s1 = bp[0]
             new_read.append(ReadSegment(s1.align_start, s1.read_start + 1, s1.read_start + bp_len, key[1], key[1], bp_pos, bp_pos, s1.read_id,
                                         s1.ref_id, s1.strand, s1.read_length,s1.align_len, bp_len, s1.haplotype, s1.mapq,
-                                        s1.genome_id, s1.mismatch_rate, True, s1.error_rate, s1.is_primary))
+                                        s1.genome_id, s1.mismatch_rate, True, s1.error_rate, s1.is_primary, s1.PS))
             new_read[-1].ins_seq = ins_seq
             if not check_spanning(read, key):
                 new_read[-1].is_pass = 'vntr_only'

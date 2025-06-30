@@ -8,12 +8,13 @@ import sys
 import os
 
 class vcf_format(object):
-    __slots__ = ('chrom', 'pos', 'haplotype', 'ID', 'sv_type','alt', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2','mut_type', 'tra_pos',
+    __slots__ = ('chrom', 'pos', 'haplotypes','haplotype', 'ID', 'sv_type','alt', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2','mut_type', 'tra_pos',
                  'ins_seq', 'ins_len_seq', 'cluster_id','ins_len', 'detailed_type', 'prec', 'phaseset_id', 'strands', 'sample','HP', 'mate_id', 'vntr', 'low_cov')
-    def __init__(self, chrom, pos, haplotype, ID, sv_type, alt, sv_len, qual, Filter, chr2, pos2, mut_type, cluster_id, 
+    def __init__(self, chrom, pos, haplotypes, haplotype, ID, sv_type, alt, sv_len, qual, Filter, chr2, pos2, mut_type, cluster_id, 
                  ins_len, ins_len_seq, detailed_type, prec, phaseset_id, strands, sample, HP, mate_id, vntr,tra_pos, low_cov):
         self.chrom = chrom
         self.pos = pos
+        self.haplotypes = haplotypes
         self.haplotype = haplotype
         self.ID = ID
         self.sv_type = sv_type
@@ -98,13 +99,15 @@ class vcf_format(object):
             return f"SVLEN={self.sv_len};"
         else:
             return ""
-            
+        
     def HP_inf(self):
         if self.HP and self.phaseset_id:
-            phase_id = str(self.phaseset_id[0]) if self.phaseset_id[0] == self.phaseset_id[1] else '{0}|{1}'.format(self.phaseset_id[0], self.phaseset_id[1])
-            return f";PHASESETID={phase_id};HP={self.HP}"
+            phase_id = '{0}|{1}'.format(self.phaseset_id[0], self.phaseset_id[1])
+            hps = '{0}|{1}'.format(self.haplotypes[0], self.haplotypes[1])
+            return f";PHASESETID={phase_id};HP={hps}"
         else:
             return ""
+
     def low_covls(self):
         return 'LOW_COV_IN=' + ','.join(self.low_cov) + ';' if self.low_cov else ''
     
@@ -252,6 +255,7 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample):
             else: 
                 gen_type2 = '1' if 1 in hap_type else '2'
             phaseset = db.phaseset_id
+        haplotype = (db.haplotype_1, db.haplotype_2)
         
         sample_list = defaultdict(list)
         sample_list2 = defaultdict(list)
@@ -288,15 +292,16 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample):
                 
             ID1 = ID + '_1'
             ID2 = ID + '_2'
-            vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID1, sv_type, alt1, db.length, db.vcf_qual, 
+            haplotype2 = (db.haplotype_2, db.haplotype_1)
+            vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID1, sv_type, alt1, db.length, db.vcf_qual, 
                                                      sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type,db.cluster_id,
                                                      has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, ID2,vntr, db.tra_pos, low_cov))#
-            vcf_list.append(vcf_format(db.bp_2.ref_id, db.bp_2.position, db.haplotype_2, ID2, sv_type, alt2, db.length, db.vcf_qual, 
+            vcf_list.append(vcf_format(db.bp_2.ref_id, db.bp_2.position, haplotype2, db.haplotype_2, ID2, sv_type, alt2, db.length, db.vcf_qual, 
                                                      sv_pass, db.bp_1.ref_id, db.bp_1.position, db.mut_type, db.cluster_id,
                                                      has_ins, db.ins_seq,db.sv_type, db.prec, phaseset, strands,sample2, gen_type2, ID1,vntr, db.tra_pos, low_cov))
         elif db.is_single:
             alt= '.N' if db.direction_1 == -1 else 'N.'
-            vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, 'sBND', alt, db.length, db.vcf_qual, 
+            vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID, 'sBND', alt, db.length, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type, db.cluster_id,
                                                  has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.bp_1.pos2, low_cov))
             vcf_list[-1].pos2 = db.bp_1.pos2
@@ -304,12 +309,12 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample):
             if db.direction_1 == -1:
                 continue
             pos1 , pos2 = int(min(db.sv_type)), int(max(db.sv_type))
-            vcf_list.append(vcf_format(db.bp_1.ref_id, pos1, db.haplotype_1, ID, sv_type, sv_type, pos2-pos1, db.vcf_qual, 
+            vcf_list.append(vcf_format(db.bp_1.ref_id, pos1, haplotype, db.haplotype_1, ID, sv_type, sv_type, pos2-pos1, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, pos2, db.mut_type, db.cluster_id,
                                                  has_ins, db.ins_seq, 'reciprocal_inversion', db.prec, phaseset, strands,sample, gen_type1, None,vntr, None, low_cov))            
         else:
         
-            vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, db.haplotype_1, ID, sv_type, sv_type, db.length, db.vcf_qual, 
+            vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID, sv_type, sv_type, db.length, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type, db.cluster_id,
                                                  has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.tra_pos, low_cov))#
         
