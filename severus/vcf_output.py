@@ -67,7 +67,7 @@ class vcf_format(object):
         else:
             return ''
     def detailedtype(self):
-        if self.detailed_type:
+        if self.detailed_type and not self.detailed_type == 'DEL':
             return f"DETAILED_TYPE={self.detailed_type};"
         else:
             return ""
@@ -174,7 +174,7 @@ class vcf_sample(object):
         return f"{self.GT}:{self.vaf:.2f}:{self.hVAF()}:{self.DR}:{self.DV}"
     
     
-def db_2_vcf(double_breaks, no_ins, sample_ids, multisample):
+def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
     vcf_list = []
     clusters = defaultdict(list) 
     for br in double_breaks:
@@ -236,6 +236,7 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample):
             strands = (dir1)
         
         ID = db.vcf_id
+    
         vntr = True if db.vntr else None
         
         if db.genotype == 'hom':
@@ -276,7 +277,7 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample):
         sample2 = '\t'.join([s.sample() for s in sample_list2.values()])
         
         has_ins = 0 if not db.ins_seq else len(db.ins_seq)
-        if sv_type == "BND" and not db.is_single:
+        if (sv_type == "BND"  and not db.is_single) or (junction_vcf and not sv_type == 'INS'):
             if db.bp_2.dir_1 == 1 and db.bp_1.dir_1 == 1:
                 alt1 = 'N]' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + ']'
                 alt2 = 'N]' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + ']'
@@ -293,6 +294,8 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample):
             ID1 = ID + '_1'
             ID2 = ID + '_2'
             haplotype2 = (db.haplotype_2, db.haplotype_1)
+            if sv_type == 'INV':
+                db.sv_type = 'reciprocal_inversion'           
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID1, sv_type, alt1, db.length, db.vcf_qual, 
                                                      sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type,db.cluster_id,
                                                      has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, ID2,vntr, db.tra_pos, low_cov))#
@@ -398,8 +401,8 @@ def write_germline_vcf(vcf_list, outfile,ref_lengths):
     outfile.close()
     
     
-def write_to_vcf(double_breaks, all_ids, outpath, out_key, ref_lengths, no_ins, multisample):            
-    vcf_list = db_2_vcf(double_breaks, no_ins, all_ids, multisample)
+def write_to_vcf(double_breaks, all_ids, outpath, out_key, ref_lengths, no_ins, multisample, junction_vcf):            
+    vcf_list = db_2_vcf(double_breaks, no_ins, all_ids, multisample, junction_vcf)
     key = 'somatic' if out_key == 'somatic' else 'all'
     sample_ids = [target_id.replace('.bam' , '') for target_id in all_ids]
     

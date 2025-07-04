@@ -1458,9 +1458,10 @@ def annotate_mut_type(double_breaks, control_id, control_vaf, vaf_thr, min_supp,
     clusters = defaultdict(list)
     if pon_file:
         pon_list = extract_pon(pon_file, ref_lengths)
+
     for br in double_breaks:
         clusters[br.to_string()].append(br)
-    
+        
     for db_clust in clusters.values():
         vaf_pass = 'FAIL'
         db_list = defaultdict(list)
@@ -1485,21 +1486,21 @@ def annotate_mut_type(double_breaks, control_id, control_vaf, vaf_thr, min_supp,
                 pon_ls = pon_list[(db_clust[0].bp_1.ref_id,db_clust[0].bp_2.ref_id)]
                 if not pon_ls:
                     continue
-            pon_ls = list(zip(*sorted(zip(*pon_ls))))
+                pon_ls = list(zip(*sorted(zip(pon_ls[0],pon_ls[1], pon_ls[2], pon_ls[3], pon_ls[4]))))
             add_pon(db_clust, pon_ls)
 
-def add_sv_type(double_breaks):
-    clusters = defaultdict(list) 
+def add_sv_type(double_breaks, junction_vcf):
+    clusters = defaultdict(list)
     for br in double_breaks:
         clusters[br.to_string()].append(br)
     
     t = 0
     for db_clust in clusters.values():
         sv_type = get_sv_type(db_clust[0])
-        sv_id = 'severus_' + sv_type + str(t)
+        sv_id = 'severus_BND' + str(t) if junction_vcf and not sv_type == 'INS' else 'severus_' + sv_type + str(t)
         t +=1
         
-        for db in db_clust:    
+        for db in db_clust:
             db.vcf_sv_type = sv_type
             db.vcf_id = sv_id
     
@@ -1565,7 +1566,7 @@ def check_vntr(db, vntr_list):
 def add_vntr_annot(double_breaks, args):
    
     vntr_list = read_vntr_file(args.vntr_file)
-    add_sv_type(double_breaks)
+    add_sv_type(double_breaks, args.junction_vcf)
     clusters = defaultdict(list)
     vntr_clusters = defaultdict(list)
     MERGE_THR = 150
@@ -1727,7 +1728,7 @@ def get_ref_adj(genomic_segments, ref_adj):
     return adj_segments
 
 
-def get_genomic_segments(double_breaks, coverage_histograms, hb_vcf, key_type, ref_lengths, max_genomic_length, min_sv_size):
+def get_genomic_segments(double_breaks, coverage_histograms, hb_vcf, key_type, ref_lengths, max_genomic_length, min_sv_size, junction_vcf):
     hb_points = []
     
     if hb_vcf:
@@ -1737,7 +1738,7 @@ def get_genomic_segments(double_breaks, coverage_histograms, hb_vcf, key_type, r
         if hb_points:
             add_phaseset_id(double_breaks, hb_points)
         cluster_inversions(double_breaks, coverage_histograms, min_sv_size)
-        add_sv_type(double_breaks)
+        add_sv_type(double_breaks, junction_vcf)
         
     clusters = defaultdict(list)
     for br in double_breaks:
@@ -2223,7 +2224,7 @@ def cluster_inversions(double_breaks, coverage_histograms, min_sv_size):
 def reciprocal_inv(clusters):
     inv_list = defaultdict(list)
     MINSIZE = 200
-    LEN_DIFF_THR = 200
+    LEN_DIFF_THR = 50
     LEN_DIFF_RAT= 0.95
     for cl in clusters.values():
         db = cl[0]
