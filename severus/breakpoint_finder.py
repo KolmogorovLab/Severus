@@ -69,7 +69,7 @@ class Breakpoint(object):
 class DoubleBreak(object):
     __slots__ = ("bp_1", "direction_1", "bp_2", "direction_2", "genome_id","haplotype_1",'haplotype_2',"supp",'supp_read_ids',
                  'length','genotype','edgestyle', 'is_pass', 'ins_seq', 'mut_type', 'is_dup', 'has_ins','subgraph_id', 'sv_type','tra_pos',
-                 'DR', 'DV', 'hvaf', 'vaf', 'prec', 'phaseset_id', 'cluster_id', 'gr_id', 'vcf_id', 'vcf_sv_type','vaf_pass', 'vcf_qual', 'haplotypes', 'is_single', 'vntr')
+                 'DR', 'DV', 'hvaf', 'vaf', 'prec', 'phaseset_id', 'cluster_id', 'gr_id', 'vcf_id', 'vcf_sv_type','vaf_pass', 'vcf_qual', 'haplotypes', 'is_single', 'vntr', 'white_bed')
     def __init__(self, bp_1, direction_1, bp_2, direction_2, genome_id, haplotype_1, haplotype_2, 
                  supp, supp_read_ids, length):
         self.bp_1 = bp_1
@@ -106,6 +106,7 @@ class DoubleBreak(object):
         self.is_single = None
         self.vntr = None
         self.tra_pos = None
+        self.white_bed = None
         
     def to_string(self):
         strand_1 = "+" if self.direction_1 > 0 else "-"
@@ -1533,15 +1534,45 @@ def filter_germline_db(double_breaks):
             db_list['somatic'].append(db)
     return db_list
 
+def whitebed(double_breaks, bed_file):
+    regions = defaultdict(list)
+    if bed_file.endswith('.bed'):
+        f = open(bed_file)
+    else:
+        f = gzip.open(bed_file,'rt')
+    for line in f:
+        seq, pos1, pos2 = line.strip().split()[:3]
+        pos1, pos2  = int(pos1), int(pos2)
+        if seq in regions.keys():
+            regions[0].append(pos1)
+            regions[1].append(pos2)
+        else:
+            regions[seq] = [[pos1], [pos2]]
+    
+    for db in double_breaks:
+        if db.bp_1.ref_id in regions.keys():
+            ind1 = bisect.bisect_right(regions[db.bp_1.ref_id][0], db.bp_1.position)
+            ind2 = bisect.bisect_left(regions[db.bp_1.ref_id][1], db.bp_1.position)
+            if ind1 - ind2 == 1:
+                db.white_bed = True
+        if db.bp_2.ref_id in regions.keys():
+            ind1 = bisect.bisect_right(regions[db.bp_2.ref_id][0], db.bp_2.position)
+            ind2 = bisect.bisect_left(regions[db.bp_2.ref_id][1], db.bp_2.position)
+            if ind1 - ind2 == 1:
+                db.white_bed = True
+
 def filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segments_by_read, bam_files, thread_pool, args):
 
     min_sv_size = args.min_sv_size
     ins_seq = args.ins_seq
     single_bp = args.single_bp
     
+    if args.white_bed:
+        whitebed(double_breaks, args.white_bed)
+    
     db_list = []
     for db in double_breaks:
-        if db.is_pass == 'PASS' and db.vaf_pass == 'PASS' and db.vcf_qual:
+        if (db.is_pass == 'PASS' and db.vaf_pass == 'PASS' and db.vcf_qual) or db.white_bed:
             db_list.append(db)
         
     cluster_db(db_list, coverage_histograms, min_sv_size)

@@ -204,7 +204,7 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
         elif 'FAIL_LOWCOV_OTHER' in pass_list:
             sv_pass = 'FAIL_LOWCOV_OTHER'
         else:
-            sv_pass = db[0].is_pass
+            sv_pass = db_clust[0].is_pass
         
         low_cov = None
         if multisample:
