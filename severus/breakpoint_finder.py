@@ -282,13 +282,14 @@ def get_single_bps(bp_ls, bp_counts):
     return single_bps
     
 def cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads, bp_dir):
+
     clusters = []
     cur_cluster = []
     bp_list = []
     min_supp = min(2, min_reads)
     bp_pos.sort(key=lambda bp: (get_pos(bp, bp_dir)[2], get_pos(bp, bp_dir)[0]))
     for rc in bp_pos:
-        if cur_cluster and get_pos(rc,bp_dir)[0] - get_pos(cur_cluster[-1], bp_dir)[0] > clust_len:
+        if cur_cluster and abs(get_pos(rc,bp_dir)[0] - get_pos(cur_cluster[-1], bp_dir)[0]) > clust_len:
             if len(cur_cluster) >= min_supp:
                 clusters.append(cur_cluster)
             cur_cluster = [rc]
@@ -1900,6 +1901,8 @@ def calc_gen_segments(double_breaks,coverage_histograms,ref_lengths, max_genomic
             db_cov = db.supp + db.bp_2.spanning_reads[db.genome_id][db.haplotype_2]
             if db.bp_2.dir_1 == -1:
                 ind = bisect.bisect_right(pos_ls,db.bp_2.position)
+                if ind == len(pos_ls):
+                    print((ref_name, db.bp_2.ref_id, db.bp_2.position,db.bp_1.ref_id, db.bp_1.position, pos_ls[-1]))
                 if db.bp_2.position == pos_ls[ind]:
                     ind = ind +1
                 ind_max = bisect.bisect_right(pos_ls, db.bp_2.position + max_genomic_length)

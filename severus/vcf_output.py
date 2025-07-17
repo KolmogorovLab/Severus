@@ -101,7 +101,7 @@ class vcf_format(object):
             return ""
         
     def HP_inf(self):
-        if self.HP and self.phaseset_id:
+        if self.haplotypes and self.phaseset_id:
             phase_id = '{0}|{1}'.format(self.phaseset_id[0], self.phaseset_id[1])
             hps = '{0}|{1}'.format(self.haplotypes[0], self.haplotypes[1])
             return f";PHASESETID={phase_id};HP={hps}"
