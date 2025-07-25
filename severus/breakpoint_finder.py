@@ -2136,6 +2136,7 @@ def resolve_overlaps(segments_by_read, min_ovlp_len):
 
 def match_haplotypes(double_breaks):
     PHASE_THR = 0.66
+    MIN_PHASED_READ = 2
     
     clusters = defaultdict(list)
     for br in double_breaks:
@@ -2159,10 +2160,15 @@ def match_haplotypes(double_breaks):
             hp_list1 = sorted(haplotype1_supp, key=lambda k:haplotype1_supp[k], reverse=True)
             hp_list1_phased = [x for x in hp_list1 if not x == 0]
             
+            
             if 0 in hp_list1 and hp_list1_phased:
-                by_haplotype1[hp_list1_phased[0]] += by_haplotype1[0]
-                by_haplotype1[0] = []
-                
+                if haplotype1_supp[hp_list1_phased[0]] > MIN_PHASED_READ:
+                    by_haplotype1[hp_list1_phased[0]] += by_haplotype1[0]
+                    by_haplotype1[0] = []
+                else:
+                    by_haplotype1[0] += by_haplotype1[hp_list1_phased[0]]
+                    by_haplotype1[hp_list1_phased[0]] = []
+            
             if len(hp_list1_phased) > 1:
                 if haplotype1_supp[hp_list1_phased[0]] * PHASE_THR > haplotype1_supp[hp_list1_phased[1]]:
                     by_haplotype1[hp_list1_phased[0]] += by_haplotype1[hp_list1_phased[1]]
@@ -2182,8 +2188,12 @@ def match_haplotypes(double_breaks):
                 hp_list2_phased = [x for x in hp_list2 if not x == 0]
                 
                 if 0 in hp_list2 and hp_list2_phased:
-                    by_haplotype2[hp_list2_phased[0]] += by_haplotype2[0]
-                    by_haplotype2[0] = []
+                    if haplotype2_supp[hp_list2_phased[0]] > MIN_PHASED_READ:
+                        by_haplotype2[hp_list2_phased[0]] += by_haplotype2[0]
+                        by_haplotype2[0] = []
+                    else:
+                        by_haplotype2[0] += by_haplotype2[hp_list2_phased[0]]
+                        by_haplotype2[hp_list2_phased[0]] = []
                     
                 if len(hp_list2_phased) > 1:
                     if haplotype2_supp[hp_list2_phased[0]] * PHASE_THR > haplotype2_supp[hp_list2_phased[1]]:
