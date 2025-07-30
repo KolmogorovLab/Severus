@@ -130,7 +130,7 @@ def main():
     parser.add_argument("--max-unmapped-seq", dest='max_segment_dist',default=MAX_SEGMENT_DIST, metavar="int", type=int, help = 'maximum length of unmapped sequence between two mapped segments (if --between-junction-ins is selected the unmapped sequnce will be reported in the vcf)'')')
     parser.add_argument("--use-supplementary-tag", dest='use_supplementary_tag', action = "store_true", help = 'Uses haplotype tag in supplementary alignments')
     parser.add_argument("--PON", dest='pon_file', metavar="path", help = 'Uses PON data')
-    parser.add_argument("--whitelist", dest='white_bed', metavar="path", help = 'Outputs all the SVs within the bed file')
+    parser.add_argument("--whitelist", dest='whitelist', metavar="path", help = 'Outputs all the SVs within the bed file')
     parser.add_argument("--low-quality", dest='multisample', action = "store_true", help = 'Uses set of parameters optimized for the analysis with lower quality') 
     parser.add_argument("--junction-vcf", dest='junction_vcf', action = "store_true", help = 'Outputs a junction vcf in which all DELs, DUPs and INVs are represented as a BND') 
     parser.add_argument("--target-sample", dest='target_name', default = '', help = 'Sample name for the target bams', nargs="+")

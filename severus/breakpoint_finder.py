@@ -33,7 +33,7 @@ CHUNK_SIZE = 10000000
         
 class Breakpoint(object):
     __slots__ = ("ref_id", "position","dir_1", "spanning_reads", "connections", 'prec',
-                 "read_ids", "pos2", 'id', "is_insertion", "insertion_size", "qual", "CI", "is_single")
+                 "read_ids", "pos2", 'id', "is_insertion", "insertion_size", "qual", "CI", "is_single", 'whitelist')
     def __init__(self, ref_id, ref_position, dir_1, qual, CI):
         self.ref_id = ref_id
         self.position = ref_position
@@ -49,6 +49,7 @@ class Breakpoint(object):
         self.prec = 1
         self.CI = CI
         self.is_single = None
+        self.whitelist = None
 
     def fancy_name(self):
         if not self.is_insertion:
@@ -69,7 +70,7 @@ class Breakpoint(object):
 class DoubleBreak(object):
     __slots__ = ("bp_1", "direction_1", "bp_2", "direction_2", "genome_id","haplotype_1",'haplotype_2',"supp",'supp_read_ids',
                  'length','genotype','edgestyle', 'is_pass', 'ins_seq', 'mut_type', 'is_dup', 'has_ins','subgraph_id', 'sv_type','tra_pos',
-                 'DR', 'DV', 'hvaf', 'vaf', 'prec', 'phaseset_id', 'cluster_id', 'gr_id', 'vcf_id', 'vcf_sv_type','vaf_pass', 'vcf_qual', 'haplotypes', 'is_single', 'vntr', 'white_bed')
+                 'DR', 'DV', 'hvaf', 'vaf', 'prec', 'phaseset_id', 'cluster_id', 'gr_id', 'vcf_id', 'vcf_sv_type','vaf_pass', 'vcf_qual', 'haplotypes', 'is_single', 'vntr', 'whitelist')
     def __init__(self, bp_1, direction_1, bp_2, direction_2, genome_id, haplotype_1, haplotype_2, 
                  supp, supp_read_ids, length):
         self.bp_1 = bp_1
@@ -106,7 +107,7 @@ class DoubleBreak(object):
         self.is_single = None
         self.vntr = None
         self.tra_pos = None
-        self.white_bed = None
+        self.whitelist = None
         
     def to_string(self):
         strand_1 = "+" if self.direction_1 > 0 else "-"
@@ -186,7 +187,7 @@ def get_pos(segls, bp_dir):
     else:
         return s1.get_pos(dirls[bp_dir])
            
-def get_breakpoints(split_reads, ref_lengths, args):
+def get_breakpoints(split_reads, ref_lengths, white_reg, args):
     """
     Finds regular 1-sided breakpoints, where split reads consistently connect
     two different parts of the genome
@@ -227,7 +228,8 @@ def get_breakpoints(split_reads, ref_lengths, args):
         bps = cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads,1)
         if bps:
             all_breaks += bps
-    
+    if white_reg:
+        add_whitelist(all_breaks, white_reg)
     merge_bps(all_breaks)
     conn_list = defaultdict(list)
     for bp in all_breaks:
@@ -254,6 +256,14 @@ def get_breakpoints(split_reads, ref_lengths, args):
     
     return double_breaks, single_bps
 
+def add_whitelist(all_breaks, white_reg):
+    for bp in all_breaks:
+        if bp.ref_id in white_reg.keys():
+            ind1 = bisect.bisect_right(white_reg[bp.ref_id][0], bp.position)
+            ind2 = bisect.bisect_left(white_reg[bp.ref_id][1], bp.position)
+            if ind1 - ind2 == 1:
+               bp.whitelist = True
+    
 def merge_bps(all_breaks):
     MIN_DIFF = 50
     all_breaks.sort(key=lambda x:(x.dir_1, x.ref_id, x.position))
@@ -272,6 +282,8 @@ def get_single_bps(bp_ls, bp_counts):
             single_bps.append(bp)
             bp.is_single = True
         elif 1 in rcls:
+            if bp.whitelist:
+                continue
             if sum([1 for a in rcls if a == 1]) > len(rcls)*SINGLE_PAIR_RAT:
                 single_bps.append(bp)
                 bp.is_single = True
@@ -396,9 +408,10 @@ def get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads, bp_ls, multisample):
     for key in unique_reads_pass.keys():
         by_genome_id_pass[key[0]] += len(unique_reads_pass[key])
             
-    if by_genome_id_pass.values():
+    if by_genome_id_pass.values() or bp_1.whitelist or bp_2.whitelist:
         is_pass = 'PASS'
-        if max(by_genome_id_pass.values()) < min_reads:
+        whitelist = True if bp_1.whitelist or bp_2.whitelist else None
+        if by_genome_id_pass.values() and max(by_genome_id_pass.values()) < min_reads:
             is_pass = 'FAIL'
             
         if conn_valid_1[2] < conn_pass_1 * CONN_2_PASS and conn_valid_2[2] < conn_pass_2 * CONN_2_PASS:
@@ -423,6 +436,7 @@ def get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads, bp_ls, multisample):
             db_list[-1].prec = prec
             db_list[-1].is_dup = is_dup
             db_list[-1].is_pass = is_pass
+            db_list[-1].whitelist = whitelist
     return db_list
     
 
@@ -627,7 +641,6 @@ def double_breaks_filter(double_breaks, single_bps, min_reads, control_id, resol
         db = cl[0]
         if not 'PASS' in [db.is_pass for db in cl]:
             continue
-        
         conn_1 = db.bp_1.connections
         conn_2 = db.bp_2.connections#
         fail1 = check_db(cl, conn_1, 0)
@@ -637,21 +650,26 @@ def double_breaks_filter(double_breaks, single_bps, min_reads, control_id, resol
             add_single_bp(cl, 0, single_bps)
             
         elif not fail2 and fail1:
-            add_single_bp(cl, 1, single_bps)
+            if not cl[0].whitelist:
+                add_single_bp(cl, 1, single_bps)
             
         elif fail1 and fail2:
             if fail1 == 'FAIL_CONN_CONS' and db.bp_1.qual >= MIN_QUAL:
-                add_single_bp(cl, 0, single_bps)
+                if not cl[0].whitelist:
+                    add_single_bp(cl, 0, single_bps)
                 
             if fail2 == 'FAIL_CONN_CONS' and db.bp_2.qual >= MIN_QUAL:
-                add_single_bp(cl, 1, single_bps)
+                if not cl[0].whitelist:
+                    add_single_bp(cl, 1, single_bps)
                 
             else:
                 for db1 in cl:
                     db1.is_pass = fail1
                 
-        if not fail1 and not fail2:
+        if not fail1 and not fail2 or cl[0].whitelist:
             conn_ins = [cn for cn in conn_1 if cn in conn_2 and cn[0].is_pass == 'PASS' and cn[1].is_pass == 'PASS']
+            if cl[0].whitelist:
+                conn_ins = [cn for cn in conn_1 if cn in conn_2]
             has_ins = []
             for c in conn_ins:
                 s1,s2 = sorted(c, key=lambda x:(x.align_start, x.read_start))
@@ -760,7 +778,7 @@ def iter_kmers(seq):
     for i in range(0, len(seq) - KMER, SKIP):
         yield seq[i:i + KMER]
               
-def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
+def extract_insertions(ins_list, clipped_clusters,ref_lengths, white_reg, args):
 
     CLUST_LEN = 1000
     CV_THR = 0.2
@@ -839,13 +857,18 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
                     
             position = int(np.median(pos_list))
             mapq = int(np.median([x.mapq for x in cl if x.is_pass == 'PASS']))
-            
+            whitelist = None
             if position > min_ref_flank and position < ref_lengths[seq] - min_ref_flank:
                 cl2 = add_clipped_end(ins_length, position, clipped_clusters_pos, clipped_clusters_seq, by_genome_id_pass,unique_reads_pass, unique_reads)
                 if cl2:
                     clipped_to_remove.append(cl2)
                 if not by_genome_id_pass.values() or not max(by_genome_id_pass.values()) >= min_reads:
                     continue#
+                if white_reg and seq in white_reg.keys():
+                    ind1 = bisect.bisect_right(white_reg[seq][0], position)
+                    ind2 = bisect.bisect_left(white_reg[seq][1], position)
+                    if ind1 - ind2 == 1:
+                       whitelist = True
                 for key, unique_read in unique_reads.items():
                     bp_1 = Breakpoint(seq, position, -1, mapq, max(pos_list) - min(pos_list))
                     bp_1.read_ids = [x.read_id for x in unique_read]
@@ -861,6 +884,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, args):
                     db_1.prec = prec
                     db_1.ins_seq = ins_seq
                     db_1.is_pass = is_pass
+                    db_1.whitelist = whitelist
                     ins_clusters.append(db_1)
         if clipped_to_remove:              
             for clipped in list(set(clipped_to_remove)):
@@ -881,7 +905,7 @@ def insertion_filter(ins_list, min_reads, control_id):
         clusters[br.to_string()].append(br)
     
     for cl in clusters.values():
-        if not cl[0].is_pass == 'PASS':
+        if not cl[0].is_pass == 'PASS' and not cl[0].whitelist:
             continue
         conn_1 = [cn for ins in cl for cn in ins.bp_1.connections]
         conn_count_1 = Counter([cn.is_pass for cn in conn_1])
@@ -1535,7 +1559,7 @@ def filter_germline_db(double_breaks):
             db_list['somatic'].append(db)
     return db_list
 
-def whitebed(double_breaks, bed_file):
+def whitebed(bed_file):
     regions = defaultdict(list)
     if bed_file.endswith('.bed'):
         f = open(bed_file)
@@ -1549,18 +1573,7 @@ def whitebed(double_breaks, bed_file):
             regions[1].append(pos2)
         else:
             regions[seq] = [[pos1], [pos2]]
-    
-    for db in double_breaks:
-        if db.bp_1.ref_id in regions.keys():
-            ind1 = bisect.bisect_right(regions[db.bp_1.ref_id][0], db.bp_1.position)
-            ind2 = bisect.bisect_left(regions[db.bp_1.ref_id][1], db.bp_1.position)
-            if ind1 - ind2 == 1:
-                db.white_bed = True
-        if db.bp_2.ref_id in regions.keys():
-            ind1 = bisect.bisect_right(regions[db.bp_2.ref_id][0], db.bp_2.position)
-            ind2 = bisect.bisect_left(regions[db.bp_2.ref_id][1], db.bp_2.position)
-            if ind1 - ind2 == 1:
-                db.white_bed = True
+    return regions
 
 def filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segments_by_read, bam_files, thread_pool, args):
 
@@ -1568,12 +1581,9 @@ def filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segmen
     ins_seq = args.ins_seq
     single_bp = args.single_bp
     
-    if args.white_bed:
-        whitebed(double_breaks, args.white_bed)
-    
     db_list = []
     for db in double_breaks:
-        if (db.is_pass == 'PASS' and db.vaf_pass == 'PASS' and db.vcf_qual) or db.white_bed:
+        if (db.is_pass == 'PASS' and db.vaf_pass == 'PASS' and db.vcf_qual) or db.whitelist:
             db_list.append(db)
         
     cluster_db(db_list, coverage_histograms, min_sv_size)
@@ -2758,7 +2768,10 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
     if args.write_alignments:
         outpath_alignments = os.path.join(args.out_dir, "read_alignments")
         write_alignments(segments_by_read, outpath_alignments)
-        
+    
+    white_reg = []
+    if args.whitelist:
+        white_reg = whitebed(args.whitelist)
     logger.info('Extracting split alignments')
     split_reads = get_splitreads(segments_by_read)
     ins_list_all = get_insertionreads(segments_by_read)
@@ -2771,9 +2784,9 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
     clipped_clusters = cluster_clipped_ends(clipped_reads, args.bp_cluster_size,args.min_ref_flank, ref_lengths)
     
     logger.info('Starting breakpoint detection')
-    double_breaks, single_bps = get_breakpoints(split_reads, ref_lengths, args)
+    double_breaks, single_bps = get_breakpoints(split_reads, ref_lengths, white_reg, args)
     logger.info('Clustering unmapped insertions')
-    ins_clusters = extract_insertions(ins_list_all, clipped_clusters, ref_lengths, args)
+    ins_clusters = extract_insertions(ins_list_all, clipped_clusters, ref_lengths, white_reg, args)
 
     match_long_ins(ins_clusters, double_breaks, args.min_sv_size, args.tra_to_ins)
     

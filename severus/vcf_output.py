@@ -4,6 +4,7 @@
 from severus.__version__ import __version__
 from collections import defaultdict
 from datetime import datetime
+import numpy as np
 import sys
 import os
 
@@ -205,7 +206,14 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
             sv_pass = 'FAIL_LOWCOV_OTHER'
         else:
             sv_pass = db_clust[0].is_pass
-        
+        if db.whitelist:
+            sv_pass = 'WHITELIST'
+            qual_list = []
+            for db in db_clust:
+                qual_list += [db.bp_1.qual, db.bp_2.qual]
+            vcf_qual = np.median(qual_list)
+            for db in db_clust:
+                db.vcf_qual = vcf_qual
         low_cov = None
         if multisample:
             low_cov = set()
