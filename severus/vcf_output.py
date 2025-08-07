@@ -10,9 +10,9 @@ import os
 
 class vcf_format(object):
     __slots__ = ('chrom', 'pos', 'haplotypes','haplotype', 'ID', 'sv_type','alt', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2','mut_type', 'tra_pos',
-                 'ins_seq', 'ins_len_seq', 'cluster_id','ins_len', 'detailed_type', 'prec', 'phaseset_id', 'strands', 'sample','HP', 'mate_id', 'vntr', 'low_cov')
+                 'ins_seq', 'ins_len_seq', 'cluster_id','ins_len', 'detailed_type', 'prec', 'phaseset_id', 'strands', 'sample','HP', 'mate_id', 'vntr', 'low_cov', 'whitelist')
     def __init__(self, chrom, pos, haplotypes, haplotype, ID, sv_type, alt, sv_len, qual, Filter, chr2, pos2, mut_type, cluster_id, 
-                 ins_len, ins_len_seq, detailed_type, prec, phaseset_id, strands, sample, HP, mate_id, vntr,tra_pos, low_cov):
+                 ins_len, ins_len_seq, detailed_type, prec, phaseset_id, strands, sample, HP, mate_id, vntr,tra_pos, low_cov, whitelist):
         self.chrom = chrom
         self.pos = pos
         self.haplotypes = haplotypes
@@ -40,9 +40,15 @@ class vcf_format(object):
         self.vntr = vntr
         self.tra_pos = tra_pos
         self.low_cov = low_cov
+        self.whitelist = whitelist
      
     def precision(self):
         return 'PRECISE' if self.prec else 'IMPRECISE'
+    def inwhitelist(self):
+        if self.whitelist:
+            return ';INSIDE_WHITELIST=TRUE'
+        else:
+            return ''
     
     def strands_vcf(self):
         if self.sv_type == 'INS':
@@ -113,7 +119,7 @@ class vcf_format(object):
         return 'LOW_COV_IN=' + ','.join(self.low_cov) + ';' if self.low_cov else ''
     
     def info(self):
-        return f"{self.precision()};SVTYPE={self.sv_type};{self.svlen()}{self.end_pos()}{self.trapos()}{self.strands_vcf()}{self.low_covls()}{self.add_vntr()}{self.detailedtype()}{self.has_ins()}MAPQ={self.qual}{self.HP_inf()}{self.clusterid()}"
+        return f"{self.precision()};SVTYPE={self.sv_type};{self.svlen()}{self.end_pos()}{self.trapos()}{self.strands_vcf()}{self.low_covls()}{self.add_vntr()}{self.detailedtype()}{self.has_ins()}MAPQ={self.qual}{self.HP_inf()}{self.clusterid()}{self.inwhitelist()}"
     
     def to_vcf(self):
         if self.sv_type == 'INS':
@@ -207,7 +213,6 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
         else:
             sv_pass = db_clust[0].is_pass
         if db.whitelist:
-            sv_pass = 'WHITELIST'
             qual_list = []
             for db in db_clust:
                 qual_list += [db.bp_1.qual, db.bp_2.qual]
@@ -306,15 +311,15 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
                 db.sv_type = 'reciprocal_inversion'           
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID1, sv_type, alt1, db.length, db.vcf_qual, 
                                                      sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type,db.cluster_id,
-                                                     has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, ID2,vntr, db.tra_pos, low_cov))#
+                                                     has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, ID2,vntr, db.tra_pos, low_cov, db.whitelist))#
             vcf_list.append(vcf_format(db.bp_2.ref_id, db.bp_2.position, haplotype2, db.haplotype_2, ID2, sv_type, alt2, db.length, db.vcf_qual, 
                                                      sv_pass, db.bp_1.ref_id, db.bp_1.position, db.mut_type, db.cluster_id,
-                                                     has_ins, db.ins_seq,db.sv_type, db.prec, phaseset, strands,sample2, gen_type2, ID1,vntr, db.tra_pos, low_cov))
+                                                     has_ins, db.ins_seq,db.sv_type, db.prec, phaseset, strands,sample2, gen_type2, ID1,vntr, db.tra_pos, low_cov,db.whitelist))
         elif db.is_single:
             alt= '.N' if db.direction_1 == -1 else 'N.'
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID, 'sBND', alt, db.length, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type, db.cluster_id,
-                                                 has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.bp_1.pos2, low_cov))
+                                                 has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.bp_1.pos2, low_cov,db.whitelist))
             vcf_list[-1].pos2 = db.bp_1.pos2
         elif sv_type == 'INV':
             if db.direction_1 == -1:
@@ -322,12 +327,12 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
             pos1 , pos2 = int(min(db.sv_type)), int(max(db.sv_type))
             vcf_list.append(vcf_format(db.bp_1.ref_id, pos1, haplotype, db.haplotype_1, ID, sv_type, sv_type, pos2-pos1, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, pos2, db.mut_type, db.cluster_id,
-                                                 has_ins, db.ins_seq, 'reciprocal_inversion', db.prec, phaseset, strands,sample, gen_type1, None,vntr, None, low_cov))            
+                                                 has_ins, db.ins_seq, 'reciprocal_inversion', db.prec, phaseset, strands,sample, gen_type1, None,vntr, None, low_cov,db.whitelist))            
         else:
         
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID, sv_type, sv_type, db.length, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type, db.cluster_id,
-                                                 has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.tra_pos, low_cov))#
+                                                 has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.tra_pos, low_cov,db.whitelist))#
         
         if sv_type == 'INS':
             if not no_ins:
@@ -378,6 +383,7 @@ def write_vcf_header(ref_lengths, outfile, sample_list):
     outfile.write("##INFO=<ID=INSIDE_VNTR,Number=1,Type=String,Description=\"True if an indel is inside a VNTR\">\n")
     outfile.write("##INFO=<ID=ALIGNED_POS,Number=1,Type=String,Description=\"Position in the reference\">\n")
     outfile.write("##INFO=<ID=LOW_COV_IN,Number=1,Type=String,Description=\"Samples that has low coverage in that region\">\n")
+    outfile.write("##INFO=<ID=INSIDE_WHITELIST,Number=1,Type=String,Description=\"SVs within the whitelist bed file\">\n")
 
     outfile.write("##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n")
     #outfile.write("##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotyping quality\">\n")

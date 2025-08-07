@@ -252,7 +252,9 @@ def get_breakpoints(split_reads, ref_lengths, white_reg, args):
         db = get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads,bp_ls, args.multisample)
         if db:
             double_breaks += db
-    double_breaks = match_del(double_breaks, args.resolve_overlaps)
+    if args.resolve_overlaps:
+        resolve_ovlp(double_breaks)
+    double_breaks = match_del(double_breaks)
     
     return double_breaks, single_bps
 
@@ -440,7 +442,7 @@ def get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads, bp_ls, multisample):
     return db_list
     
 
-def match_del(double_breaks, resolve_overlaps):
+def match_del(double_breaks):
     DEL_THR = 20000
     CLUSTER_SIZE = 50
 
@@ -450,9 +452,6 @@ def match_del(double_breaks, resolve_overlaps):
     for db in double_breaks:
         if db.bp_1.ref_id == db.bp_2.ref_id and db.bp_1.dir_1 == 1 and db.bp_2.dir_1 == -1 and db.length <= DEL_THR:
             clusters[db.to_string()].append(db)
-            
-    if resolve_overlaps:
-        resolve_ovlp(clusters) 
         
     for cl in clusters.values():
         db = cl[0]
@@ -627,7 +626,7 @@ def multisample_filter(clusters):
             for db in cl:
                 db.is_pass = 'FAIL_MULTISAMPLE'          
                 
-def double_breaks_filter(double_breaks, single_bps, min_reads, control_id, resolve_overlaps, sv_size, multisample, cov_thr):
+def double_breaks_filter(double_breaks, single_bps, min_reads, control_id, sv_size, multisample, cov_thr):
 
     NUM_HAPLOTYPES = [0,1,2]
     MAX_STD = 25
@@ -709,8 +708,12 @@ def double_breaks_filter(double_breaks, single_bps, min_reads, control_id, resol
     return double_breaks
 
 
-def resolve_ovlp(clusters):
+def resolve_ovlp(double_breaks):
     MIN_SIZE = 50
+    clusters = defaultdict(list)
+
+    for db in double_breaks:
+        clusters[db.to_string()].append(db)
     for cl in clusters.values():
         db = cl[0]
         if not db.is_pass == 'PASS' or db.is_single:
@@ -2056,93 +2059,6 @@ def add_pon(db_clust, pon_ls):
 
     for db in db_clust:
         db.mut_type = mut_type
-    
-def resolve_overlaps(segments_by_read, min_ovlp_len):
-    """
-    Some supplementary alignments may be overlapping (e.g. in case of inversions with flanking repeat).
-    This function checks if the overlap has ok structe, trims and outputs non-overlapping alignments
-    """
-    
-    def _get_ovlp(seglist_1, seglist_2):
-        
-        alg_strt = [seglist_1[-1].align_start, seglist_2[-1].align_start]
-        alg_end = [seglist_1[-1].read_end, seglist_2[-1].read_end]
-        
-        if alg_end[0] - alg_strt[1] > min_ovlp_len:
-            return  alg_end[0] - alg_strt[1] + 1
-        else:
-            return 0
-        
-    def _get_full_ovlp(seglist_1, seglist_2):
-        
-        alg_strt = [seglist_1[-1].align_start, seglist_2[-1].align_start]
-        alg_end = [seglist_1[-1].read_end, seglist_2[-1].read_end]
-        
-        max_ovlp_len = [alg_end[0] - alg_strt[0], alg_end[1] - alg_strt[1]]
-        if alg_end[0] - alg_strt[1] == min(max_ovlp_len):
-            seg = [seglist_1, seglist_2]
-            return seg[max_ovlp_len.index(min(max_ovlp_len))]
-        else:
-            return False
-            
-    def _update_ovlp_seg(seglist_1, seglist_2, left_ovlp):
-        seg_to_remove = []
-        
-        seg2 = seglist_1 if seglist_2[0].strand == 1 else seglist_2
-        
-        for seg in seg2:
-            seg.align_start += left_ovlp
-            if seg.read_start >= seg.align_start:
-                continue
-            if seg.read_end < seg.align_start:
-                seg_to_remove.append(seg)
-            else:
-                seg.read_start += left_ovlp
-                seg.segment_length = seg.read_end - seg.read_start
-                seg.ref_start = seg.ref_start + left_ovlp
-                seg.ref_start_ori = seg.ref_start
-        
-        return seg_to_remove
-
-    for read in segments_by_read:
-        read_segments = [seg for seg in read if not seg.is_insertion and not seg.is_clipped]
-        if len(read_segments) < 2:
-            continue
-    
-        segs_to_remove =[]
-        cur_cluster = []
-        clusters = []
-        read_segments.sort(key=lambda s:(s.align_start, s.read_start))
-        
-        for seg in read_segments:
-            if cur_cluster and not seg.align_start == cur_cluster[-1].align_start: 
-                clusters.append(cur_cluster)
-                cur_cluster = [seg]
-            else:
-                cur_cluster.append(seg)
-        if cur_cluster:
-            clusters.append(cur_cluster)
-            
-        if len(clusters) < 2:
-            continue
-        
-        for i in range(len(clusters)):
-            left_ovlp = 0
-            seg = False
-            
-            if i > 0 and clusters[i-1][0].ref_id == clusters[i][0].ref_id:
-                seg_to_remove = _get_full_ovlp(clusters[i-1], clusters[i])
-                if seg_to_remove:
-                    segs_to_remove += seg_to_remove
-                    continue
-                left_ovlp = _get_ovlp(clusters[i-1], clusters[i])
-                
-            if left_ovlp > 0:
-                seg_to_remove = _update_ovlp_seg(clusters[i-1], clusters[i], left_ovlp)
-                segs_to_remove += seg_to_remove
-                
-        for seg in list(set(segs_to_remove)):
-            read.remove(seg)
 
 def match_haplotypes(double_breaks):
     PHASE_THR = 0.66
@@ -2803,7 +2719,7 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
 
         
     logger.info('Filtering breakpoints')
-    double_breaks = double_breaks_filter(double_breaks, single_bps, args.bp_min_support, cont_id, args.resolve_overlaps, args.sv_size, args.multisample, args.cov_thr)
+    double_breaks = double_breaks_filter(double_breaks, single_bps, args.bp_min_support, cont_id, args.sv_size, args.multisample, args.cov_thr)
     double_breaks.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position, b.direction_1))
     if args.single_bp and single_bps:
         single_bps = filter_single_bp(single_bps, cont_id, args.control_vaf, args.vaf_thr, args.bp_min_support, median_cov, args.pon_file, ref_lengths)
