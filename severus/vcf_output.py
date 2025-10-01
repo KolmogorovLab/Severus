@@ -9,10 +9,14 @@ import sys
 import os
 
 class vcf_format(object):
-    __slots__ = ('chrom', 'pos', 'haplotypes','haplotype', 'ID', 'sv_type','alt', 'sv_len', 'qual', 'Filter', 'chr2', 'pos2','mut_type', 'tra_pos',
-                 'ins_seq', 'ins_len_seq', 'cluster_id','ins_len', 'detailed_type', 'prec', 'phaseset_id', 'strands', 'sample','HP', 'mate_id', 'vntr', 'low_cov', 'whitelist')
-    def __init__(self, chrom, pos, haplotypes, haplotype, ID, sv_type, alt, sv_len, qual, Filter, chr2, pos2, mut_type, cluster_id, 
-                 ins_len, ins_len_seq, detailed_type, prec, phaseset_id, strands, sample, HP, mate_id, vntr,tra_pos, low_cov, whitelist):
+    __slots__ = ('chrom', 'pos', 'haplotypes','haplotype', 'ID', 'sv_type','alt', 'sv_len', 'qual', 
+                 'Filter', 'chr2', 'pos2','mut_type', 'tra_pos','ins_seq', 'ins_len_seq', 
+                 'cluster_id','ins_len', 'detailed_type', 'prec', 'phaseset_id', 'strands', 
+                 'sample','HP', 'mate_id', 'vntr', 'low_cov', 'whitelist', 'dvls', 'drls')
+    def __init__(self, chrom, pos, haplotypes, haplotype, ID, sv_type, alt, sv_len, qual, 
+                 Filter, chr2, pos2, mut_type, cluster_id, ins_len, ins_len_seq, detailed_type, 
+                 prec, phaseset_id, strands, sample, HP, mate_id, vntr,tra_pos, low_cov, whitelist,
+                 dvls, drls):
         self.chrom = chrom
         self.pos = pos
         self.haplotypes = haplotypes
@@ -41,6 +45,8 @@ class vcf_format(object):
         self.tra_pos = tra_pos
         self.low_cov = low_cov
         self.whitelist = whitelist
+        self.dvls = dvls
+        self.drls = drls
      
     def precision(self):
         return 'PRECISE' if self.prec else 'IMPRECISE'
@@ -114,12 +120,14 @@ class vcf_format(object):
             return f";PHASESETID={phase_id};HP={hps}"
         else:
             return ""
+    def to_dvls(self):
+        return ";SUPP_READS=" + ':'.join(self.dvls[0]) + ":"+ ':'.join(self.dvls[1]) +";REF_READS=" + ':'.join(self.drls[0]) + ":"+ ':'.join(self.drls[1])
 
     def low_covls(self):
         return 'LOW_COV_IN=' + ','.join(self.low_cov) + ';' if self.low_cov else ''
     
     def info(self):
-        return f"{self.precision()};SVTYPE={self.sv_type};{self.svlen()}{self.end_pos()}{self.trapos()}{self.strands_vcf()}{self.low_covls()}{self.add_vntr()}{self.detailedtype()}{self.has_ins()}MAPQ={self.qual}{self.HP_inf()}{self.clusterid()}{self.inwhitelist()}"
+        return f"{self.precision()};SVTYPE={self.sv_type};{self.svlen()}{self.end_pos()}{self.trapos()}{self.strands_vcf()}{self.low_covls()}{self.add_vntr()}{self.detailedtype()}{self.has_ins()}MAPQ={self.qual}{self.HP_inf()}{self.to_dvls()}{self.clusterid()}{self.inwhitelist()}"
     
     def to_vcf(self):
         if self.sv_type == 'INS':
@@ -143,6 +151,7 @@ class vcf_sample(object):
         
     def hVAF(self):
         return '{0:.2f},{1:.2f},{2:.2f}'.format(self.hVaf[0], self.hVaf[1], self.hVaf[2])
+        
     
     def call_genotype(self):
         #err = 0.1/2
@@ -183,7 +192,8 @@ class vcf_sample(object):
     
 def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
     vcf_list = []
-    clusters = defaultdict(list) 
+    clusters = defaultdict(list)
+        
     for br in double_breaks:
         if br.bp_1.is_insertion:
             continue
@@ -191,7 +201,7 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
         
     for key, db_clust in clusters.items():
         db_list = defaultdict(list)
-        
+        db_clust.sort(key=lambda k:k.supp, reverse=True)
         pass_list = [db.is_pass for db in db_clust]
         new_pass = True if 'PASS' in pass_list else False
         
@@ -271,6 +281,9 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
             phaseset = db.phaseset_id
         haplotype = (db.haplotype_1, db.haplotype_2)
         
+        drls = [[str(s) for s in db.bp_1.spanning_reads[db.genome_id][:3]], [str(s) for s in db.bp_2.spanning_reads[db.genome_id][:3]]]
+        dvls = [[str(s) for s in db.dvls[0]], [str(s) for s in db.dvls[1]]]
+        
         sample_list = defaultdict(list)
         sample_list2 = defaultdict(list)
         for sample_id in sample_ids:
@@ -280,8 +293,8 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
             hVaf1 = [0.0, 0.0, 0.0]
             hVaf2 = [0.0, 0.0, 0.0]
             for db in db1:
-                hVaf1[db.haplotype_1]  = db.hvaf
-                hVaf2[db.haplotype_1]  = db.hvaf
+                hVaf1[db.haplotype_1]  = db.hVaf
+                hVaf2[db.haplotype_1]  = db.hVaf
             sample_list[db.genome_id] = vcf_sample(db.DR, db.DV, db.vaf, hVaf1, gen_type1)
             sample_list2[db.genome_id] = vcf_sample(db.DR, db.DV, db.vaf, hVaf2, gen_type2)
             
@@ -307,19 +320,24 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
             ID1 = ID + '_1'
             ID2 = ID + '_2'
             haplotype2 = (db.haplotype_2, db.haplotype_1)
+            dvls2 = [dvls[1], dvls[0]]
+            drls2 = [drls[1], drls[0]]
             if sv_type == 'INV':
                 db.sv_type = 'reciprocal_inversion'           
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID1, sv_type, alt1, db.length, db.vcf_qual, 
                                                      sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type,db.cluster_id,
-                                                     has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, ID2,vntr, db.tra_pos, low_cov, db.whitelist))#
+                                                     has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, ID2,vntr, 
+                                                     db.tra_pos, low_cov, db.whitelist, dvls, drls))#
             vcf_list.append(vcf_format(db.bp_2.ref_id, db.bp_2.position, haplotype2, db.haplotype_2, ID2, sv_type, alt2, db.length, db.vcf_qual, 
                                                      sv_pass, db.bp_1.ref_id, db.bp_1.position, db.mut_type, db.cluster_id,
-                                                     has_ins, db.ins_seq,db.sv_type, db.prec, phaseset, strands,sample2, gen_type2, ID1,vntr, db.tra_pos, low_cov,db.whitelist))
+                                                     has_ins, db.ins_seq,db.sv_type, db.prec, phaseset, strands,sample2, gen_type2, ID1,vntr, 
+                                                     db.tra_pos, low_cov,db.whitelist, dvls2, drls2))
         elif db.is_single:
             alt= '.N' if db.direction_1 == -1 else 'N.'
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID, 'sBND', alt, db.length, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type, db.cluster_id,
-                                                 has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.bp_1.pos2, low_cov,db.whitelist))
+                                                 has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.bp_1.pos2, 
+                                                 low_cov,db.whitelist, dvls, drls))
             vcf_list[-1].pos2 = db.bp_1.pos2
         elif sv_type == 'INV':
             if db.direction_1 == -1:
@@ -327,12 +345,14 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
             pos1 , pos2 = int(min(db.sv_type)), int(max(db.sv_type))
             vcf_list.append(vcf_format(db.bp_1.ref_id, pos1, haplotype, db.haplotype_1, ID, sv_type, sv_type, pos2-pos1, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, pos2, db.mut_type, db.cluster_id,
-                                                 has_ins, db.ins_seq, 'reciprocal_inversion', db.prec, phaseset, strands,sample, gen_type1, None,vntr, None, low_cov,db.whitelist))            
+                                                 has_ins, db.ins_seq, 'reciprocal_inversion', db.prec, phaseset, strands,sample, gen_type1, 
+                                                 None,vntr, None, low_cov,db.whitelist, dvls, drls))            
         else:
         
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID, sv_type, sv_type, db.length, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type, db.cluster_id,
-                                                 has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.tra_pos, low_cov,db.whitelist))#
+                                                 has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, 
+                                                 db.tra_pos, low_cov,db.whitelist, dvls, drls))#
         
         if sv_type == 'INS':
             if not no_ins:
@@ -376,7 +396,9 @@ def write_vcf_header(ref_lengths, outfile, sample_list):
     outfile.write("##INFO=<ID=INSLEN,Number=1,Type=Integer,Description=\"Length of the unmapped sequence between breakpoint\">\n")
     outfile.write("##INFO=<ID=MAPQ,Number=1,Type=Integer,Description=\"Median mapping quality of supporting reads\">\n")
     outfile.write("##INFO=<ID=PHASESETID,Number=1,Type=String,Description=\"Matching phaseset ID for phased SVs\">\n")
-    outfile.write("##INFO=<ID=HP,Number=1,Type=Integer,Description=\"Matching haplotype ID for phased SVs\">\n")
+    outfile.write("##INFO=<ID=HP,Number=1,Type=String,Description=\"Matching haplotype ID for phased SVs\">\n")
+    outfile.write("##INFO=<ID=SUPP_READS,Number=1,Type=String,Description=\"Number of support reads\">\n")
+    outfile.write("##INFO=<ID=REF_READS,Number=1,Type=String,Description=\"Number of reference reads\">\n")
     outfile.write("##INFO=<ID=CLUSTERID,Number=1,Type=String,Description=\"Cluster ID in breakpoint_graph\">\n")
     outfile.write("##INFO=<ID=INSSEQ,Number=1,Type=String,Description=\"Insertion sequence between breakpoints\">\n")
     outfile.write("##INFO=<ID=MATE_ID,Number=1,Type=String,Description=\"MATE ID for breakends\">\n")

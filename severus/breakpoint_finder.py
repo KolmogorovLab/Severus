@@ -70,7 +70,8 @@ class Breakpoint(object):
 class DoubleBreak(object):
     __slots__ = ("bp_1", "direction_1", "bp_2", "direction_2", "genome_id","haplotype_1",'haplotype_2',"supp",'supp_read_ids',
                  'length','genotype','edgestyle', 'is_pass', 'ins_seq', 'mut_type', 'is_dup', 'has_ins','subgraph_id', 'sv_type','tra_pos',
-                 'DR', 'DV', 'hvaf', 'vaf', 'prec', 'phaseset_id', 'cluster_id', 'gr_id', 'vcf_id', 'vcf_sv_type','vaf_pass', 'vcf_qual', 'haplotypes', 'is_single', 'vntr', 'whitelist')
+                 'DR', 'DV', 'hVaf', 'vaf', 'prec', 'phaseset_id', 'cluster_id', 'gr_id', 'vcf_id', 'vcf_sv_type','vaf_pass', 'vcf_qual', 
+                 'haplotypes', 'is_single', 'vntr', 'whitelist', 'dvls')
     def __init__(self, bp_1, direction_1, bp_2, direction_2, genome_id, haplotype_1, haplotype_2, 
                  supp, supp_read_ids, length):
         self.bp_1 = bp_1
@@ -94,7 +95,7 @@ class DoubleBreak(object):
         self.sv_type = None
         self.DR =0
         self.DV = 0
-        self.hvaf = 0.0
+        self.hVaf = 0.0
         self.vaf = 0.0
         self.prec = 1
         self.phaseset_id = (0,0)
@@ -108,6 +109,7 @@ class DoubleBreak(object):
         self.vntr = None
         self.tra_pos = None
         self.whitelist = None
+        self.dvls = None
         
     def to_string(self):
         strand_1 = "+" if self.direction_1 > 0 else "-"
@@ -1436,7 +1438,7 @@ def calc_vaf(db_list):
             else:
                 DR1 = int(np.mean([db.bp_1.spanning_reads[db.genome_id][db.haplotype_1], db.bp_2.spanning_reads[db.genome_id][db.haplotype_2]])) 
             DV1 = db.supp
-            db.hvaf =  DV1 / (DV1 + DR1) if DV1 > 0 else 0
+            db.hVaf =  DV1 / (DV1 + DR1) if DV1 > 0 else 0
             DV += DV1
         span_bp1 = sum(db.bp_1.spanning_reads[db.genome_id])
         span_bp2 = sum(db.bp_2.spanning_reads[db.genome_id])
@@ -2071,8 +2073,14 @@ def match_haplotypes(double_breaks):
             
     for cl in clusters.values():
         by_genome_id = defaultdict(list)
+        dv1 = [0,0,0]
+        dv2 = [0,0,0]
         for db in cl:
             by_genome_id[db.genome_id].append(db)
+            dv1[db.haplotype_1] = db.supp
+            dv2[db.haplotype_2] = db.supp
+        for db in cl:
+            db.dvls = [dv1, dv2]
             
         for genome_id, db_ls in by_genome_id.items():
             if len(db_ls) == 1:
