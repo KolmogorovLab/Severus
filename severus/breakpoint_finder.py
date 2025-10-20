@@ -506,7 +506,7 @@ def match_del(double_breaks, min_sv_size):
     for cl in clusters.values():
         if 'PASS' in [db.is_pass for db in cl]:
             db_ls += cl
-    db_ls = [db for db in db_ls if db.length >= min_sv_size]
+    db_ls = [db for db in db_ls if not (db.bp_1.ref_id == db.bp_2.ref_id and db.length <= min_sv_size)]
     return db_ls
  
 def match_breakends(double_breaks):
