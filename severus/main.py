@@ -189,7 +189,7 @@ def main():
         return 1
     
     if args.bp_min_support == 0:
-        args.bp_min_support = 3
+        args.bp_min_support = 2
     else:
         args.vaf_thr = 0
 

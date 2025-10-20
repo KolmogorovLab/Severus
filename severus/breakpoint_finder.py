@@ -600,21 +600,76 @@ def check_db(cl, conn_1, ind):
     conn_ref_1 = Counter([cn[ind].ref_id for cn in conn_pass_1])
     if len(conn_ref_1) > CHR_CONN:
         return 'FAIL_CONN_CONS'
+
+def get_supp(bp):
+    hp_ls = defaultdict(list)
+    supp_hp = defaultdict(list)
+    def _get_hp(rs1, rs2):
+        if not rs1.ref_id == bp.ref_id:
+            return rs2.haplotype
+        if not rs2.ref_id == bp.ref_id:
+            return rs1.haplotype
+        pos = bp.position
+        if min(abs(rs1.ref_start - pos),abs(rs1.ref_end - pos)) < min(abs(rs2.ref_start - pos),abs(rs2.ref_end - pos)):
+            return rs1.haplotype
+        return rs2.haplotype
+    
+    for rs1, rs2 in bp.connections:
+        hp_ls[rs1.genome_id].append(_get_hp(rs1, rs2))
+    
+    for genome_id, hps in hp_ls.items():
+        supp_hp[genome_id] = Counter(hps)
+    return supp_hp
     
 def add_single_bp(cl, dir_1,single_bps):
     db = cl[0]
+    hpls = defaultdict(list)
     if dir_1 == 0:
         db.bp_1.pos2 = db.bp_2.unique_name()
+        supp_hp = get_supp(db.bp_1)
         for db1 in cl:
+            if not db1.genome_id in supp_hp:
+                db1.is_pass = 'FAIL'
+                continue
             db1.bp_2 = db.bp_1
+            db1.haplotype_2 = db1.haplotype_1
+            db1.supp = supp_hp[db1.genome_id][db1.haplotype_1]
             db1.is_single = True
             single_bps.append(db1)
+            hpls[db1.genome_id].append(db.haplotype_1)
+        for genome_id, supp in supp_hp.items():
+            for hp, sp in supp.items():
+                if hp in hpls[genome_id]:
+                    continue
+                else:
+                    db2 = copy.copy(db1)
+                    db2.haplotype_1 = db.haplotype_2 = hp
+                    db2.genome_id = genome_id
+                    db2.supp = sp
+                    single_bps.append(db2)
     else:
         db.bp_2.pos2 = db.bp_1.unique_name()
+        supp_hp = get_supp(db.bp_2)
         for db1 in cl:
+            if not db1.genome_id in supp_hp:
+                db1.is_pass = 'FAIL'
+                continue
             db1.bp_1 = db.bp_2
+            db1.haplotype_1 = db1.haplotype_2
+            db1.supp = supp_hp[db1.genome_id][db1.haplotype_2]
             db1.is_single = True
             single_bps.append(db1)
+            hpls[db1.genome_id].append(db.haplotype_2)
+        for genome_id, supp in supp_hp.items():
+            for hp, sp in supp.items():
+                if hp in hpls[genome_id]:
+                    continue
+                else:
+                    db2 = copy.copy(db1)
+                    db2.haplotype_1 = db2.haplotype_2 = hp
+                    db2.genome_id = genome_id
+                    db2.supp = sp
+                    single_bps.append(db2)
             
             
 def multisample_filter(clusters):
@@ -633,11 +688,9 @@ def double_breaks_filter(double_breaks, single_bps, min_reads, control_id, sv_si
     NUM_HAPLOTYPES = [0,1,2]
     MAX_STD = 25
     MIN_QUAL = 55
-    
     clusters = defaultdict(list) 
     for br in double_breaks:
         clusters[br.to_string()].append(br)
-            
     for cl in clusters.values():
         db = cl[0]
         if not 'PASS' in [db.is_pass for db in cl]:
@@ -646,23 +699,19 @@ def double_breaks_filter(double_breaks, single_bps, min_reads, control_id, sv_si
         conn_2 = db.bp_2.connections#
         fail1 = check_db(cl, conn_1, 0)
         fail2 = check_db(cl, conn_2, 1)
-        
         if not fail1 and fail2:
-            add_single_bp(cl, 0, single_bps)
-            
+            if not cl[0].whitelist:
+                add_single_bp(cl, 0, single_bps)
         elif not fail2 and fail1:
             if not cl[0].whitelist:
                 add_single_bp(cl, 1, single_bps)
-            
         elif fail1 and fail2:
             if fail1 == 'FAIL_CONN_CONS' and db.bp_1.qual >= MIN_QUAL:
                 if not cl[0].whitelist:
                     add_single_bp(cl, 0, single_bps)
-                
             if fail2 == 'FAIL_CONN_CONS' and db.bp_2.qual >= MIN_QUAL:
                 if not cl[0].whitelist:
                     add_single_bp(cl, 1, single_bps)
-                
             else:
                 for db1 in cl:
                     db1.is_pass = fail1
@@ -1124,11 +1173,11 @@ def check_normal_cov(single_bps, control_id):
 
 def filter_single_bp(single_bps, cont_id, control_vaf, vaf_thr, min_supp, median_cov, pon_file, ref_lengths):
     sbp_list = []
-    QUAL_THR = 40
+    QUAL_THR = 37
     VAF_THR = 0.1
     MIN_SUPP = 0.25
     min_supp = max([min_supp, median_cov * MIN_SUPP])
-    match_haplotypes(single_bps)
+    match_haplotypes_single(single_bps)
     annotate_mut_type(single_bps, cont_id, control_vaf, VAF_THR, min_supp, pon_file, ref_lengths)
         
     if cont_id:
@@ -2134,22 +2183,85 @@ def match_haplotypes(double_breaks):
                         by_haplotype2[hp_list2_phased[0]] += by_haplotype2[hp_list2_phased[1]]
                         by_haplotype2[hp_list2_phased[1]] = []
                         
-                for hp2, dbs in by_haplotype2.items():
-                    if not dbs:
-                        continue
-                    sum_supp = []
-                    for db in dbs:
-                        sum_supp += db.supp_read_ids
-                    hp1_list = [db.haplotype_1 for db in dbs]
-                    hp2_list = [db.haplotype_2 for db in dbs]
-                    db = dbs[0]
-                    db.supp_read_ids = list(set(sum_supp))
-                    db.supp = len(db.supp_read_ids)
-                    db.haplotype_1 = hp1
-                    db.haplotype_2 = hp2
-                    db.haplotypes = [hp1_list, hp2_list]
-                    for db in dbs[1:]:
-                        db.is_pass = 'FAIL_MERGED_HP'
+            for hp2, dbs in by_haplotype2.items():
+                if not dbs:
+                    continue
+                sum_supp = []
+                for db in dbs:
+                    sum_supp += db.supp_read_ids
+                hp1_list = [db.haplotype_1 for db in dbs]
+                hp2_list = [db.haplotype_2 for db in dbs]
+                db = dbs[0]
+                db.supp_read_ids = list(set(sum_supp))
+                db.supp = len(db.supp_read_ids)
+                db.haplotype_1 = hp1
+                db.haplotype_2 = hp2
+                db.haplotypes = [hp1_list, hp2_list]
+                for db in dbs[1:]:
+                    db.is_pass = 'FAIL_MERGED_HP'
+                        
+def match_haplotypes_single(double_breaks):
+    PHASE_THR = 0.66
+    MIN_PHASED_READ = 2
+    
+    clusters = defaultdict(list)
+    for br in double_breaks:
+        if br.is_pass == 'PASS':
+            clusters[br.to_string()].append(br)
+            
+    for cl in clusters.values():
+        by_genome_id = defaultdict(list)
+        dv1 = [0,0,0]
+        dv2 = [0,0,0]
+        for db in cl:
+            by_genome_id[db.genome_id].append(db)
+            dv1[db.haplotype_1] = db.supp
+            dv2[db.haplotype_2] = db.supp
+        for db in cl:
+            db.dvls = [dv1, dv2]
+        for genome_id, db_ls in by_genome_id.items():
+            if len(db_ls) == 1:
+                continue
+            by_haplotype1 = defaultdict(list)
+            haplotype1_supp = defaultdict(int)
+            for db in db_ls:
+                by_haplotype1[db.haplotype_1].append(db)
+                haplotype1_supp[db.haplotype_1] += db.supp
+            hp_list1 = sorted(haplotype1_supp, key=lambda k:haplotype1_supp[k], reverse=True)
+            hp_list1_phased = [x for x in hp_list1 if not x == 0]
+            
+            
+            if 0 in hp_list1 and hp_list1_phased:
+                if haplotype1_supp[hp_list1_phased[0]] > MIN_PHASED_READ:
+                    by_haplotype1[hp_list1_phased[0]] += by_haplotype1[0]
+                    by_haplotype1[0] = []
+                else:
+                    by_haplotype1[0] += by_haplotype1[hp_list1_phased[0]]
+                    by_haplotype1[hp_list1_phased[0]] = []
+            
+            if len(hp_list1_phased) > 1:
+                if haplotype1_supp[hp_list1_phased[0]] * PHASE_THR > haplotype1_supp[hp_list1_phased[1]]:
+                    by_haplotype1[hp_list1_phased[0]] += by_haplotype1[hp_list1_phased[1]]
+                    by_haplotype1[hp_list1_phased[1]] = []
+                        
+            for hp1, dbs in by_haplotype1.items():
+                if not dbs:
+                    continue
+                sum_supp = []
+                supp = 0
+                for db in dbs:
+                    sum_supp += db.supp_read_ids
+                    supp += db.supp
+                hp1_list = [db.haplotype_1 for db in dbs]
+                hp2_list = [db.haplotype_1 for db in dbs]
+                db = dbs[0]
+                db.supp_read_ids = list(set(sum_supp))
+                db.supp = supp
+                db.haplotype_1 = hp1
+                db.haplotype_2 = hp1
+                db.haplotypes = [hp1_list, hp2_list]
+                for db in dbs[1:]:
+                    db.is_pass = 'FAIL_MERGED_HP'
                         
 def cluster_db(db_list, coverage_histograms, min_sv_size):
     clusters = defaultdict(list)
@@ -2738,7 +2850,7 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
     annotate_mut_type(double_breaks, cont_id, args.control_vaf, args.vaf_thr, args.bp_min_support, args.pon_file, ref_lengths)
 
     logger.info('Writing breakpoints')
-    output_breaks(double_breaks, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
+    output_breaks(double_breaks + single_bps, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
     
     double_breaks = filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segments_by_read, bam_files, thread_pool, args)
     return double_breaks

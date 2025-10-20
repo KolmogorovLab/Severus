@@ -348,6 +348,8 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
                                                  has_ins, db.ins_seq, 'reciprocal_inversion', db.prec, phaseset, strands,sample, gen_type1, 
                                                  None,vntr, None, low_cov,db.whitelist, dvls, drls))            
         else:
+            if not sv_type == 'INS' and db.bp_1.ref_id == db.bp_2.ref_id:
+                db.length = abs(db.bp_2.position - db.bp_1.position)
         
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID, sv_type, sv_type, db.length, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type, db.cluster_id,
