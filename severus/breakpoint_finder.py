@@ -256,7 +256,7 @@ def get_breakpoints(split_reads, ref_lengths, white_reg, args):
             double_breaks += db
     if args.resolve_overlaps:
         resolve_ovlp(double_breaks)
-    double_breaks = match_del(double_breaks)
+    double_breaks = match_del(double_breaks, sv_size)
     
     return double_breaks, single_bps
 
@@ -444,7 +444,7 @@ def get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads, bp_ls, multisample):
     return db_list
     
 
-def match_del(double_breaks):
+def match_del(double_breaks, min_sv_size):
     DEL_THR = 20000
     CLUSTER_SIZE = 50
 
@@ -506,6 +506,7 @@ def match_del(double_breaks):
     for cl in clusters.values():
         if 'PASS' in [db.is_pass for db in cl]:
             db_ls += cl
+    db_ls = [db for db in db_ls if db.length >= min_sv_size]
     return db_ls
  
 def match_breakends(double_breaks):
