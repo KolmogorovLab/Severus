@@ -5,7 +5,6 @@ import networkx as nx
 from collections import defaultdict
 import logging
 import numpy as np
-import plotly
 import plotly.graph_objects as go
 
 from severus.breakpoint_finder import get_genomic_segments, cluster_indels, output_readids

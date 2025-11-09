@@ -3,7 +3,6 @@ import numpy as np
 import bisect
 from collections import  defaultdict
 import logging
-import datetime
 
 logger = logging.getLogger()
 COV_WINDOW_MM  = 1000
