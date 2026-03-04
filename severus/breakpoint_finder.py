@@ -196,7 +196,7 @@ def get_breakpoints(split_reads, ref_lengths, white_reg, args):
     """
 
     clust_len = args.bp_cluster_size
-    min_reads = args.bp_min_support
+    min_reads = 2
     min_ref_flank = args.min_ref_flank 
     sv_size = args.min_sv_size
     single_bps = []
@@ -212,34 +212,34 @@ def get_breakpoints(split_reads, ref_lengths, white_reg, args):
         rc = (s1,s2)
         seq_breakpoints_r[s1.ref_id].append(rc)
         seq_breakpoints_l[s2.ref_id].append(rc)
-        
+       
     for read_segments in split_reads:
         read_segments.sort(key=lambda x:(x.align_start, x.read_start))
         read_segments = [r for r in read_segments if r.is_pass == 'PASS' or r.segment_length >= args.max_segment_dist]
         for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
             if s2.read_start - s1.read_end < args.max_segment_dist:
                 _add_double(s1, s2)
-          
     all_breaks = []
     for seq, bp_pos in seq_breakpoints_r.items():
         bps = cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads,0)
         if bps:
             all_breaks += bps
-            
     for seq, bp_pos in seq_breakpoints_l.items():  
         bps = cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads,1)
         if bps:
             all_breaks += bps
     if white_reg:
         add_whitelist(all_breaks, white_reg)
+        
     merge_bps(all_breaks)
+    
     conn_list = defaultdict(list)
     for bp in all_breaks:
         if bp.is_single:
             continue
         for conn in bp.connections:
             conn_list[conn].append(bp)
-        
+            
     matched_bp, bp_ls, bp_counts = match_breaks(conn_list)
         
     single_bps = get_single_bps(bp_ls, bp_counts)
@@ -248,6 +248,8 @@ def get_breakpoints(split_reads, ref_lengths, white_reg, args):
         if bp_1.is_single or bp_2.is_single:
             bp_1.is_single = True
             bp_2.is_single = True
+            single_bps.append(bp_1)
+            single_bps.append(bp_2)
             continue
         if bp_1.ref_id == bp_2.ref_id and abs(bp_1.position - bp_2.position) < sv_size:
                 continue
@@ -255,10 +257,10 @@ def get_breakpoints(split_reads, ref_lengths, white_reg, args):
         if db:
             double_breaks += db
     if args.resolve_overlaps:
-        resolve_ovlp(double_breaks)
+        resolve_ovlp(double_breaks, ref_lengths)
     double_breaks = match_del(double_breaks, sv_size)
     
-    return double_breaks, single_bps
+    return double_breaks, list(set(single_bps))
 
 def add_whitelist(all_breaks, white_reg):
     for bp in all_breaks:
@@ -506,7 +508,7 @@ def match_del(double_breaks, min_sv_size):
     for cl in clusters.values():
         if 'PASS' in [db.is_pass for db in cl]:
             db_ls += cl
-    db_ls = [db for db in db_ls if not (db.bp_1.ref_id == db.bp_2.ref_id and db.length <= min_sv_size)]
+    #db_ls = [db for db in db_ls if not (db.bp_1.ref_id == db.bp_2.ref_id and db.length <= min_sv_size)]
     return db_ls
  
 def match_breakends(double_breaks):
@@ -684,7 +686,7 @@ def multisample_filter(clusters):
             for db in cl:
                 db.is_pass = 'FAIL_MULTISAMPLE'          
                 
-def double_breaks_filter(double_breaks, single_bps, min_reads, control_id, sv_size, multisample, cov_thr):
+def double_breaks_filter(double_breaks, single_bps, min_supp, control_id, sv_size, multisample, cov_thr):
 
     NUM_HAPLOTYPES = [0,1,2]
     MAX_STD = 25
@@ -751,16 +753,19 @@ def double_breaks_filter(double_breaks, single_bps, min_reads, control_id, sv_si
                 if span_bp1 <= cov_thr and span_bp2 <= cov_thr:
                     for db1 in cl:
                         db1.is_pass = 'FAIL_LOWCOV_NORMAL'
-    if multisample:
+    if multisample: 
         multisample_filter(clusters)
         
     match_haplotypes(double_breaks)
     double_breaks = [db for db in double_breaks if not db.is_single]
     
+    for db in double_breaks:
+        db.length = db.bp_2.position - db.bp_1.position if db.bp_1.ref_id == db.bp_2.ref_id else db.length
+    
     return double_breaks
 
 
-def resolve_ovlp(double_breaks):
+def resolve_ovlp(double_breaks, ref_lengths):
     MIN_SIZE = 50
     clusters = defaultdict(list)
 
@@ -787,10 +792,13 @@ def resolve_ovlp(double_breaks):
         mm2 = np.median([c[1].mismatch_rate for c in conn_1])
         if mm1 > mm2:
             ovlp = ovlp if db.direction_1 == -1 else -ovlp
-            db.bp_1.position += ovlp
+            if 0 > db.bp_1.position + ovlp < ref_lengths[db.bp_1.ref_id]:
+                db.bp_1.position += ovlp
         else:
             ovlp = ovlp if db.direction_2 == -1 else -ovlp
-            db.bp_2.position += ovlp
+            if 0 > db.bp_2.position + ovlp < ref_lengths[db.bp_1.ref_id]:
+                db.bp_2.position + ovlp
+            
         db.length = abs(db.bp_2.position - db.bp_1.position) if db.length else 0
 
 def check_insseq(conn):
@@ -1139,7 +1147,7 @@ def get_single_bp(single_bp, clipped_clusters, double_breaks, bp_min_support, co
                     supp = len(support_reads)
                     length_bp = 0
                     prec = 1
-                    if not s_bp.prec:
+                    if s_bp.prec > MIN_DIST:
                         prec = 0
                     filtered_sbp.append(DoubleBreak(s_bp, s_bp.dir_1, s_bp, s_bp.dir_1,genome_id, haplotype_1, haplotype_1, supp, support_reads, length_bp))
                     filtered_sbp[-1].prec = prec
@@ -1171,12 +1179,14 @@ def check_normal_cov(single_bps, control_id):
             if span_bp1 <= COV_THR and span_bp2 <= COV_THR:
                 for db1 in cl:
                     db1.is_pass = 'FAIL_LOWCOV_NORMAL'
+    
 
 def filter_single_bp(single_bps, cont_id, control_vaf, vaf_thr, min_supp, median_cov, pon_file, ref_lengths):
     sbp_list = []
     QUAL_THR = 37
     VAF_THR = 0.1
     MIN_SUPP = 0.25
+    MIN_PREC_THR = 3
     min_supp = max([min_supp, median_cov * MIN_SUPP])
     match_haplotypes_single(single_bps)
     annotate_mut_type(single_bps, cont_id, control_vaf, VAF_THR, min_supp, pon_file, ref_lengths)
@@ -1184,8 +1194,9 @@ def filter_single_bp(single_bps, cont_id, control_vaf, vaf_thr, min_supp, median
     if cont_id:
         check_normal_cov(single_bps, cont_id)
     for sbp in single_bps:
-        if sbp.vaf_pass == 'PASS' and sbp.vcf_qual > QUAL_THR and sbp.is_pass == 'PASS':
-            sbp_list.append(sbp)
+        if sbp.vaf_pass == 'PASS' and sbp.vcf_qual > QUAL_THR and sbp.is_pass == 'PASS' and (sbp.bp_1.prec/sbp.supp) <= MIN_PREC_THR:
+            if sum([1 for z in sbp.bp_1.connections if z[0].read_length > 3_000]) >= 2:
+                sbp_list.append(sbp)
                         
     clusters = defaultdict(list) 
     for br in sbp_list:
@@ -1565,9 +1576,8 @@ def annotate_mut_type(double_breaks, control_id, control_vaf, vaf_thr, min_supp,
             pon_ls = pon_list[db_clust[0].bp_1.ref_id]
             if not db_clust[0].bp_1.ref_id == db_clust[0].bp_2.ref_id:
                 pon_ls = pon_list[(db_clust[0].bp_1.ref_id,db_clust[0].bp_2.ref_id)]
-                if not pon_ls:
-                    continue
-                pon_ls = list(zip(*sorted(zip(pon_ls[0],pon_ls[1], pon_ls[2], pon_ls[3], pon_ls[4]))))
+            if not pon_ls:
+                continue
             add_pon(db_clust, pon_ls)
 
 def add_sv_type(double_breaks, junction_vcf):
@@ -2075,12 +2085,16 @@ def extract_pon(pon_file, ref_lengths):
             pon_list[(chr1, chr2)][2].append(int(pos2))
             pon_list[(chr1, chr2)][3].append(int(ci2))
             pon_list[(chr1, chr2)][4].append(chr2)
+            
+    
+    for key, pon_ls in pon_list.items():
+        pon_list[key] = list(zip(*sorted(zip(pon_ls[0],pon_ls[1], pon_ls[2], pon_ls[3], pon_ls[4]))))
            
     return pon_list
     
 def add_pon(db_clust, pon_ls):
     BUFF = 2000
-    CLUST_LEN = 150
+    CLUST_LEN = 250
     VNTR_BUFF = 25
     VNTR_CLUST_LEN = 1000
     MAX_LEN_DIFF = 50
@@ -2184,22 +2198,22 @@ def match_haplotypes(double_breaks):
                         by_haplotype2[hp_list2_phased[0]] += by_haplotype2[hp_list2_phased[1]]
                         by_haplotype2[hp_list2_phased[1]] = []
                         
-            for hp2, dbs in by_haplotype2.items():
-                if not dbs:
-                    continue
-                sum_supp = []
-                for db in dbs:
-                    sum_supp += db.supp_read_ids
-                hp1_list = [db.haplotype_1 for db in dbs]
-                hp2_list = [db.haplotype_2 for db in dbs]
-                db = dbs[0]
-                db.supp_read_ids = list(set(sum_supp))
-                db.supp = len(db.supp_read_ids)
-                db.haplotype_1 = hp1
-                db.haplotype_2 = hp2
-                db.haplotypes = [hp1_list, hp2_list]
-                for db in dbs[1:]:
-                    db.is_pass = 'FAIL_MERGED_HP'
+                for hp2, dbs in by_haplotype2.items():
+                    if not dbs:
+                        continue
+                    sum_supp = []
+                    for db in dbs:
+                        sum_supp += db.supp_read_ids
+                    hp1_list = [db.haplotype_1 for db in dbs]
+                    hp2_list = [db.haplotype_2 for db in dbs]
+                    db = dbs[0]
+                    db.supp_read_ids = list(set(sum_supp))
+                    db.supp = len(db.supp_read_ids)
+                    db.haplotype_1 = hp1
+                    db.haplotype_2 = hp2
+                    db.haplotypes = [hp1_list, hp2_list]
+                    for db in dbs[1:]:
+                        db.is_pass = 'FAIL_MERGED_HP'
                         
 def match_haplotypes_single(double_breaks):
     PHASE_THR = 0.66

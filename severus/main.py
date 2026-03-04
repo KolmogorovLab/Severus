@@ -69,6 +69,7 @@ def main():
     VAF_THR = 0.05
     CONTROL_VAF = 0.01
     CONTROL_COV_THR = 3
+    MIN_ALIGN_LENGTH = 7000
     
 
     SAMTOOLS_BIN = "samtools"
@@ -100,6 +101,9 @@ def main():
     parser.add_argument("--min-sv-size", dest="min_sv_size",
                         default=MIN_SV_SIZE, metavar="int", type=int,
                         help=f"minimim size for sv [{MIN_SV_SIZE}]")
+    parser.add_argument("--min-aligned-length", dest="min_len",
+                        default=-1, metavar="int", type=int,
+                        help=f"minimim aligned length [{MIN_ALIGN_LENGTH}]")
     parser.add_argument("--max-read-error", dest="max_read_error",
                         default=MAX_READ_ERROR, metavar="float", type=float,
                         help=f"maximum base alignment error [{MAX_READ_ERROR}]")
@@ -125,8 +129,10 @@ def main():
     parser.add_argument("--output-LOH", dest='output_loh', action = "store_true", help = 'outputs a bed file with predicted LOH regions')
     parser.add_argument("--resolve-overlaps", dest='resolve_overlaps', action = "store_true")
     parser.add_argument("--ins-to-tra", dest='tra_to_ins', action = "store_false", help = 'converts insertions to translocations if mapping is known')
+    parser.add_argument("--use_germline_genotype", dest='germline_genotype', action = "store_true", help = 'calculates GT with germline assumptions')
     parser.add_argument("--output-read-ids", dest='output_read_ids', action = "store_true", help = 'to output supporting read ids')
     parser.add_argument("--between-junction-ins", dest='ins_seq', action = "store_true", help = 'reports unmapped sequence between breakpoints')
+    parser.add_argument("--disable-low-readlength", dest='force_default', action = "store_true", help = 'Disables low read length settings')
     parser.add_argument("--max-unmapped-seq", dest='max_segment_dist',default=MAX_SEGMENT_DIST, metavar="int", type=int, help = 'maximum length of unmapped sequence between two mapped segments (if --between-junction-ins is selected the unmapped sequnce will be reported in the vcf)'')')
     parser.add_argument("--use-supplementary-tag", dest='use_supplementary_tag', action = "store_true", help = 'Uses haplotype tag in supplementary alignments')
     parser.add_argument("--PON", dest='pon_file', metavar="path", help = 'Uses PON data')
@@ -138,9 +144,11 @@ def main():
     
     
     args = parser.parse_args()
-    
     MIN_ALIGNED_LENGTH = 7000 if not args.multisample else 5000
     
+    if not args.min_len == -1:
+        MIN_ALIGNED_LENGTH = args.min_len
+
     args.only_germline = False
     if args.control_bam is None:
         args.control_bam = []
@@ -189,7 +197,7 @@ def main():
         return 1
     
     if args.bp_min_support == 0:
-        args.bp_min_support = 2
+        args.bp_min_support = 3
     else:
         args.vaf_thr = 0
 
@@ -237,9 +245,9 @@ def main():
         target_genomes = args.target_name
         control_genomes = args.control_name
 
-    args.min_aligned_length = MIN_ALIGNED_LENGTH
     coverage_histograms = init_hist(genome_ids, ref_lengths)
     mismatch_histograms = init_mm_hist(ref_lengths)
+    args.min_aligned_length = MIN_ALIGNED_LENGTH
     n90 = [MIN_ALIGNED_LENGTH]
     read_qual = defaultdict(int)
     read_qual_len = defaultdict(int)
@@ -251,7 +259,8 @@ def main():
                                                       coverage_histograms, mismatch_histograms, n90, bg_mm,read_qual,read_qual_len,args)
         segments_by_read += segments_by_read_bam
 
-    args.min_aligned_length = min(n90) if not args.multisample else MIN_ALIGNED_LENGTH
+    args.min_aligned_length = min(n90) if not args.multisample or not args.min_len == -1 else MIN_ALIGNED_LENGTH
+        
     logger.info('Computing read quality') 
     update_segments_by_read(segments_by_read, mismatch_histograms, bg_mm, ref_lengths,read_qual,read_qual_len, args)
     

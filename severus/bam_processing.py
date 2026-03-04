@@ -106,13 +106,13 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
     use_tag = False
     if use_supplementary_tag or is_primary:
         use_tag = True
-
+        
+    haplotype = 0
+    PS = 0
     if use_tag and read.has_tag('HP'):
-        haplotype = read.get_tag('HP')
+        haplotype = int(read.get_tag('HP'))
+    if use_tag and read.has_tag('PS'):
         PS = read.get_tag('PS')
-    else:
-        haplotype = 0
-        PS = 0
     
     read_inf = []
     
@@ -319,7 +319,7 @@ def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq):
                 end = bisect.bisect_left(poslist, aln.reference_end)
                 if not strt == end:
                     if aln.has_tag('HP'):
-                        hp = aln.get_tag('HP')
+                        hp = int(aln.get_tag('HP'))
                     else:
                         hp = 0
                     for pos in poslist[strt:end]:
@@ -505,14 +505,15 @@ def add_read_qual(segments_by_read, ref_lengths, bg_mm, mismatch_histograms,read
     for alignments in segments_by_read:
         if not alignments:
             continue
-        label_reads(alignments, min_mapq, bg_mm, mm_hist_high, min_aligned_length, args.multisample)
+        label_reads(alignments, min_mapq, bg_mm, mm_hist_high, min_aligned_length, args.multisample, args.min_len)
 
     write_readqual(segments_by_read, args.outpath_readqual,read_qual,read_qual_len)
 
 
-def label_reads(read, min_mapq, bg_mm, mm_hist_high, min_aligned_length, multisample):
-    MIN_ALIGNED_RATE = 0.5
-    MIN_ALIGNED_LEN = min_aligned_length if multisample else 2000
+def label_reads(read, min_mapq, bg_mm, mm_hist_high, min_aligned_length, multisample, min_len):
+    MIN_ALIGNED_RATE = 0 if not min_len == -1 else 0.5
+    MIN_ALIGNED_LEN = min_len if not min_len == -1 else min_aligned_length
+    #MIN_ALIGNED_LEN = min_aligned_length if multisample else 2000
 
     for seg in read:
         if seg.mapq < min_mapq:

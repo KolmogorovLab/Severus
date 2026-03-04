@@ -7,6 +7,7 @@ from datetime import datetime
 import numpy as np
 import sys
 import os
+import math
 
 class vcf_format(object):
     __slots__ = ('chrom', 'pos', 'haplotypes','haplotype', 'ID', 'sv_type','alt', 'sv_len', 'qual', 
@@ -139,8 +140,8 @@ class vcf_format(object):
       
         
 class vcf_sample(object):
-    __slots__ = ('DR', 'DV', 'vaf', 'hVaf','gen_type', 'GT', 'GQ')
-    def __init__(self, DR, DV, vaf, hVaf, gen_type):
+    __slots__ = ('DR', 'DV', 'vaf', 'hVaf','gen_type', 'GT', 'GQ', 'genotype')
+    def __init__(self, DR, DV, vaf, hVaf, gen_type, genotype):
         self.DR = DR
         self.DV = DV
         self.hVaf = hVaf
@@ -148,49 +149,99 @@ class vcf_sample(object):
         self.gen_type = gen_type
         self.GT = None
         self.GQ = None
+        self.genotype = genotype
         
     def hVAF(self):
         return '{0:.2f},{1:.2f},{2:.2f}'.format(self.hVaf[0], self.hVaf[1], self.hVaf[2])
         
     
-    def call_genotype(self):
-        #err = 0.1/2
-        #prior = 1/3
-        #genotypes = ["0/0", "0/1", "1/1"]
-        #MAX_READ = 100
-        
-        #if self.DV + self.DR > MAX_READ:
-        #    DV = int(MAX_READ*self.DV/(self.DV+self.DR))
-        #    DR = MAX_READ - DV
-        #else:
-       #     DV, DR = self.DV, self.DR
-            
-        #hom_1 = float(pow((1-err), DV) * pow(err, DR) * prior)
-        #hom_0 = float(pow(err, DV) * pow((1-err), DR) * prior)
-        #het = float(pow(0.5, DV + DR) * prior)
-        
-        #g_list = [hom_0, het, hom_1]
-        #g_list = [-10 * math.log10(p) for p in g_list]
-        #min_pl = min(g_list)
-        #g_list = [pl - min_pl for pl in g_list]
-        #GT = genotypes[g_list.index(min(g_list))]
-        
-        #if self.gen_type:
-        #    GT = '1|0' if self.gen_type == 'HP1' else '0|1'
-            
-        #g_list.sort()
-        #GQ = int(g_list[2])
-        GT = '0/1'
-        self.GT = GT
+    def call_genotype(
+        self,
+        err: float = 0.01,
+        priors=(0.90, 0.09, 0.01),
+        max_read: int = 100,
+        pl_cap: int = 999,
+        force_phase_if_het: bool = True,
+    ):
+        # --- 1) Get counts, cap to avoid extreme numbers dominating & reduce numeric issues
+        DV = int(getattr(self, "DV", 0) or 0)
+        DR = int(getattr(self, "DR", 0) or 0)
+
+        if DV < 0 or DR < 0:
+            # Defensive: invalid counts
+            self.GT, self.GQ, self.PL = "./.", 0, [pl_cap, pl_cap, pl_cap]
+            return self.GT, self.GQ, self.PL
+
+        tot = DV + DR
+        if tot == 0:
+            # No evidence: typically no-call or 0/0 low confidence; choose your preference
+            self.GT, self.GQ, self.PL = "./.", 0, [0, 0, 0]
+            return self.GT, self.GQ, self.PL
+
+        if tot > max_read:
+            DV = int(round(max_read * DV / tot))
+            DR = max_read - DV
+            tot = max_read
+
+        # --- 2) Log-likelihoods: P(data | GT) * prior(GT)
+        p00, p01, p11 = priors
+        # guard against priors=0
+        p00 = max(p00, 1e-300)
+        p01 = max(p01, 1e-300)
+        p11 = max(p11, 1e-300)
+
+        # guard against err extremes
+        err = min(max(err, 1e-12), 1 - 1e-12)
+
+        # 0/0: variant reads are errors
+        log_hom0 = DV * math.log(err) + DR * math.log(1 - err) + math.log(p00)
+        # 0/1: symmetric 50/50 model
+        log_het  = tot * math.log(0.5) + math.log(p01)
+        # 1/1: ref reads are errors
+        log_hom1 = DV * math.log(1 - err) + DR * math.log(err) + math.log(p11)
+
+        logs = [log_hom0, log_het, log_hom1]
+        m = max(logs)
+        rel = [math.exp(x - m) for x in logs]  # in (0,1]
+        pls = []
+        for p in rel:
+            if p <= 0.0:
+                pls.append(pl_cap)
+            else:
+                pls.append(-10.0 * math.log10(p))
+
+        min_pl = min(pls)
+        pls = [min(pl_cap, pl - min_pl) for pl in pls]
+
+        PL = [int(round(x)) for x in pls]
+
+        gt_map = ["0/0", "0/1", "1/1"]
+        best_idx = min(range(3), key=lambda i: PL[i])
+        GT = gt_map[best_idx]
+
+        sorted_pl = sorted(PL)
+        GQ = int(sorted_pl[1])
+
+        if force_phase_if_het:
+            gt_phase = getattr(self, "gen_type", None)
+            if gt_phase == "HP1":
+                GT = "1|0"
+            elif gt_phase == "HP2":
+                GT = "0|1"
+
+        self.GT, self.GQ = GT, GQ
     
     def sample(self):
         if self.DV == 0:
             return f"./.:0:0,0,0:{self.DR}:0"
-        self.call_genotype()
+        if self.genotype:
+            self.call_genotype()
+        else:
+            self.GT = '0/1'
         return f"{self.GT}:{self.vaf:.2f}:{self.hVAF()}:{self.DR}:{self.DV}"
     
     
-def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
+def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf, germline_genotype):
     vcf_list = []
     clusters = defaultdict(list)
         
@@ -255,6 +306,7 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
         dir1 = '-' if db.direction_1 == -1 else '+'
         dir2 = '-' if db.direction_2 == -1 else '+'
         strands = (dir1, dir2)
+        strands2 = (dir2, dir1)
         if db.is_single:
             strands = (dir1)
         
@@ -287,16 +339,16 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
         sample_list = defaultdict(list)
         sample_list2 = defaultdict(list)
         for sample_id in sample_ids:
-            sample_list[sample_id] = vcf_sample(sum(db.bp_1.spanning_reads[sample_id]),0,0,0,0)
-            sample_list2[sample_id] = vcf_sample(sum(db.bp_2.spanning_reads[sample_id]),0,0,0,0)
+            sample_list[sample_id] = vcf_sample(sum(db.bp_1.spanning_reads[sample_id]),0,0,0,0, germline_genotype)
+            sample_list2[sample_id] = vcf_sample(sum(db.bp_2.spanning_reads[sample_id]),0,0,0,0, germline_genotype)
         for db1 in db_list.values():
             hVaf1 = [0.0, 0.0, 0.0]
             hVaf2 = [0.0, 0.0, 0.0]
             for db in db1:
                 hVaf1[db.haplotype_1]  = db.hVaf
                 hVaf2[db.haplotype_1]  = db.hVaf
-            sample_list[db.genome_id] = vcf_sample(db.DR, db.DV, db.vaf, hVaf1, gen_type1)
-            sample_list2[db.genome_id] = vcf_sample(db.DR, db.DV, db.vaf, hVaf2, gen_type2)
+            sample_list[db.genome_id] = vcf_sample(db.DR, db.DV, db.vaf, hVaf1, gen_type1, germline_genotype)
+            sample_list2[db.genome_id] = vcf_sample(db.DR, db.DV, db.vaf, hVaf2, gen_type2, germline_genotype)
             
           
         sample = '\t'.join([s.sample() for s in sample_list.values()])
@@ -304,18 +356,24 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
         
         has_ins = 0 if not db.ins_seq else len(db.ins_seq)
         if (sv_type == "BND"  and not db.is_single) or (junction_vcf and not sv_type == 'INS'):
-            if db.bp_2.dir_1 == 1 and db.bp_1.dir_1 == 1:
-                alt1 = 'N]' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + ']'
-                alt2 = 'N]' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + ']'
-            elif db.bp_2.dir_1 == -1 and db.bp_1.dir_1 == -1:
-                alt1 = '[' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + '[N'
-                alt2 = '[' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + '[N'
-            elif db.bp_2.dir_1 == -1 and db.bp_1.dir_1 == 1:
-                alt1 = ']' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + ']N'
-                alt2 = 'N[' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + '['
-            else:
-                alt1 = 'N[' + db.bp_2.ref_id +':'+ str(db.bp_2.position) + '['
-                alt2 = ']' + db.bp_1.ref_id +':'+ str(db.bp_1.position) + ']N'
+            b1 = f"{db.bp_1.ref_id}:{db.bp_1.position}"
+            b2 = f"{db.bp_2.ref_id}:{db.bp_2.position}"
+        
+            s1 = db.bp_1.dir_1  # local sign at bp1 (+1 or -1)
+            s2 = db.bp_2.dir_1  # local sign at bp2 (+1 or -1)
+        
+            if s1 == 1 and s2 == 1:          # +/+
+                alt1 = f"N]{b2}]"
+                alt2 = f"N]{b1}]"
+            elif s1 == 1 and s2 == -1:       # +/-
+                alt1 = f"N[{b2}["
+                alt2 = f"]{b1}]N"
+            elif s1 == -1 and s2 == 1:       # -/+
+                alt1 = f"]{b2}]N"
+                alt2 = f"N[{b1}["
+            else:                             # -/-
+                alt1 = f"[{b2}[N"
+                alt2 = f"[{b1}[N"
                 
             ID1 = ID + '_1'
             ID2 = ID + '_2'
@@ -323,14 +381,14 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf):
             dvls2 = [dvls[1], dvls[0]]
             drls2 = [drls[1], drls[0]]
             if sv_type == 'INV':
-                db.sv_type = 'reciprocal_inversion'           
+                db.sv_type = 'reciprocal_inversion'        
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID1, sv_type, alt1, db.length, db.vcf_qual, 
                                                      sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type,db.cluster_id,
                                                      has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, ID2,vntr, 
                                                      db.tra_pos, low_cov, db.whitelist, dvls, drls))#
             vcf_list.append(vcf_format(db.bp_2.ref_id, db.bp_2.position, haplotype2, db.haplotype_2, ID2, sv_type, alt2, db.length, db.vcf_qual, 
                                                      sv_pass, db.bp_1.ref_id, db.bp_1.position, db.mut_type, db.cluster_id,
-                                                     has_ins, db.ins_seq,db.sv_type, db.prec, phaseset, strands,sample2, gen_type2, ID1,vntr, 
+                                                     has_ins, db.ins_seq,db.sv_type, db.prec, phaseset, strands2,sample2, gen_type2, ID1,vntr, 
                                                      db.tra_pos, low_cov,db.whitelist, dvls2, drls2))
         elif db.is_single:
             alt= '.N' if db.direction_1 == -1 else 'N.'
@@ -439,8 +497,8 @@ def write_germline_vcf(vcf_list, outfile,ref_lengths):
     outfile.close()
     
     
-def write_to_vcf(double_breaks, all_ids, outpath, out_key, ref_lengths, no_ins, multisample, junction_vcf):            
-    vcf_list = db_2_vcf(double_breaks, no_ins, all_ids, multisample, junction_vcf)
+def write_to_vcf(double_breaks, all_ids, outpath, out_key, ref_lengths, no_ins, multisample, junction_vcf, germline_genotype):            
+    vcf_list = db_2_vcf(double_breaks, no_ins, all_ids, multisample, junction_vcf, germline_genotype)
     key = 'somatic' if out_key == 'somatic' else 'all'
     sample_ids = [target_id.replace('.bam' , '') for target_id in all_ids]
     
