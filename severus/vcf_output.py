@@ -248,7 +248,7 @@ class vcf_sample(object):
 def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf, germline_genotype):
     vcf_list = []
     clusters = defaultdict(list)
-    bnd_types = {'-+': 'DUP_LIKE', '+-': 'DEL_LIKE', '++': 'INV_LIKE', '--': 'INVLIKE'}
+    bnd_types = {'-+': 'DUP_LIKE', '+-': 'DEL_LIKE', '++': 'INV_LIKE', '--': 'INV_LIKE'}
         
     for br in double_breaks:
         if br.bp_1.is_insertion:
@@ -472,7 +472,7 @@ def write_vcf_header(ref_lengths, outfile, sample_list):
     outfile.write("##INFO=<ID=MATE_ID,Number=1,Type=String,Description=\"MATE ID for breakends\">\n")
     outfile.write("##INFO=<ID=INSIDE_VNTR,Number=1,Type=String,Description=\"True if an indel is inside a VNTR\">\n")
     outfile.write("##INFO=<ID=ALIGNED_POS,Number=1,Type=String,Description=\"Position in the reference\">\n")
-    outfile.write("##INFO=<ID=ABND_TYPE,Number=1,Type=String,Description=\"Junction type\">\n")
+    outfile.write("##INFO=<ID=BND_TYPE,Number=1,Type=String,Description=\"Junction type\">\n")
     outfile.write("##INFO=<ID=LOW_COV_IN,Number=1,Type=String,Description=\"Samples that has low coverage in that region\">\n")
     outfile.write("##INFO=<ID=INSIDE_WHITELIST,Number=1,Type=String,Description=\"SVs within the whitelist bed file\">\n")
 
