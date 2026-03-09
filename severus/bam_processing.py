@@ -147,7 +147,7 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
         if op == CIGAR_DEL:
             if op_len < sv_size:
                 ref_aligned += op_len
-            elif op_len > sv_size:
+            else:
                 ref_end = ref_start + ref_aligned
                 read_end = read_start + read_aligned
                 if read.is_reverse:
@@ -158,7 +158,7 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
                                                  read.reference_name, strand, read_length,total_segment_length,read_aligned,
                                                  haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, is_primary, PS))
                 read_segments[-1].ID = ID
-                read_start = read_end+1
+                read_start = read_end
                 ref_start = ref_end+op_len
                 read_aligned = 0
                 ref_aligned = 0

@@ -1577,6 +1577,8 @@ def annotate_mut_type(double_breaks, control_id, control_vaf, vaf_thr, min_supp,
             if not db_clust[0].bp_1.ref_id == db_clust[0].bp_2.ref_id:
                 pon_ls = pon_list[(db_clust[0].bp_1.ref_id,db_clust[0].bp_2.ref_id)]
             if not pon_ls:
+                for db in db_clust:
+                    db.mut_type = 'somatic'
                 continue
             add_pon(db_clust, pon_ls)
 
