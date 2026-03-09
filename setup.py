@@ -18,6 +18,8 @@ if script_dir != os.getcwd():
 
 from severus.__version__ import __version__
 
+with open('requirements.txt') as f:
+    install_requires = f.read().splitlines()
 
 setup(name='severus',
       version=__version__,
@@ -28,5 +30,7 @@ setup(name='severus',
       license='BSD-3-Clause',
       packages=['severus'],
       package_data={'severus': ['vntrs/*']},
+      install_requires=install_requires,
+      python_requires='>=3.8',
       entry_points={'console_scripts': ['severus = severus.main:main']},
       )
