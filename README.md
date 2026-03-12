@@ -132,11 +132,12 @@ along with complexSV clusters and additional information about SVs. See [below][
 --output-read-ids       outputs read IDs for support reads
 --use-supplementary-tag to use HP tag in supplementary alignments. Need to be added if HiPhase or LongPhase is used for haplotagging.
 --low-quality           to use more strict settings if one of the samples has a lower quality
+--use_germline_genotype to use genotyping for diploid samples
 ```
  
 ## Benchmarking Severus and other SV callers
 
-For the details of benchmarking and complete results, please check https://www.medrxiv.org/content/10.1101/2024.03.22.24304756v1
+For the details of benchmarking and complete results, please check [our paper](https://www.nature.com/articles/s41587-025-02618-8)
 
 ### Germline benchmarking results using HG002
 
