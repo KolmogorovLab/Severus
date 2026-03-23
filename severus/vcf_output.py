@@ -245,7 +245,7 @@ class vcf_sample(object):
         return f"{self.GT}:{self.vaf:.2f}:{self.hVAF()}:{self.DR}:{self.DV}"
     
     
-def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf, germline_genotype):
+def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf, germline_genotype, ignore_hp):
     vcf_list = []
     clusters = defaultdict(list)
     bnd_types = {'-+': 'DUP_LIKE', '+-': 'DEL_LIKE', '++': 'INV_LIKE', '--': 'INV_LIKE'}
@@ -338,6 +338,9 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf, germl
                 gen_type2 = '1' if 1 in hap_type else '2'
             phaseset = db.phaseset_id
         haplotype = (db.haplotype_1, db.haplotype_2)
+        if ignore_hp:
+            phaseset = ''
+            haplotype = None
         
         drls = [[str(s) for s in db.bp_1.spanning_reads[db.genome_id][:3]], [str(s) for s in db.bp_2.spanning_reads[db.genome_id][:3]]]
         dvls = [[str(s) for s in db.dvls[0]], [str(s) for s in db.dvls[1]]]
@@ -506,8 +509,8 @@ def write_germline_vcf(vcf_list, outfile,ref_lengths):
     outfile.close()
     
     
-def write_to_vcf(double_breaks, all_ids, outpath, out_key, ref_lengths, no_ins, multisample, junction_vcf, germline_genotype):            
-    vcf_list = db_2_vcf(double_breaks, no_ins, all_ids, multisample, junction_vcf, germline_genotype)
+def write_to_vcf(double_breaks, all_ids, outpath, out_key, ref_lengths, no_ins, multisample, junction_vcf, germline_genotype, ignore_hp):            
+    vcf_list = db_2_vcf(double_breaks, no_ins, all_ids, multisample, junction_vcf, germline_genotype, ignore_hp)
     key = 'somatic' if out_key == 'somatic' else 'all'
     sample_ids = [target_id.replace('.bam' , '') for target_id in all_ids]
     

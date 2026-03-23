@@ -2852,7 +2852,7 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
     logger.info('Starting compute_bp_coverage')
     if args.vntr_file:
         add_vntr_annot(double_breaks + ins_clusters, args)
-    get_coverage_parallel(bam_files, genome_ids, thread_pool, args.min_mapping_quality, double_breaks + ins_clusters + single_bps)
+    get_coverage_parallel(bam_files, genome_ids, thread_pool, args.min_mapping_quality, double_breaks + ins_clusters + single_bps, args.ignore_hp)
 
         
     logger.info('Filtering breakpoints')
@@ -2867,7 +2867,8 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
     annotate_mut_type(double_breaks, cont_id, args.control_vaf, args.vaf_thr, args.bp_min_support, args.pon_file, ref_lengths)
 
     logger.info('Writing breakpoints')
-    output_breaks(double_breaks + single_bps, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
+    effective_phasing = bool(args.phase_vcf) and not args.ignore_hp
+    output_breaks(double_breaks + single_bps, genome_ids, effective_phasing, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
     
     double_breaks = filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segments_by_read, bam_files, thread_pool, args)
     return double_breaks
