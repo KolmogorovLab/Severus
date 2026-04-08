@@ -246,7 +246,8 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
                 
         if not split_seg_vntr and s2:
             new_read.append(s2)
-        
+    
+    seg_in_vntr = dict(sorted(seg_in_vntr.items(), key=lambda x: x[0][1]))
     for key, bp_in_vntr in seg_in_vntr.items():
         segments = []
         bp_len = 0

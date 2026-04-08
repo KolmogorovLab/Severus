@@ -13,11 +13,11 @@ class vcf_format(object):
     __slots__ = ('chrom', 'pos', 'haplotypes','haplotype', 'ID', 'sv_type','alt', 'sv_len', 'qual', 
                  'Filter', 'chr2', 'pos2','mut_type', 'tra_pos','ins_seq', 'ins_len_seq', 
                  'cluster_id','ins_len', 'detailed_type', 'prec', 'phaseset_id', 'strands', 
-                 'sample','HP', 'mate_id', 'vntr', 'low_cov', 'whitelist', 'dvls', 'drls', 'bnd_type')
+                 'sample','HP', 'mate_id', 'vntr', 'low_cov', 'whitelist', 'dvls', 'drls', 'bnd_type', 'read_cluster_id')
     def __init__(self, chrom, pos, haplotypes, haplotype, ID, sv_type, alt, sv_len, qual, 
                  Filter, chr2, pos2, mut_type, cluster_id, ins_len, ins_len_seq, detailed_type, 
                  prec, phaseset_id, strands, sample, HP, mate_id, vntr,tra_pos, low_cov, whitelist,
-                 dvls, drls,bnd_type):
+                 dvls, drls,bnd_type, read_cluster_id):
         self.chrom = chrom
         self.pos = pos
         self.haplotypes = haplotypes
@@ -49,6 +49,7 @@ class vcf_format(object):
         self.dvls = dvls
         self.drls = drls
         self.bnd_type = bnd_type
+        self.read_cluster_id = read_cluster_id
      
     def precision(self):
         return 'PRECISE' if self.prec else 'IMPRECISE'
@@ -96,6 +97,11 @@ class vcf_format(object):
             return f";CLUSTERID={self.cluster_id}"
         else:
             return ""
+    def readclusterid(self):
+        if self.read_cluster_id:
+            return f";READCLUSTERID={self.read_cluster_id};"
+        else:
+            return ""
     def end_pos(self):
         if self.alt == '.N':
             return ''
@@ -132,7 +138,7 @@ class vcf_format(object):
         return 'BND_TYPE=' + self.bnd_type + ';' if self.bnd_type else ''
     
     def info(self):
-        return f"{self.precision()};SVTYPE={self.sv_type};{self.svlen()}{self.end_pos()}{self.trapos()}{self.bndtype()}{self.strands_vcf()}{self.low_covls()}{self.add_vntr()}{self.detailedtype()}{self.has_ins()}MAPQ={self.qual}{self.HP_inf()}{self.to_dvls()}{self.clusterid()}{self.inwhitelist()}"
+        return f"{self.precision()};SVTYPE={self.sv_type};{self.svlen()}{self.end_pos()}{self.trapos()}{self.bndtype()}{self.strands_vcf()}{self.low_covls()}{self.add_vntr()}{self.readclusterid()}{self.detailedtype()}{self.has_ins()}MAPQ={self.qual}{self.HP_inf()}{self.to_dvls()}{self.clusterid()}{self.inwhitelist()}"
     
     def to_vcf(self):
         if self.sv_type == 'INS':
@@ -393,17 +399,17 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf, germl
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID1, sv_type, alt1, db.length, db.vcf_qual, 
                                                      sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type,db.cluster_id,
                                                      has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, ID2,vntr, 
-                                                     db.tra_pos, low_cov, db.whitelist, dvls, drls, bnd_type))#
+                                                     db.tra_pos, low_cov, db.whitelist, dvls, drls, bnd_type, db.read_cluster_id))#
             vcf_list.append(vcf_format(db.bp_2.ref_id, db.bp_2.position, haplotype2, db.haplotype_2, ID2, sv_type, alt2, db.length, db.vcf_qual, 
                                                      sv_pass, db.bp_1.ref_id, db.bp_1.position, db.mut_type, db.cluster_id,
                                                      has_ins, db.ins_seq,db.sv_type, db.prec, phaseset, strands2,sample2, gen_type2, ID1,vntr, 
-                                                     db.tra_pos, low_cov,db.whitelist, dvls2, drls2, bnd_type))
+                                                     db.tra_pos, low_cov,db.whitelist, dvls2, drls2, bnd_type, db.read_cluster_id))
         elif db.is_single:
             alt= '.N' if db.direction_1 == -1 else 'N.'
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID, 'sBND', alt, db.length, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type, db.cluster_id,
                                                  has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.bp_1.pos2, 
-                                                 low_cov,db.whitelist, dvls, drls, bnd_type))
+                                                 low_cov,db.whitelist, dvls, drls, bnd_type, db.read_cluster_id))
             vcf_list[-1].pos2 = db.bp_1.pos2
         elif sv_type == 'INV':
             if db.direction_1 == -1:
@@ -412,7 +418,7 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf, germl
             vcf_list.append(vcf_format(db.bp_1.ref_id, pos1, haplotype, db.haplotype_1, ID, sv_type, sv_type, pos2-pos1, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, pos2, db.mut_type, db.cluster_id,
                                                  has_ins, db.ins_seq, 'reciprocal_inversion', db.prec, phaseset, strands,sample, gen_type1, 
-                                                 None,vntr, None, low_cov,db.whitelist, dvls, drls, bnd_type))            
+                                                 None,vntr, None, low_cov,db.whitelist, dvls, drls, bnd_type, db.read_cluster_id))            
         else:
             if not sv_type == 'INS' and db.bp_1.ref_id == db.bp_2.ref_id:
                 db.length = abs(db.bp_2.position - db.bp_1.position)
@@ -420,7 +426,7 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf, germl
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID, sv_type, sv_type, db.length, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type, db.cluster_id,
                                                  has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, 
-                                                 db.tra_pos, low_cov,db.whitelist, dvls, drls, bnd_type))#
+                                                 db.tra_pos, low_cov,db.whitelist, dvls, drls, bnd_type, db.read_cluster_id))#
         
         if sv_type == 'INS':
             if not no_ins:
@@ -468,6 +474,7 @@ def write_vcf_header(ref_lengths, outfile, sample_list):
     outfile.write("##INFO=<ID=SUPP_READS,Number=1,Type=String,Description=\"Number of support reads\">\n")
     outfile.write("##INFO=<ID=REF_READS,Number=1,Type=String,Description=\"Number of reference reads\">\n")
     outfile.write("##INFO=<ID=CLUSTERID,Number=1,Type=String,Description=\"Cluster ID in breakpoint_graph\">\n")
+    outfile.write("##INFO=<ID=READCLUSTERID,Number=1,Type=String,Description=\"Cluster ID in breakpoint_graph\">\n")
     outfile.write("##INFO=<ID=INSSEQ,Number=1,Type=String,Description=\"Insertion sequence between breakpoints\">\n")
     outfile.write("##INFO=<ID=MATE_ID,Number=1,Type=String,Description=\"MATE ID for breakends\">\n")
     outfile.write("##INFO=<ID=INSIDE_VNTR,Number=1,Type=String,Description=\"True if an indel is inside a VNTR\">\n")
@@ -515,6 +522,3 @@ def write_to_vcf(double_breaks, all_ids, outpath, out_key, ref_lengths, no_ins, 
     write_vcf_header(ref_lengths, germline_outfile, sample_ids)
     write_germline_vcf(vcf_list, germline_outfile,ref_lengths)
     
-            
-    
-

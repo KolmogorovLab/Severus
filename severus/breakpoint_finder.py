@@ -70,7 +70,7 @@ class Breakpoint(object):
 class DoubleBreak(object):
     __slots__ = ("bp_1", "direction_1", "bp_2", "direction_2", "genome_id","haplotype_1",'haplotype_2',"supp",'supp_read_ids',
                  'length','genotype','edgestyle', 'is_pass', 'ins_seq', 'mut_type', 'is_dup', 'has_ins','subgraph_id', 'sv_type','tra_pos',
-                 'DR', 'DV', 'hVaf', 'vaf', 'prec', 'phaseset_id', 'cluster_id', 'gr_id', 'vcf_id', 'vcf_sv_type','vaf_pass', 'vcf_qual', 
+                 'DR', 'DV', 'hVaf', 'vaf', 'prec', 'phaseset_id', 'cluster_id','read_cluster_id', 'gr_id', 'vcf_id', 'vcf_sv_type','vaf_pass', 'vcf_qual', 
                  'haplotypes', 'is_single', 'vntr', 'whitelist', 'dvls')
     def __init__(self, bp_1, direction_1, bp_2, direction_2, genome_id, haplotype_1, haplotype_2, 
                  supp, supp_read_ids, length):
@@ -101,6 +101,7 @@ class DoubleBreak(object):
         self.phaseset_id = (0,0)
         self.gr_id = 0
         self.cluster_id = 0
+        self.read_cluster_id = 0
         self.vcf_id = None
         self.vcf_sv_type = None
         self.vaf_pass = None
@@ -180,7 +181,37 @@ class GenomicSegment(object):
     def ins_label(self):
         return f"INS:{self.length_bp}"
 
-        
+class UnionFind:
+    def __init__(self):
+        self.parent = []
+        self.rank = []
+    def add(self):
+        i = len(self.parent)
+        self.parent.append(i)
+        self.rank.append(0)
+        return i
+    def find(self, x):
+        parent = self.parent
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    def union(self, a, b):
+        ra = self.find(a)
+        rb = self.find(b)
+        if ra == rb:
+            return
+        rank = self.rank
+        parent = self.parent
+        if rank[ra] < rank[rb]:
+            parent[ra] = rb
+        elif rank[ra] > rank[rb]:
+            parent[rb] = ra
+        else:
+            parent[rb] = ra
+            rank[ra] += 1
+            
+            
 def get_pos(segls, bp_dir):
     dirls = ['right', 'left']
     s1 = segls[bp_dir]
@@ -251,7 +282,7 @@ def get_breakpoints(split_reads, ref_lengths, white_reg, args):
             single_bps.append(bp_1)
             single_bps.append(bp_2)
             continue
-        if bp_1.ref_id == bp_2.ref_id and abs(bp_1.position - bp_2.position) < sv_size:
+        if bp_1.ref_id == bp_2.ref_id and (bp_1.dir_1 != bp_2.dir_1 and abs(bp_1.position - bp_2.position) < sv_size):
                 continue
         db = get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads,bp_ls, args.multisample)
         if db:
@@ -2143,8 +2174,8 @@ def match_haplotypes(double_breaks):
         dv2 = [0,0,0]
         for db in cl:
             by_genome_id[db.genome_id].append(db)
-            dv1[db.haplotype_1] = db.supp
-            dv2[db.haplotype_2] = db.supp
+            dv1[db.haplotype_1] += db.supp
+            dv2[db.haplotype_2] += db.supp
         for db in cl:
             db.dvls = [dv1, dv2]
             
@@ -2232,8 +2263,8 @@ def match_haplotypes_single(double_breaks):
         dv2 = [0,0,0]
         for db in cl:
             by_genome_id[db.genome_id].append(db)
-            dv1[db.haplotype_1] = db.supp
-            dv2[db.haplotype_2] = db.supp
+            dv1[db.haplotype_1] += db.supp
+            dv2[db.haplotype_2] += db.supp
         for db in cl:
             db.dvls = [dv1, dv2]
         for genome_id, db_ls in by_genome_id.items():
@@ -2734,6 +2765,61 @@ def conn_inter(clusters, ind_id):
                 if sv_type:
                     continue
 
+def assign_cluster_ids_to_doublebreaks(double_breaks):
+    uf = UnionFind()
+    pos_to_node = {}
+    read_to_first_node = {}
+    
+    def get_node(chrom, pos):
+        key = (chrom, pos)
+        node = pos_to_node.get(key)
+        if node is None:
+            node = uf.add()
+            pos_to_node[key] = node
+        return node
+    
+    for db in double_breaks:
+        n1 = get_node(db.bp_1.ref_id, db.bp_1.position)
+        n2 = get_node(db.bp_2.ref_id, db.bp_2.position)
+        uf.union(n1, n2)
+        for rid in db.supp_read_ids:
+            first = read_to_first_node.get(rid)
+            if first is None:
+                read_to_first_node[rid] = n1
+            else:
+                uf.union(first, n1)
+                uf.union(first, n2)
+                
+    root_to_cluster = {}
+    next_cluster_id = 0
+    for db in double_breaks:
+        n1 = pos_to_node[(db.bp_1.ref_id, db.bp_1.position)]
+        root = uf.find(n1)
+        cid = root_to_cluster.get(root)
+        if cid is None:
+            cid = next_cluster_id
+            root_to_cluster[root] = cid
+            next_cluster_id += 1
+        db.read_cluster_id = cid
+        
+    first_seen = {}
+    multi = set()
+    for db in double_breaks:
+        cid = db.read_cluster_id
+        if cid is None or cid in multi:
+            continue
+        s = db.to_string()
+        prev = first_seen.get(cid)
+        if prev is None:
+            first_seen[cid] = s
+        elif prev != s:
+            multi.add(cid)
+            
+    for db in double_breaks:
+        if db.read_cluster_id not in multi:
+            db.read_cluster_id = None
+            
+            
 def write_alignments(allsegments, outpath):
     aln_dump_stream = open(outpath, "w")
     for read in allsegments:
@@ -2870,4 +2956,8 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
     output_breaks(double_breaks + single_bps, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
     
     double_breaks = filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segments_by_read, bam_files, thread_pool, args)
+    if 'somatic' in double_breaks.keys():
+        assign_cluster_ids_to_doublebreaks(double_breaks['somatic'])
+    else:
+        assign_cluster_ids_to_doublebreaks(double_breaks['germline'])
     return double_breaks
