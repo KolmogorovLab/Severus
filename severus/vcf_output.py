@@ -99,7 +99,7 @@ class vcf_format(object):
             return ""
     def readclusterid(self):
         if self.read_cluster_id:
-            return f";READCLUSTERID={self.read_cluster_id};"
+            return f"READCLUSTERID={self.read_cluster_id};"
         else:
             return ""
     def end_pos(self):
