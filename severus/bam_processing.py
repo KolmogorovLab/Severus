@@ -283,17 +283,21 @@ def extract_clipped_end(segments_by_read):
             read[-1].is_pass = 'PASS'
         read.sort(key=lambda s: s.read_start)
         
-def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq):
+def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq, ref = None):
     region_start, region_end = max(0, poslist[0]-3), poslist[-1]+3
-    aln_file = pysam.AlignmentFile(bam_file, "rb")
+    if bam_file.endswith(".bam"):
+        aln_file = pysam.AlignmentFile(bam_file, "rb")
+            
+    elif bam_file.endswith(".cram"):
+        aln_file = pysam.AlignmentFile(bam_file, "rc", reference_filename=ref)
+    
     cov_list = defaultdict(list)
     BUFF = 50
     BUFF2 = 5
     for pos in poslist:
         cov_list[(ref_id, pos)] = [0,0,0,0,0,0]
     
-    with pysam.AlignmentFile(bam_file, "rb") as a:
-        ref_lengths = dict(zip(a.references, a.lengths))
+    ref_lengths = dict(zip(aln_file.references, aln_file.lengths))
         
     if not ref_id in ref_lengths.keys():
         return cov_list
@@ -328,7 +332,7 @@ def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq):
     return cov_list
 
 
-def get_coverage_parallel(bam_files, genome_ids, thread_pool, min_mapq, double_breaks):
+def get_coverage_parallel(bam_files, genome_ids, thread_pool, min_mapq, double_breaks, ref):
     db_list = defaultdict(list)
     covlist = defaultdict(list)
     for db in double_breaks:
@@ -342,7 +346,7 @@ def get_coverage_parallel(bam_files, genome_ids, thread_pool, min_mapq, double_b
         db_list[key] = [lst[start:end] for start, end in zip([0] + indices, indices + [len(lst)])]
     for genome_id in genome_ids:
         covlist = defaultdict(list)
-        tasks = [(bam_files[genome_id], genome_id, ref_id, pos, min_mapq) for ref_id, poslist in db_list.items() for pos in poslist]
+        tasks = [(bam_files[genome_id], genome_id, ref_id, pos, min_mapq, ref) for ref_id, poslist in db_list.items() for pos in poslist]
         parsing_results = None
         parsing_results = thread_pool.starmap(get_cov, tasks)
         for item in parsing_results:
@@ -353,7 +357,7 @@ def get_coverage_parallel(bam_files, genome_ids, thread_pool, min_mapq, double_b
             db.bp_2.spanning_reads[genome_id] = covlist[(db.bp_2.ref_id, db.bp_2.position)]
     
         
-def get_all_reads(bam_file, region, genome_id,sv_size,use_supplementary_tag):
+def get_all_reads(bam_file, region, genome_id,sv_size,use_supplementary_tag, ref=None):
     """
     Yields set of split reads for each contig separately. Only reads primary alignments
     and infers the split reads from SA alignment tag
@@ -364,7 +368,12 @@ def get_all_reads(bam_file, region, genome_id,sv_size,use_supplementary_tag):
     ncol= 10000
     read_info = np.zeros((ncol,9), dtype = int)
     ref_ind, ref_id, region_start, region_end = region
-    aln_file = pysam.AlignmentFile(bam_file, "rb")
+    if bam_file.endswith(".bam"):
+        aln_file = pysam.AlignmentFile(bam_file, "rb")
+            
+    elif bam_file.endswith(".cram"):
+        aln_file = pysam.AlignmentFile(bam_file, "rc", reference_filename=ref)
+        
     t=0
     for aln in aln_file.fetch(ref_id, region_start, region_end,  multiple_iterators=True):
         if not aln.is_secondary and not aln.is_unmapped:
@@ -397,8 +406,13 @@ def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
     CHUNK_SIZE = 10000000
     sv_size = args.sv_size
     use_supplementary_tag = args.use_supplementary_tag
+    ref = args.ref
+    if bam_file.endswith(".bam"):
+        all_reference_ids = [r for r in pysam.AlignmentFile(bam_file, "rb").references]
+            
+    elif bam_file.endswith(".cram"):
+        all_reference_ids = [r for r in pysam.AlignmentFile(bam_file, "rc", reference_filename=args.ref).references]
     
-    all_reference_ids = [r for r in pysam.AlignmentFile(bam_file, "rb").references]
     fetch_list = []
     for j, ctg in enumerate(all_reference_ids):
         ctg_len = ref_lengths[ctg]
@@ -408,7 +422,7 @@ def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
             if ctg_len - reg_end < CHUNK_SIZE:
                 reg_end = ctg_len
             fetch_list.append((j, ctg, reg_start, reg_end))
-    tasks = [(bam_file, region, genome_id,sv_size,use_supplementary_tag) for region in fetch_list]
+    tasks = [(bam_file, region, genome_id,sv_size,use_supplementary_tag, ref) for region in fetch_list]
     parsing_results = None
     parsing_results = thread_pool.starmap(get_all_reads, tasks)
     segments_by_read = defaultdict(list)

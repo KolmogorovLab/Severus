@@ -33,7 +33,8 @@ CHUNK_SIZE = 10000000
         
 class Breakpoint(object):
     __slots__ = ("ref_id", "position","dir_1", "spanning_reads", "connections", 'prec',
-                 "read_ids", "pos2", 'id', "is_insertion", "insertion_size", "qual", "CI", "is_single", 'whitelist')
+                 "read_ids", "pos2", 'id', "is_insertion", "insertion_size", "qual", 
+                 "CI", "is_single", 'whitelist', 'vaf')
     def __init__(self, ref_id, ref_position, dir_1, qual, CI):
         self.ref_id = ref_id
         self.position = ref_position
@@ -50,6 +51,7 @@ class Breakpoint(object):
         self.CI = CI
         self.is_single = None
         self.whitelist = None
+        self.vaf = None
 
     def fancy_name(self):
         if not self.is_insertion:
@@ -823,11 +825,11 @@ def resolve_ovlp(double_breaks, ref_lengths):
         mm2 = np.median([c[1].mismatch_rate for c in conn_1])
         if mm1 > mm2:
             ovlp = ovlp if db.direction_1 == -1 else -ovlp
-            if 0 > db.bp_1.position + ovlp < ref_lengths[db.bp_1.ref_id]:
+            if 0 < db.bp_1.position + ovlp < ref_lengths[db.bp_1.ref_id]:
                 db.bp_1.position += ovlp
         else:
             ovlp = ovlp if db.direction_2 == -1 else -ovlp
-            if 0 > db.bp_2.position + ovlp < ref_lengths[db.bp_1.ref_id]:
+            if 0 < db.bp_2.position + ovlp < ref_lengths[db.bp_1.ref_id]:
                 db.bp_2.position + ovlp
             
         db.length = abs(db.bp_2.position - db.bp_1.position) if db.length else 0
@@ -1225,7 +1227,7 @@ def filter_single_bp(single_bps, cont_id, control_vaf, vaf_thr, min_supp, median
     if cont_id:
         check_normal_cov(single_bps, cont_id)
     for sbp in single_bps:
-        if sbp.vaf_pass == 'PASS' and sbp.vcf_qual > QUAL_THR and sbp.is_pass == 'PASS' and (sbp.bp_1.prec/sbp.supp) <= MIN_PREC_THR:
+        if sbp.vaf_pass == 'PASS' and sbp.vcf_qual > QUAL_THR and sbp.is_pass == 'PASS' and sbp.supp and (sbp.bp_1.prec/sbp.supp) <= MIN_PREC_THR:
             if sum([1 for z in sbp.bp_1.connections if z[0].read_length > 3_000]) >= 2:
                 sbp_list.append(sbp)
                         
@@ -1477,7 +1479,7 @@ def match_long_ins(ins_clusters, double_breaks, min_sv_size, tra_vs_ins):
             if not ins_to_remove_tra:
                 conv_tra_ins(ins_list_pos, ins_list, db.bp_2, db.bp_1, db.direction_2, dbs, ins_clusters, double_breaks, min_sv_size, tra_vs_ins,0)
                 
-def add_insseq(double_breaks2, segments_by_read, bam_files, thread_pool):
+def add_insseq(double_breaks2, segments_by_read, bam_files, thread_pool, ref):
 
     clusters = defaultdict(list) 
     for br in double_breaks2:
@@ -1496,7 +1498,7 @@ def add_insseq(double_breaks2, segments_by_read, bam_files, thread_pool):
                 if s.is_primary:
                     pos_ls[(s.ref_id,s.ref_start//CHUNK_SIZE, s.genome_id)].append((s.read_id, dbls[s.read_id][2], dbls[s.read_id][1]))
                     break
-    tasks = [(bam_files[key[2]], key[0], key[1], val) for key, val in pos_ls.items()]
+    tasks = [(bam_files[key[2]], key[0], key[1], val, ref) for key, val in pos_ls.items()]
     parsing_results = None
     parsing_results = thread_pool.starmap(get_insseq, tasks)
     for res in parsing_results:
@@ -1505,10 +1507,15 @@ def add_insseq(double_breaks2, segments_by_read, bam_files, thread_pool):
             for db in cl:
                 db.ins_seq = ins_seq
                 
-def get_insseq(bam_file,ref_id, pos, val):
+def get_insseq(bam_file,ref_id, pos, val, ref):
     ins_seq = []
     read_ids = [v[0] for v in val]
-    aln_file = pysam.AlignmentFile(bam_file, "rb")
+    if bam_file.endswith(".bam"):
+        aln_file = pysam.AlignmentFile(bam_file, "rb")
+            
+    elif bam_file.endswith(".cram"):
+        aln_file = pysam.AlignmentFile(bam_file, "rc", reference_filename=ref)
+        
     for aln in aln_file.fetch(ref_id, pos * CHUNK_SIZE, (pos+1) * CHUNK_SIZE,  multiple_iterators=True):
         if aln.query_name in read_ids and not aln.is_supplementary and not aln.is_secondary and not aln.is_unmapped:
             st_pos,end_pos = [v[2] for v in val if v[0] == aln.query_name][0]
@@ -1539,11 +1546,15 @@ def calc_vaf(db_list):
         if db.bp_2.is_insertion:
             DR = max([0,span_bp1 - DV])
             
+        vaf1 = DV / (DV + span_bp1) if DV > 0 else 0
+        vaf2 = DV / (DV + span_bp1) if DV > 0 else 0    
         vaf =  DV / (DV + DR) if DV > 0 else 0
         for db in db1:
             db.DR = DR
             db.DV = DV
             db.vaf = vaf
+            db.bp_1.vaf = vaf1
+            db.bp_2.vaf = vaf2
 
 def add_mut_type(db_list, control_id, control_vaf):
     mut_type = 'germline'#
@@ -1592,7 +1603,7 @@ def annotate_mut_type(double_breaks, control_id, control_vaf, vaf_thr, min_supp,
             db_list[db.genome_id].append(db)
         calc_gentype(db_list)
         calc_vaf(db_list)
-        vaf_list = [db.vaf for db in db_clust]
+        vaf_list = [db.bp_1.vaf for db in db_clust] + [db.bp_2.vaf for db in db_clust]
         supp_list = [db.DV for db in db_clust]
         if max(vaf_list) >= vaf_thr and max(supp_list) >= min_supp:
             vaf_pass = 'PASS'
@@ -1687,7 +1698,7 @@ def filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segmen
     cluster_db(db_list, coverage_histograms, min_sv_size)
     
     if ins_seq:
-        add_insseq(db_list, segments_by_read, bam_files, thread_pool)
+        add_insseq(db_list, segments_by_read, bam_files, thread_pool, args.ref)
         
     if single_bp:
         db_list += single_bps
@@ -2140,13 +2151,11 @@ def add_pon(db_clust, pon_ls):
     min_pos = bisect.bisect_left(pon_ls[0], pos1)
     max_pos = bisect.bisect_right(pon_ls[0], pos2)
     if not min_pos == max_pos:
-        max_diff = CLUST_LEN if not  db.vntr else VNTR_CLUST_LEN
+        max_diff = CLUST_LEN if not db.vntr else VNTR_CLUST_LEN
         for ind in range(min_pos, max_pos):
             if not pon_ls[4][ind] == db.bp_2.ref_id:
                 continue
-            if db.is_single:
-                len_diff = 0
-            elif db.bp_1.ref_id == db.bp_2.ref_id:
+            if db.bp_1.ref_id == db.bp_2.ref_id:
                 len_diff = abs(pon_ls[2][ind] - pon_ls[0][ind] - db.length)
             else:
                 len_diff = abs(pon_ls[2][ind] - db.bp_2.position)
@@ -2938,7 +2947,7 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
     logger.info('Starting compute_bp_coverage')
     if args.vntr_file:
         add_vntr_annot(double_breaks + ins_clusters, args)
-    get_coverage_parallel(bam_files, genome_ids, thread_pool, args.min_mapping_quality, double_breaks + ins_clusters + single_bps)
+    get_coverage_parallel(bam_files, genome_ids, thread_pool, args.min_mapping_quality, double_breaks + ins_clusters + single_bps, args.ref)
 
         
     logger.info('Filtering breakpoints')

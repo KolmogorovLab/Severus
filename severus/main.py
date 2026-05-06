@@ -84,6 +84,9 @@ def main():
     parser.add_argument("--control-bam", dest="control_bam",
                         metavar="path", required=False, default=None, nargs="+",
                         help="path to the control bam file (e.g. normal, must be indexed)")
+    parser.add_argument("--reference", dest="ref",
+                        metavar="path", required=False, default=None,
+                        help="path to the reference fasta (must be indexed)")
     parser.add_argument("--out-dir", dest="out_dir",
                         default=None, required=True,
                         metavar="path", help="Output directory")
@@ -218,8 +221,6 @@ def main():
         args.write_log_out = open(os.path.join(args.out_dir,"severus_LOH.bed"), "w")
         
     args.outpath_readqual = os.path.join(args.out_dir, "read_qual.txt")
-    
-    
         
     segments_by_read = []
     bam_files = defaultdict(list)
@@ -255,6 +256,9 @@ def main():
     for i, bam_file in enumerate(all_bams):
         genome_id = genome_ids[i]
         logger.info(f"Parsing reads from {genome_id}")
+        if bam_file.endswith(".cram"):
+            if not args.ref:
+                logger.info('Cram file is detected. Please provide reference fasta')
         segments_by_read_bam = get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
                                                       coverage_histograms, mismatch_histograms, n90, bg_mm,read_qual,read_qual_len,args)
         segments_by_read += segments_by_read_bam
