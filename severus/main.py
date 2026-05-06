@@ -120,6 +120,8 @@ def main():
                         default=MAX_GENOMIC_LEN, metavar="int", type=int,
                         help=f"maximum length of genomic segment to form connected components [{MAX_GENOMIC_LEN}]")
     parser.add_argument("--phasing-vcf", dest="phase_vcf", metavar="path", help="path to vcf file used for phasing (if using haplotype specific SV calling)[None]")
+    parser.add_argument("--ignore-hp", dest="ignore_hp", action="store_true",
+                        help="Ignore BAM HP/PS tags and treat the run as unphased; overrides --phasing-vcf outputs")
     parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
     parser.add_argument("--TIN-ratio", dest='control_vaf', metavar="float", type=float, default = CONTROL_VAF, help = 'Tumor in normal ratio[{CONTROL_VAF}]')
     parser.add_argument("--control-cov-thr", dest='cov_thr', metavar="float", type=int, default = CONTROL_COV_THR, help = 'Min normal coverage[{CONTROL_COV_THR}]')

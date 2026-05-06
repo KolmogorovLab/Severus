@@ -652,7 +652,8 @@ def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, con
         for db in double_breaks:
             db.cluster_id = 0
         
-        (genomic_segments, adj_segments) = get_genomic_segments(double_breaks, coverage_histograms, args.phase_vcf,
+        phase_vcf_for_graph = None if args.ignore_hp else args.phase_vcf
+        (genomic_segments, adj_segments) = get_genomic_segments(double_breaks, coverage_histograms, phase_vcf_for_graph,
                                                                 key, ref_lengths, args.max_genomic_len, args.min_sv_size, args.junction_vcf)
         components_list = []
         if key == 'germline':
