@@ -2128,15 +2128,28 @@ def add_pon(db_clust, pon_ls):
     for db in db_clust:
         db.mut_type = mut_type
 
+def init_dvls(double_breaks):
+    """
+    Sets per-breakpoint support counts, so that breaks which are not clustered
+    below (everything that is not PASS) still have SUPP_READS to report.
+    """
+    for br in double_breaks:
+        dv1 = [0,0,0]
+        dv2 = [0,0,0]
+        dv1[br.haplotype_1] = br.supp
+        dv2[br.haplotype_2] = br.supp
+        br.dvls = [dv1, dv2]
+
 def match_haplotypes(double_breaks):
     PHASE_THR = 0.66
     MIN_PHASED_READ = 2
-    
+
+    init_dvls(double_breaks)
     clusters = defaultdict(list)
     for br in double_breaks:
         if br.is_pass == 'PASS':
             clusters[br.to_string()].append(br)
-            
+
     for cl in clusters.values():
         by_genome_id = defaultdict(list)
         dv1 = [0,0,0]
@@ -2220,7 +2233,8 @@ def match_haplotypes(double_breaks):
 def match_haplotypes_single(double_breaks):
     PHASE_THR = 0.66
     MIN_PHASED_READ = 2
-    
+
+    init_dvls(double_breaks)
     clusters = defaultdict(list)
     for br in double_breaks:
         if br.is_pass == 'PASS':
