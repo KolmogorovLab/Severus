@@ -1636,10 +1636,12 @@ def whitebed(bed_file):
         seq, pos1, pos2 = line.strip().split()[:3]
         pos1, pos2  = int(pos1), int(pos2)
         if seq in regions.keys():
-            regions[0].append(pos1)
-            regions[1].append(pos2)
+            regions[seq][0].append(pos1)
+            regions[seq][1].append(pos2)
         else:
             regions[seq] = [[pos1], [pos2]]
+    for seq, (starts, ends) in regions.items():
+        regions[seq] = [sorted(starts), sorted(ends)]
     return regions
 
 def filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segments_by_read, bam_files, thread_pool, args):
