@@ -19,7 +19,7 @@ import logging
 
 from severus.build_graph import output_graphs
 from severus.bam_processing import get_all_reads_parallel, init_hist, init_mm_hist, update_coverage_hist
-from severus.breakpoint_finder import call_breakpoints
+from severus.breakpoint_finder import call_breakpoints, whitebed
 from severus.resolve_vntr import update_segments_by_read
 from severus.__version__ import __version__
 
@@ -220,6 +220,8 @@ def main():
         args.write_log_out = open(os.path.join(args.out_dir,"severus_LOH.bed"), "w")
         
     args.outpath_readqual = os.path.join(args.out_dir, "read_qual.txt")
+
+    args.white_reg = whitebed(args.whitelist) if args.whitelist else {}
     
     
         

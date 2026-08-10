@@ -16,7 +16,7 @@ import networkx as nx
 import copy
 import gzip
 
-from severus.bam_processing import _calc_nx, extract_clipped_end, get_coverage_parallel
+from severus.bam_processing import _calc_nx, extract_clipped_end, get_coverage_parallel, in_whitelist
 from severus.resolve_vntr import read_vntr_file
 
 logger = logging.getLogger()
@@ -264,11 +264,8 @@ def get_breakpoints(split_reads, ref_lengths, white_reg, args):
 
 def add_whitelist(all_breaks, white_reg):
     for bp in all_breaks:
-        if bp.ref_id in white_reg.keys():
-            ind1 = bisect.bisect_right(white_reg[bp.ref_id][0], bp.position)
-            ind2 = bisect.bisect_left(white_reg[bp.ref_id][1], bp.position)
-            if ind1 - ind2 == 1:
-               bp.whitelist = True
+        if in_whitelist(white_reg, bp.ref_id, bp.position, bp.position):
+            bp.whitelist = True
     
 def merge_bps(all_breaks):
     MIN_DIFF = 50
@@ -927,11 +924,8 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, white_reg, args):
                     clipped_to_remove.append(cl2)
                 if not by_genome_id_pass.values() or not max(by_genome_id_pass.values()) >= min_reads:
                     continue#
-                if white_reg and seq in white_reg.keys():
-                    ind1 = bisect.bisect_right(white_reg[seq][0], position)
-                    ind2 = bisect.bisect_left(white_reg[seq][1], position)
-                    if ind1 - ind2 == 1:
-                       whitelist = True
+                if in_whitelist(white_reg, seq, position, position):
+                    whitelist = True
                 for key, unique_read in unique_reads.items():
                     bp_1 = Breakpoint(seq, position, -1, mapq, max(pos_list) - min(pos_list))
                     bp_1.read_ids = [x.read_id for x in unique_read]
@@ -2838,9 +2832,7 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
         outpath_alignments = os.path.join(args.out_dir, "read_alignments")
         write_alignments(segments_by_read, outpath_alignments)
     
-    white_reg = []
-    if args.whitelist:
-        white_reg = whitebed(args.whitelist)
+    white_reg = args.white_reg
     logger.info('Extracting split alignments')
     split_reads = get_splitreads(segments_by_read)
     ins_list_all = get_insertionreads(segments_by_read)

@@ -508,17 +508,26 @@ def add_read_qual(segments_by_read, ref_lengths, bg_mm, mismatch_histograms,read
     for alignments in segments_by_read:
         if not alignments:
             continue
-        label_reads(alignments, min_mapq, bg_mm, mm_hist_high, min_aligned_length, args.multisample, args.min_len)
+        label_reads(alignments, min_mapq, bg_mm, mm_hist_high, min_aligned_length, args.multisample, args.min_len, args.white_reg)
 
     write_readqual(segments_by_read, args.outpath_readqual,read_qual,read_qual_len)
 
 
-def label_reads(read, min_mapq, bg_mm, mm_hist_high, min_aligned_length, multisample, min_len):
+def in_whitelist(white_reg, ref_id, start, end):
+    if ref_id not in white_reg:
+        return False
+    starts, ends = white_reg[ref_id]
+    return bisect.bisect_right(starts, end) > bisect.bisect_left(ends, start)
+
+
+def label_reads(read, min_mapq, bg_mm, mm_hist_high, min_aligned_length, multisample, min_len, white_reg):
     MIN_ALIGNED_RATE = 0 if not min_len == -1 else 0.5
     MIN_ALIGNED_LEN = min_len if not min_len == -1 else min_aligned_length
     #MIN_ALIGNED_LEN = min_aligned_length if multisample else 2000
 
     for seg in read:
+        if in_whitelist(white_reg, seg.ref_id, seg.ref_start_ori, seg.ref_end_ori):
+            continue
         if seg.mapq < min_mapq:
             seg.is_pass += '_LOW_MAPQ'
         if high_mm_check(mm_hist_high, bg_mm, seg):
@@ -530,7 +539,8 @@ def label_reads(read, min_mapq, bg_mm, mm_hist_high, min_aligned_length, multisa
 
     if aligned_ratio < MIN_ALIGNED_RATE or aligned_len < MIN_ALIGNED_LEN:
         for seg in read:
-            seg.is_pass += '_LOW_ALIGNED_LEN'#
+            if not in_whitelist(white_reg, seg.ref_id, seg.ref_start_ori, seg.ref_end_ori):
+                seg.is_pass += '_LOW_ALIGNED_LEN'#
 
     for seg in read:
         if not seg.is_pass:

@@ -133,7 +133,15 @@ along with complexSV clusters and additional information about SVs. See [below][
 --use-supplementary-tag to use HP tag in supplementary alignments. Need to be added if HiPhase or LongPhase is used for haplotagging.
 --low-quality           to use more strict settings if one of the samples has a lower quality
 --use_germline_genotype to use genotyping for diploid samples
+--whitelist             path to a bed file of regions in which all SVs are reported
 ```
+
+`--whitelist` is intended for loci where the sample is expected to diverge from the
+reference, such as the immunoglobulin and T-cell receptor loci in lymphoma. Alignments
+overlapping a whitelisted region are exempt from the segment quality filters
+(`--min-mapq`, the background mismatch-rate check and the minimum aligned length), and
+the resulting SVs skip the breakpoint filters and are tagged `INSIDE_WHITELIST=TRUE` in
+the vcf. Behaviour outside the bed file is unchanged.
  
 ## Benchmarking Severus and other SV callers
 
