@@ -221,11 +221,11 @@ def get_breakpoints(split_reads, ref_lengths, white_reg, args):
                 _add_double(s1, s2)
     all_breaks = []
     for seq, bp_pos in seq_breakpoints_r.items():
-        bps = cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads,0)
+        bps = cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads,0, white_reg)
         if bps:
             all_breaks += bps
     for seq, bp_pos in seq_breakpoints_l.items():  
-        bps = cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads,1)
+        bps = cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads,1, white_reg)
         if bps:
             all_breaks += bps
     if white_reg:
@@ -296,21 +296,32 @@ def get_single_bps(bp_ls, bp_counts):
                 
     return single_bps
     
-def cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads, bp_dir):
+def cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads, bp_dir, white_reg):
 
     clusters = []
     cur_cluster = []
     bp_list = []
     min_supp = min(2, min_reads)
+
+    def keep_cluster(cl):
+        if len(cl) >= min_supp:
+            return True
+        for rc in cl:
+            for i in [0, 1]:
+                pos = get_pos(rc, i)[0]
+                if in_whitelist(white_reg, rc[i].ref_id, pos, pos):
+                    return True
+        return False
+
     bp_pos.sort(key=lambda bp: (get_pos(bp, bp_dir)[2], get_pos(bp, bp_dir)[0]))
     for rc in bp_pos:
         if cur_cluster and abs(get_pos(rc,bp_dir)[0] - get_pos(cur_cluster[-1], bp_dir)[0]) > clust_len:
-            if len(cur_cluster) >= min_supp:
+            if keep_cluster(cur_cluster):
                 clusters.append(cur_cluster)
             cur_cluster = [rc]
         else:
             cur_cluster.append(rc)
-    if cur_cluster and len(cur_cluster) >= min_supp:
+    if cur_cluster and keep_cluster(cur_cluster):
         clusters.append(cur_cluster)
         
     for cl in clusters:
@@ -414,7 +425,7 @@ def get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads, bp_ls, multisample):
     if by_genome_id_pass.values() or bp_1.whitelist or bp_2.whitelist:
         is_pass = 'PASS'
         whitelist = True if bp_1.whitelist or bp_2.whitelist else None
-        if by_genome_id_pass.values() and max(by_genome_id_pass.values()) < min_reads:
+        if by_genome_id_pass.values() and max(by_genome_id_pass.values()) < min_reads and not whitelist:
             is_pass = 'FAIL'
             
         if conn_valid_1[2] < conn_pass_1 * CONN_2_PASS and conn_valid_2[2] < conn_pass_2 * CONN_2_PASS:

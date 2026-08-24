@@ -141,7 +141,9 @@ reference, such as the immunoglobulin and T-cell receptor loci in lymphoma. Alig
 overlapping a whitelisted region are exempt from the segment quality filters
 (`--min-mapq`, the background mismatch-rate check and the minimum aligned length), and
 the resulting SVs skip the breakpoint filters and are tagged `INSIDE_WHITELIST=TRUE` in
-the vcf. Behaviour outside the bed file is unchanged.
+the vcf. A junction with at least one breakend in a whitelisted region is also kept when
+only a single read supports it, below the usual minimum support. Behaviour outside the bed
+file is unchanged.
  
 ## Benchmarking Severus and other SV callers
 
