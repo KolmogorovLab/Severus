@@ -6,7 +6,7 @@ import logging
 import numpy as np 
 import gzip
 
-from severus.bam_processing import ReadSegment, add_read_qual
+from severus.bam_processing import ReadSegment, add_read_qual, in_whitelist
 
 logger = logging.getLogger()
 
@@ -78,7 +78,7 @@ def filter_vntr_only_segments(split_segs, vntr_list):
                 if s1.segment_length > vntr_len * OVERLAP_THR:
                     s1.is_pass = 'vntr_only'
      
-def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_pos, split_seg_vntr, min_sv_size, ins_seq):
+def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_pos, split_seg_vntr, min_sv_size, ins_seq, white_reg):
     BP_TOL = 500
     seg_span_start=[]
     seg_span_end=[]
@@ -99,6 +99,8 @@ def calc_new_segments(segments, clipped_segs, vntr_strt, vntr_end, bp_len, bp_po
         
     if not seg_span_start or not seg_span_end and [seg for seg in segments if not seg.is_insertion and not seg.is_clipped]:     
         for seg in segments:
+            if in_whitelist(white_reg, seg.ref_id, seg.ref_start, seg.ref_end):
+                continue
             seg.is_pass = 'vntr_only'
             is_pass = 'vntr_only'
             
@@ -194,7 +196,7 @@ def check_spanning(new_read, vntr_loc):
         if seg.ref_id == vntr_ref and seg.ins_pos[0] < vntr_strt - BP_TOL and seg.ins_pos[1] > vntr_end + BP_TOL:
             return True
 
-def resolve_read_vntr(read, vntr_list, min_sv_size):
+def resolve_read_vntr(read, vntr_list, min_sv_size, white_reg):
 
     seg_in_vntr = defaultdict(list)
     read.sort(key = lambda s:(s.align_start, s.read_start))
@@ -278,7 +280,7 @@ def resolve_read_vntr(read, vntr_list, min_sv_size):
                 new_read[-1].is_pass = 'vntr_only'
         else:
             segments.sort(key = lambda s:s.ref_start)
-            new_segments = calc_new_segments(segments, clipped_segs, key[1], key[2],bp_len, bp_pos, split_seg_vntr, min_sv_size, ins_seq)
+            new_segments = calc_new_segments(segments, clipped_segs, key[1], key[2],bp_len, bp_pos, split_seg_vntr, min_sv_size, ins_seq, white_reg)
             seg_to_remove += list(set(segments) - set(new_segments))
                 
             if new_segments:
@@ -308,12 +310,12 @@ def remove_dedup_segments(segments_by_read):
         segments_by_read[i] = dedup_segments + dedup_segments_ins
         
             
-def resolve_vntr(segments_by_read, vntr_file, min_sv_size):
+def resolve_vntr(segments_by_read, vntr_file, min_sv_size, white_reg):
     vntr_list = read_vntr_file(vntr_file)
     for i, read in enumerate(segments_by_read):
         if not read:
             continue
-        new_read = resolve_read_vntr(read, vntr_list, min_sv_size)
+        new_read = resolve_read_vntr(read, vntr_list, min_sv_size, white_reg)
         if new_read:
             segments_by_read[i] = new_read
         else:
@@ -324,7 +326,7 @@ def update_segments_by_read(segments_by_read, mismatch_histograms, bg_mm, ref_le
     remove_dedup_segments(segments_by_read)
     bg_mm = float(np.median(bg_mm))
     if args.vntr_file:
-        resolve_vntr(segments_by_read, args.vntr_file, args.sv_size)
+        resolve_vntr(segments_by_read, args.vntr_file, args.sv_size, args.white_reg)
     logger.info("Annotating reads")
     add_read_qual(segments_by_read, ref_lengths, bg_mm, mismatch_histograms,read_qual,read_qual_len, args)
 
