@@ -71,7 +71,7 @@ class DoubleBreak(object):
     __slots__ = ("bp_1", "direction_1", "bp_2", "direction_2", "genome_id","haplotype_1",'haplotype_2',"supp",'supp_read_ids',
                  'length','genotype','edgestyle', 'is_pass', 'ins_seq', 'mut_type', 'is_dup', 'has_ins','subgraph_id', 'sv_type','tra_pos',
                  'DR', 'DV', 'hVaf', 'vaf', 'prec', 'phaseset_id', 'cluster_id', 'gr_id', 'vcf_id', 'vcf_sv_type','vaf_pass', 'vcf_qual', 
-                 'haplotypes', 'is_single', 'vntr', 'whitelist', 'dvls')
+                 'haplotypes', 'is_single', 'vntr', 'whitelist', 'dvls', 'wl_rescue')
     def __init__(self, bp_1, direction_1, bp_2, direction_2, genome_id, haplotype_1, haplotype_2, 
                  supp, supp_read_ids, length):
         self.bp_1 = bp_1
@@ -109,6 +109,7 @@ class DoubleBreak(object):
         self.vntr = None
         self.tra_pos = None
         self.whitelist = None
+        self.wl_rescue = None
         self.dvls = None
         
     def to_string(self):
@@ -1649,17 +1650,110 @@ def whitebed(bed_file):
         regions[seq] = [sorted(starts), sorted(ends)]
     return regions
 
+#Support at which a breakpoint cluster survives cluster_bp() on its own evidence.
+#Mirrors "min_supp = min(2, min_reads)" there; the single-read exemption is the only
+#way a junction below this can exist, so it is the only class that needs corroborating.
+WL_CLUSTER_MIN_SUPP = 2
+
+
+def wl_region_id(white_reg, ref_id, position):
+    """Identifies the whitelisted region containing a breakend, or None."""
+    if ref_id not in white_reg:
+        return None
+    starts, ends = white_reg[ref_id]
+    ind = bisect.bisect_right(starts, position) - 1
+    if ind >= 0 and position <= ends[ind]:
+        return (ref_id, ind)
+    return None
+
+
+def wl_same_region(db, white_reg):
+    """True when both breakends fall in the same whitelisted region.
+
+    Recombination inside a single immunoglobulin or T-cell receptor locus is
+    physiological, so such a junction is not corroborating evidence for a
+    translocation and is not rescued on a single read.
+    """
+    reg_1 = wl_region_id(white_reg, db.bp_1.ref_id, db.bp_1.position)
+    return reg_1 is not None and reg_1 == wl_region_id(white_reg, db.bp_2.ref_id, db.bp_2.position)
+
+
+def build_junction_index(double_breaks):
+    """Junctions keyed by contig pair, stored under both orderings of the pair."""
+    index = defaultdict(list)
+    seen = set()
+    for db in double_breaks:
+        if db.bp_2.is_insertion or db.is_single:
+            continue
+        key = db.to_string()
+        if key in seen:
+            continue
+        seen.add(key)
+        entry_1 = (key, db.bp_1.position, db.direction_1, db.bp_2.position, db.direction_2, db.DV)
+        entry_2 = (key, db.bp_2.position, db.direction_2, db.bp_1.position, db.direction_1, db.DV)
+        index[(db.bp_1.ref_id, db.bp_2.ref_id)].append(entry_1)
+        index[(db.bp_2.ref_id, db.bp_1.ref_id)].append(entry_2)
+    return index
+
+
+def wl_corroboration(db, index, tol):
+    """Looks for a second junction between the same two loci.
+
+    A chimeric read produces an isolated breakend, whereas a real rearrangement
+    leaves either the opposite orientation of the same junction (a reciprocal
+    pair) or a neighbouring junction that stands on its own read support.
+    """
+    key = db.to_string()
+    for okey, opos_1, odir_1, opos_2, odir_2, odv in index[(db.bp_1.ref_id, db.bp_2.ref_id)]:
+        if okey == key:
+            continue
+        if abs(opos_1 - db.bp_1.position) > tol or abs(opos_2 - db.bp_2.position) > tol:
+            continue
+        if odir_1 == -db.direction_1 and odir_2 == -db.direction_2:
+            return 'RECIPROCAL'
+        if odv >= WL_CLUSTER_MIN_SUPP:
+            return 'SUPPORTED_NEIGHBOUR'
+    return None
+
+
 def filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segments_by_read, bam_files, thread_pool, args):
 
     min_sv_size = args.min_sv_size
     ins_seq = args.ins_seq
     single_bp = args.single_bp
     
+    wl_mode = args.whitelist_single_read
+    wl_tol = args.whitelist_reciprocal_dist
+    white_reg = args.white_reg
+
+    #Built once, and only when a junction can actually be refused for lack of a partner.
+    junction_index = build_junction_index(double_breaks) if wl_mode == 'reciprocal' and white_reg else None
+
     db_list = []
     for db in double_breaks:
-        if (db.is_pass == 'PASS' and db.vaf_pass == 'PASS' and db.vcf_qual) or db.whitelist:
+        if db.is_pass == 'PASS' and db.vaf_pass == 'PASS' and db.vcf_qual:
             db_list.append(db)
-        
+            continue
+        if not db.whitelist:
+            continue
+
+        #Above the clustering threshold, or asked for the unconditional behaviour: as before.
+        if (db.DV >= WL_CLUSTER_MIN_SUPP or wl_mode == 'any'
+                or db.bp_2.is_insertion or db.is_single):
+            db.wl_rescue = 'WHITELIST'
+            db_list.append(db)
+            continue
+        if wl_mode == 'off':
+            continue
+
+        #Only the single-read exemption reaches here, and only it has to be corroborated.
+        if not args.whitelist_allow_intra_region and wl_same_region(db, white_reg):
+            continue
+        reason = wl_corroboration(db, junction_index, wl_tol)
+        if reason:
+            db.wl_rescue = reason
+            db_list.append(db)
+
     cluster_db(db_list, coverage_histograms, min_sv_size)
     
     if ins_seq:

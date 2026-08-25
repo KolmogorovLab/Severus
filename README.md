@@ -134,6 +134,12 @@ along with complexSV clusters and additional information about SVs. See [below][
 --low-quality           to use more strict settings if one of the samples has a lower quality
 --use_germline_genotype to use genotyping for diploid samples
 --whitelist             path to a bed file of regions in which all SVs are reported
+--whitelist-single-read how to treat a whitelisted junction supported by a single read:
+                        reciprocal (default) | any | off
+--whitelist-reciprocal-dist  maximum distance to a corroborating junction [1000]
+--whitelist-allow-intra-region  also rescue single-read junctions with both breakends in
+                        the same whitelisted region
+--whitelist-enforce-mapq  apply --min-mapq inside whitelisted regions as well
 ```
 
 `--whitelist` is intended for loci where the sample is expected to diverge from the
@@ -144,6 +150,21 @@ the resulting SVs skip the breakpoint filters and are tagged `INSIDE_WHITELIST=T
 the vcf. A junction with at least one breakend in a whitelisted region is also kept when
 only a single read supports it, below the usual minimum support. Behaviour outside the bed
 file is unchanged.
+
+Single-read junctions are the expensive part of that exemption: a chimeric read with one
+end in the bed produces one, and the rate scales with the size of the bed rather than with
+anything biological. By default such a junction is therefore kept only if a second junction
+between the same two loci corroborates it, either in the reciprocal orientation or with read
+support of its own; `WL_RESCUE` in the vcf records which. `--whitelist-single-read any`
+restores the unconditional behaviour and `off` disables the exemption. Junctions with both
+breakends in the *same* whitelisted region are not rescued on a single read, because
+recombination within one immunoglobulin or T-cell receptor locus is physiological;
+`--whitelist-allow-intra-region` keeps them.
+
+The quality exemption is justified by hypermutation and V(D)J recombination making reads
+diverge from the reference, which is an argument about mismatches and alignment length
+rather than about mapping quality. `--whitelist-enforce-mapq` keeps `--min-mapq` in force
+inside the bed and exempts only the other two checks.
  
 ## Benchmarking Severus and other SV callers
 

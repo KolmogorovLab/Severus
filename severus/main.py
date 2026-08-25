@@ -139,6 +139,20 @@ def main():
     parser.add_argument("--use-supplementary-tag", dest='use_supplementary_tag', action = "store_true", help = 'Uses haplotype tag in supplementary alignments')
     parser.add_argument("--PON", dest='pon_file', metavar="path", help = 'Uses PON data')
     parser.add_argument("--whitelist", dest='whitelist', metavar="path", help = 'Outputs all the SVs within the bed file')
+    parser.add_argument("--whitelist-single-read", dest='whitelist_single_read', default='reciprocal',
+                        choices=['reciprocal', 'any', 'off'],
+                        help = 'How to treat a whitelisted junction supported by a single read: keep it only if a '
+                               'reciprocal or independently supported junction corroborates it (reciprocal, default), '
+                               'keep it unconditionally (any), or drop it (off)')
+    parser.add_argument("--whitelist-reciprocal-dist", dest='whitelist_reciprocal_dist', default=1000,
+                        metavar="int", type=int,
+                        help = 'maximum distance at both breakends to a corroborating junction [1000]')
+    parser.add_argument("--whitelist-allow-intra-region", dest='whitelist_allow_intra_region', action="store_true",
+                        help = 'Also rescue single-read junctions with both breakends in the same whitelisted region '
+                               '(physiological V(D)J recombination is reported as somatic)')
+    parser.add_argument("--whitelist-enforce-mapq", dest='whitelist_enforce_mapq', action="store_true",
+                        help = 'Apply --min-mapq inside whitelisted regions as well; the whitelist then exempts only '
+                               'the mismatch-rate and aligned-length checks')
     parser.add_argument("--low-quality", dest='multisample', action = "store_true", help = 'Uses set of parameters optimized for the analysis with lower quality') 
     parser.add_argument("--junction-vcf", dest='junction_vcf', action = "store_true", help = 'Outputs a junction vcf in which all DELs, DUPs and INVs are represented as a BND') 
     parser.add_argument("--target-sample", dest='target_name', default = '', help = 'Sample name for the target bams', nargs="+")
