@@ -16,7 +16,7 @@ import networkx as nx
 import copy
 import gzip
 
-from severus.bam_processing import _calc_nx, extract_clipped_end, get_coverage_parallel
+from severus.bam_processing import _calc_nx, extract_clipped_end, get_coverage_parallel, in_whitelist
 from severus.resolve_vntr import read_vntr_file
 
 logger = logging.getLogger()
@@ -71,7 +71,7 @@ class DoubleBreak(object):
     __slots__ = ("bp_1", "direction_1", "bp_2", "direction_2", "genome_id","haplotype_1",'haplotype_2',"supp",'supp_read_ids',
                  'length','genotype','edgestyle', 'is_pass', 'ins_seq', 'mut_type', 'is_dup', 'has_ins','subgraph_id', 'sv_type','tra_pos',
                  'DR', 'DV', 'hVaf', 'vaf', 'prec', 'phaseset_id', 'cluster_id', 'gr_id', 'vcf_id', 'vcf_sv_type','vaf_pass', 'vcf_qual', 
-                 'haplotypes', 'is_single', 'vntr', 'whitelist', 'dvls')
+                 'haplotypes', 'is_single', 'vntr', 'whitelist', 'dvls', 'wl_rescue')
     def __init__(self, bp_1, direction_1, bp_2, direction_2, genome_id, haplotype_1, haplotype_2, 
                  supp, supp_read_ids, length):
         self.bp_1 = bp_1
@@ -109,6 +109,7 @@ class DoubleBreak(object):
         self.vntr = None
         self.tra_pos = None
         self.whitelist = None
+        self.wl_rescue = None
         self.dvls = None
         
     def to_string(self):
@@ -221,11 +222,11 @@ def get_breakpoints(split_reads, ref_lengths, white_reg, args):
                 _add_double(s1, s2)
     all_breaks = []
     for seq, bp_pos in seq_breakpoints_r.items():
-        bps = cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads,0)
+        bps = cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads,0, white_reg)
         if bps:
             all_breaks += bps
     for seq, bp_pos in seq_breakpoints_l.items():  
-        bps = cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads,1)
+        bps = cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads,1, white_reg)
         if bps:
             all_breaks += bps
     if white_reg:
@@ -264,11 +265,8 @@ def get_breakpoints(split_reads, ref_lengths, white_reg, args):
 
 def add_whitelist(all_breaks, white_reg):
     for bp in all_breaks:
-        if bp.ref_id in white_reg.keys():
-            ind1 = bisect.bisect_right(white_reg[bp.ref_id][0], bp.position)
-            ind2 = bisect.bisect_left(white_reg[bp.ref_id][1], bp.position)
-            if ind1 - ind2 == 1:
-               bp.whitelist = True
+        if in_whitelist(white_reg, bp.ref_id, bp.position, bp.position):
+            bp.whitelist = True
     
 def merge_bps(all_breaks):
     MIN_DIFF = 50
@@ -299,21 +297,32 @@ def get_single_bps(bp_ls, bp_counts):
                 
     return single_bps
     
-def cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads, bp_dir):
+def cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads, bp_dir, white_reg):
 
     clusters = []
     cur_cluster = []
     bp_list = []
     min_supp = min(2, min_reads)
+
+    def keep_cluster(cl):
+        if len(cl) >= min_supp:
+            return True
+        for rc in cl:
+            for i in [0, 1]:
+                pos = get_pos(rc, i)[0]
+                if in_whitelist(white_reg, rc[i].ref_id, pos, pos):
+                    return True
+        return False
+
     bp_pos.sort(key=lambda bp: (get_pos(bp, bp_dir)[2], get_pos(bp, bp_dir)[0]))
     for rc in bp_pos:
         if cur_cluster and abs(get_pos(rc,bp_dir)[0] - get_pos(cur_cluster[-1], bp_dir)[0]) > clust_len:
-            if len(cur_cluster) >= min_supp:
+            if keep_cluster(cur_cluster):
                 clusters.append(cur_cluster)
             cur_cluster = [rc]
         else:
             cur_cluster.append(rc)
-    if cur_cluster and len(cur_cluster) >= min_supp:
+    if cur_cluster and keep_cluster(cur_cluster):
         clusters.append(cur_cluster)
         
     for cl in clusters:
@@ -417,7 +426,7 @@ def get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads, bp_ls, multisample):
     if by_genome_id_pass.values() or bp_1.whitelist or bp_2.whitelist:
         is_pass = 'PASS'
         whitelist = True if bp_1.whitelist or bp_2.whitelist else None
-        if by_genome_id_pass.values() and max(by_genome_id_pass.values()) < min_reads:
+        if by_genome_id_pass.values() and max(by_genome_id_pass.values()) < min_reads and not whitelist:
             is_pass = 'FAIL'
             
         if conn_valid_1[2] < conn_pass_1 * CONN_2_PASS and conn_valid_2[2] < conn_pass_2 * CONN_2_PASS:
@@ -927,11 +936,8 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, white_reg, args):
                     clipped_to_remove.append(cl2)
                 if not by_genome_id_pass.values() or not max(by_genome_id_pass.values()) >= min_reads:
                     continue#
-                if white_reg and seq in white_reg.keys():
-                    ind1 = bisect.bisect_right(white_reg[seq][0], position)
-                    ind2 = bisect.bisect_left(white_reg[seq][1], position)
-                    if ind1 - ind2 == 1:
-                       whitelist = True
+                if in_whitelist(white_reg, seq, position, position):
+                    whitelist = True
                 for key, unique_read in unique_reads.items():
                     bp_1 = Breakpoint(seq, position, -1, mapq, max(pos_list) - min(pos_list))
                     bp_1.read_ids = [x.read_id for x in unique_read]
@@ -1636,11 +1642,79 @@ def whitebed(bed_file):
         seq, pos1, pos2 = line.strip().split()[:3]
         pos1, pos2  = int(pos1), int(pos2)
         if seq in regions.keys():
-            regions[0].append(pos1)
-            regions[1].append(pos2)
+            regions[seq][0].append(pos1)
+            regions[seq][1].append(pos2)
         else:
             regions[seq] = [[pos1], [pos2]]
+    for seq, (starts, ends) in regions.items():
+        regions[seq] = [sorted(starts), sorted(ends)]
     return regions
+
+#Support at which a breakpoint cluster survives cluster_bp() on its own evidence.
+#Mirrors "min_supp = min(2, min_reads)" there; the single-read exemption is the only
+#way a junction below this can exist, so it is the only class that needs corroborating.
+WL_CLUSTER_MIN_SUPP = 2
+
+
+def wl_region_id(white_reg, ref_id, position):
+    """Identifies the whitelisted region containing a breakend, or None."""
+    if ref_id not in white_reg:
+        return None
+    starts, ends = white_reg[ref_id]
+    ind = bisect.bisect_right(starts, position) - 1
+    if ind >= 0 and position <= ends[ind]:
+        return (ref_id, ind)
+    return None
+
+
+def wl_same_region(db, white_reg):
+    """True when both breakends fall in the same whitelisted region.
+
+    Recombination inside a single immunoglobulin or T-cell receptor locus is
+    physiological, so such a junction is not corroborating evidence for a
+    translocation and is not rescued on a single read.
+    """
+    reg_1 = wl_region_id(white_reg, db.bp_1.ref_id, db.bp_1.position)
+    return reg_1 is not None and reg_1 == wl_region_id(white_reg, db.bp_2.ref_id, db.bp_2.position)
+
+
+def build_junction_index(double_breaks):
+    """Junctions keyed by contig pair, stored under both orderings of the pair."""
+    index = defaultdict(list)
+    seen = set()
+    for db in double_breaks:
+        if db.bp_2.is_insertion or db.is_single:
+            continue
+        key = db.to_string()
+        if key in seen:
+            continue
+        seen.add(key)
+        entry_1 = (key, db.bp_1.position, db.direction_1, db.bp_2.position, db.direction_2, db.DV)
+        entry_2 = (key, db.bp_2.position, db.direction_2, db.bp_1.position, db.direction_1, db.DV)
+        index[(db.bp_1.ref_id, db.bp_2.ref_id)].append(entry_1)
+        index[(db.bp_2.ref_id, db.bp_1.ref_id)].append(entry_2)
+    return index
+
+
+def wl_corroboration(db, index, tol):
+    """Looks for a second junction between the same two loci.
+
+    A chimeric read produces an isolated breakend, whereas a real rearrangement
+    leaves either the opposite orientation of the same junction (a reciprocal
+    pair) or a neighbouring junction that stands on its own read support.
+    """
+    key = db.to_string()
+    for okey, opos_1, odir_1, opos_2, odir_2, odv in index[(db.bp_1.ref_id, db.bp_2.ref_id)]:
+        if okey == key:
+            continue
+        if abs(opos_1 - db.bp_1.position) > tol or abs(opos_2 - db.bp_2.position) > tol:
+            continue
+        if odir_1 == -db.direction_1 and odir_2 == -db.direction_2:
+            return 'RECIPROCAL'
+        if odv >= WL_CLUSTER_MIN_SUPP:
+            return 'SUPPORTED_NEIGHBOUR'
+    return None
+
 
 def filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segments_by_read, bam_files, thread_pool, args):
 
@@ -1648,11 +1722,38 @@ def filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segmen
     ins_seq = args.ins_seq
     single_bp = args.single_bp
     
+    wl_mode = args.whitelist_single_read
+    wl_tol = args.whitelist_reciprocal_dist
+    white_reg = args.white_reg
+
+    #Built once, and only when a junction can actually be refused for lack of a partner.
+    junction_index = build_junction_index(double_breaks) if wl_mode == 'reciprocal' and white_reg else None
+
     db_list = []
     for db in double_breaks:
-        if (db.is_pass == 'PASS' and db.vaf_pass == 'PASS' and db.vcf_qual) or db.whitelist:
+        if db.is_pass == 'PASS' and db.vaf_pass == 'PASS' and db.vcf_qual:
             db_list.append(db)
-        
+            continue
+        if not db.whitelist:
+            continue
+
+        #Above the clustering threshold, or asked for the unconditional behaviour: as before.
+        if (db.DV >= WL_CLUSTER_MIN_SUPP or wl_mode == 'any'
+                or db.bp_2.is_insertion or db.is_single):
+            db.wl_rescue = 'WHITELIST'
+            db_list.append(db)
+            continue
+        if wl_mode == 'off':
+            continue
+
+        #Only the single-read exemption reaches here, and only it has to be corroborated.
+        if not args.whitelist_allow_intra_region and wl_same_region(db, white_reg):
+            continue
+        reason = wl_corroboration(db, junction_index, wl_tol)
+        if reason:
+            db.wl_rescue = reason
+            db_list.append(db)
+
     cluster_db(db_list, coverage_histograms, min_sv_size)
     
     if ins_seq:
@@ -2128,15 +2229,28 @@ def add_pon(db_clust, pon_ls):
     for db in db_clust:
         db.mut_type = mut_type
 
+def init_dvls(double_breaks):
+    """
+    Sets per-breakpoint support counts, so that breaks which are not clustered
+    below (everything that is not PASS) still have SUPP_READS to report.
+    """
+    for br in double_breaks:
+        dv1 = [0,0,0]
+        dv2 = [0,0,0]
+        dv1[br.haplotype_1] = br.supp
+        dv2[br.haplotype_2] = br.supp
+        br.dvls = [dv1, dv2]
+
 def match_haplotypes(double_breaks):
     PHASE_THR = 0.66
     MIN_PHASED_READ = 2
-    
+
+    init_dvls(double_breaks)
     clusters = defaultdict(list)
     for br in double_breaks:
         if br.is_pass == 'PASS':
             clusters[br.to_string()].append(br)
-            
+
     for cl in clusters.values():
         by_genome_id = defaultdict(list)
         dv1 = [0,0,0]
@@ -2220,7 +2334,8 @@ def match_haplotypes(double_breaks):
 def match_haplotypes_single(double_breaks):
     PHASE_THR = 0.66
     MIN_PHASED_READ = 2
-    
+
+    init_dvls(double_breaks)
     clusters = defaultdict(list)
     for br in double_breaks:
         if br.is_pass == 'PASS':
@@ -2822,9 +2937,7 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
         outpath_alignments = os.path.join(args.out_dir, "read_alignments")
         write_alignments(segments_by_read, outpath_alignments)
     
-    white_reg = []
-    if args.whitelist:
-        white_reg = whitebed(args.whitelist)
+    white_reg = args.white_reg
     logger.info('Extracting split alignments')
     split_reads = get_splitreads(segments_by_read)
     ins_list_all = get_insertionreads(segments_by_read)
