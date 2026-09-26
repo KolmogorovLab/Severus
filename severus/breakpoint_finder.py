@@ -2816,7 +2816,7 @@ def output_readids(double_breaks, genome_ids, out_stream):
         out_stream.write(line)
         out_stream.write("\n")
                             
-def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_files, genome_ids, control_id, thread_pool, median_cov, args):
+def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_files, genome_ids, control_id, thread_pool, median_cov, args, coverage_reads=None):
     
     if args.write_alignments:
         outpath_alignments = os.path.join(args.out_dir, "read_alignments")
@@ -2852,7 +2852,7 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
     logger.info('Starting compute_bp_coverage')
     if args.vntr_file:
         add_vntr_annot(double_breaks + ins_clusters, args)
-    get_coverage_parallel(bam_files, genome_ids, thread_pool, args.min_mapping_quality, double_breaks + ins_clusters + single_bps, args.ignore_hp)
+    get_coverage_parallel(bam_files, genome_ids, thread_pool, args.min_mapping_quality, double_breaks + ins_clusters + single_bps, args.ignore_hp, coverage_reads)
 
         
     logger.info('Filtering breakpoints')

@@ -91,14 +91,15 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind, ignore_h
     nm = read.get_tag('NM')
     indel = [b for a, b in cigar if a in [CIGAR_INS, CIGAR_DEL]]
     num_of_mismatch = nm - sum(indel)
-    total_segment_length = sum([b for a, b in cigar if a not in CIGAR_CLIP + [CIGAR_DEL]])
+    unaligned_ops = CIGAR_CLIP + [CIGAR_DEL]
+    total_segment_length = sum([b for a, b in cigar if a not in unaligned_ops])
     if total_segment_length == 0:
         return [[], []] 
     mm_rate = int(num_of_mismatch * K_MM / total_segment_length)
     error_rate = int(nm * K_MM/ total_segment_length)
     read_length = sum([k[1] for k in cigar if k[0] != CIGAR_DEL])
     strand = -1 if read.is_reverse else 1
-    sequence = read.query_sequence
+    sequence = None
     hc = 0
     clp = cigar[-1] if read.is_reverse else cigar[0]
     align_start = clp[1] if clp[0] in CIGAR_CLIP else 0
@@ -174,6 +175,8 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind, ignore_h
                 read_segments.append(ReadSegment(align_start,ins_start, ins_end, ins_pos, ins_pos, ins_pos, ins_pos, read.query_name,
                                                  read.reference_name, strand, read_length,total_segment_length,op_len, haplotype,
                                                  read.mapping_quality, genome_id, mm_rate, True, error_rate, None,PS))
+                if sequence is None:
+                    sequence = read.query_sequence
                 ins_seq = sequence[ins_start - hc: ins_end - hc]
                 read_segments[-1].ins_seq = ins_seq
                 read_segments[-1].ins_pos = (read.reference_start, read.reference_end)
@@ -330,7 +333,34 @@ def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq, ignore_hp):
     return cov_list
 
 
-def get_coverage_parallel(bam_files, genome_ids, thread_pool, min_mapq, double_breaks, ignore_hp):
+def coverage_from_intervals(intervals, positions):
+    """Count coverage from (start, end, haplotype, secondary) rows."""
+    BUFF = 50
+    positions = np.asarray(positions, dtype=np.int64)
+    coverage = np.zeros((len(positions), 6), dtype=np.int64)
+
+    def count(starts, ends, start_side, end_side):
+        return (np.searchsorted(np.sort(starts), positions, side=start_side)
+                - np.searchsorted(np.sort(ends), positions, side=end_side))
+
+    primary = intervals[intervals[:, 3] == 0]
+    for hp in np.unique(primary[:, 2]):
+        reads = primary[primary[:, 2] == hp]
+        counts = count(reads[:, 0], reads[:, 1], 'left', 'right')
+        if np.any(counts):
+            coverage[:, hp] += counts
+
+    secondary = intervals[intervals[:, 3] != 0]
+    starts, ends = secondary[:, 0], secondary[:, 1]
+    coverage[:, 5] += count(starts, ends, 'right', 'left')
+    coverage[:, 4] += count(starts, np.minimum(starts + BUFF, ends), 'right', 'left')
+    near_end = np.maximum(starts + BUFF + 1, ends - BUFF)
+    valid = near_end <= ends
+    coverage[:, 3] += count(near_end[valid], ends[valid], 'right', 'left')
+    return coverage.tolist()
+
+
+def get_coverage_parallel(bam_files, genome_ids, thread_pool, min_mapq, double_breaks, ignore_hp, coverage_reads=None):
     db_list = defaultdict(list)
     covlist = defaultdict(list)
     for db in double_breaks:
@@ -346,7 +376,15 @@ def get_coverage_parallel(bam_files, genome_ids, thread_pool, min_mapq, double_b
         covlist = defaultdict(list)
         tasks = [(bam_files[genome_id], genome_id, ref_id, pos, min_mapq, ignore_hp) for ref_id, poslist in db_list.items() for pos in poslist]
         parsing_results = None
-        parsing_results = thread_pool.starmap(get_cov, tasks)
+        if coverage_reads is None:
+            parsing_results = thread_pool.starmap(get_cov, tasks)
+        else:
+            parsing_results = []
+            for ref_id, chunks in db_list.items():
+                positions = [pos for chunk in chunks for pos in chunk]
+                intervals = coverage_reads[genome_id].get(ref_id, np.empty((0, 4), dtype=np.int64))
+                counts = coverage_from_intervals(intervals, positions)
+                parsing_results.append({(ref_id, pos): count for pos, count in zip(positions, counts)})
         for item in parsing_results:
             for key, value in item.items():
                 covlist[key] = value
@@ -355,7 +393,7 @@ def get_coverage_parallel(bam_files, genome_ids, thread_pool, min_mapq, double_b
             db.bp_2.spanning_reads[genome_id] = covlist[(db.bp_2.ref_id, db.bp_2.position)]
     
         
-def get_all_reads(bam_file, region, genome_id,sv_size,use_supplementary_tag, ignore_hp):
+def get_all_reads(bam_file, region, genome_id,sv_size,use_supplementary_tag, ignore_hp, min_mapq=None):
     """
     Yields set of split reads for each contig separately. Only reads primary alignments
     and infers the split reads from SA alignment tag
@@ -367,8 +405,13 @@ def get_all_reads(bam_file, region, genome_id,sv_size,use_supplementary_tag, ign
     read_info = np.zeros((ncol,9), dtype = int)
     ref_ind, ref_id, region_start, region_end = region
     aln_file = pysam.AlignmentFile(bam_file, "rb")
+    coverage_reads = []
     t=0
     for aln in aln_file.fetch(ref_id, region_start, region_end,  multiple_iterators=True):
+        if min_mapq is not None and not aln.is_unmapped and aln.reference_start >= region_start:
+            if aln.is_secondary or aln.mapping_quality > min_mapq:
+                hp = int(aln.get_tag('HP')) if not ignore_hp and not aln.is_secondary and aln.has_tag('HP') else 0
+                coverage_reads.append((aln.reference_start, aln.reference_end, hp, aln.is_secondary))
         if not aln.is_secondary and not aln.is_unmapped:
             new_segment, read_inf = get_segment(aln, genome_id, sv_size, use_supplementary_tag, ref_ind, ignore_hp)
             if new_segment:
@@ -390,11 +433,13 @@ def get_all_reads(bam_file, region, genome_id,sv_size,use_supplementary_tag, ign
         read_info_final = read_info[0:t-1]
     else:
         read_info_final = np.concatenate((read_info_final, read_info[0:t-1]), axis=0)                
+    if min_mapq is not None:
+        return alignments, read_info_final, np.asarray(coverage_reads, dtype=np.int64).reshape(-1, 4)
     return (alignments, read_info_final)
 
 
 def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
-                           coverage_histograms, mismatch_histograms, n90ls, bg_mmls,read_qual,read_qual_len, args):
+                           coverage_histograms, mismatch_histograms, n90ls, bg_mmls,read_qual,read_qual_len, args, coverage_reads=None):
 
     CHUNK_SIZE = 10000000
     sv_size = args.sv_size
@@ -411,9 +456,16 @@ def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
             if ctg_len - reg_end < CHUNK_SIZE:
                 reg_end = ctg_len
             fetch_list.append((j, ctg, reg_start, reg_end))
-    tasks = [(bam_file, region, genome_id, sv_size, use_supplementary_tag, ignore_hp) for region in fetch_list]
+    min_mapq = args.min_mapping_quality if coverage_reads is not None else None
+    tasks = [(bam_file, region, genome_id, sv_size, use_supplementary_tag, ignore_hp, min_mapq) for region in fetch_list]
     parsing_results = None
-    parsing_results = thread_pool.starmap(get_all_reads, tasks)
+    parsing_results = thread_pool.starmap(get_all_reads, tasks, chunksize=1)
+    if coverage_reads is not None:
+        by_reference = defaultdict(list)
+        for region, result in zip(fetch_list, parsing_results):
+            if len(result[2]):
+                by_reference[region[1]].append(result[2])
+        coverage_reads[genome_id] = {ref: np.concatenate(chunks) for ref, chunks in by_reference.items()}
     segments_by_read = defaultdict(list)
     for alignments in parsing_results:
         for aln in alignments[0]:
@@ -448,27 +500,28 @@ def update_cov_hist(parsing_results, coverage_histograms, genome_id, ref_lengths
         if alignments[1].size == 0:
             continue
         chr_id = list(ref_lengths.keys())[int(alignments[1][0][0])]
-        for j in range(len(alignments[1])):
-            if alignments[1][j][8] > args.min_mapping_quality and alignments[1][j][6] < bg_mm and alignments[1][j][3] > n90 and abs(alignments[1][j][3] - alignments[1][j][4]) < alignments[1][j][4]:
+        for row in alignments[1]:
+            if row[8] > args.min_mapping_quality and row[6] < bg_mm and row[3] > n90 and abs(row[3] - row[4]) < row[4]:
                 read_qual['PASS'] += 1
-                read_qual_len['PASS'] += alignments[1][j][4]
-                hist_start = alignments[1][j][1] // COV_WINDOW
-                hist_end = alignments[1][j][2]// COV_WINDOW
+                read_qual_len['PASS'] += row[4]
+                hist_start = row[1] // COV_WINDOW
+                hist_end = row[2]// COV_WINDOW
+                histogram = coverage_histograms[(genome_id, row[5], chr_id)]
                 for i in range(hist_start, hist_end + 1):
-                    coverage_histograms[(genome_id, alignments[1][j][5], chr_id)][i] += 1
+                    histogram[i] += 1
             else:
-                if alignments[1][j][8] < args.min_mapping_quality:
+                if row[8] < args.min_mapping_quality:
                     read_qual['FAIL_MAPQ'] += 1
-                    read_qual_len['FAIL_MAPQ'] += alignments[1][j][4]
-                elif alignments[1][j][6] > bg_mm:
+                    read_qual_len['FAIL_MAPQ'] += row[4]
+                elif row[6] > bg_mm:
                     read_qual['FAIL_MM'] += 1
-                    read_qual_len['FAIL_MM'] += alignments[1][j][4]
-                elif alignments[1][j][3] < n90:
+                    read_qual_len['FAIL_MM'] += row[4]
+                elif row[3] < n90:
                     read_qual['FAIL_READLEN'] += 1
-                    read_qual_len['FAIL_READLEN'] += alignments[1][j][4]
-                elif abs(alignments[1][j][3] - alignments[1][j][4]) > alignments[1][j][4]:
+                    read_qual_len['FAIL_READLEN'] += row[4]
+                elif abs(row[3] - row[4]) > row[4]:
                     read_qual['FAIL_ALNLEN'] += 1
-                    read_qual_len['FAIL_ALNLEN'] += alignments[1][j][4]
+                    read_qual_len['FAIL_ALNLEN'] += row[4]
 
 def update_coverage_hist(coverage_histograms,genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes, loh_out):
     
@@ -555,18 +608,29 @@ def write_readqual(segments_by_read, outpath, read_qual, read_qual_len):
 def background_mm_rat(parsing_results, multisample):
     COV_WINDOW_BG_MM = 2000
     QT = 0.95 if not multisample else 0.975
-    mm_list = []
+    counts = defaultdict(int)
     for alignments in parsing_results:
-        for aln in alignments[1]:
-            n_mm = (aln[3] // COV_WINDOW_BG_MM) +1
-            mm_list += [aln[6]] * n_mm
+        info = alignments[1]
+        if info.size:
+            rates, indices = np.unique(info[:, 6], return_inverse=True)
+            weights = np.zeros(len(rates), dtype=np.int64)
+            np.add.at(weights, indices, np.maximum(0, info[:, 3] // COV_WINDOW_BG_MM + 1))
+            for rate, weight in zip(rates, weights):
+                if weight:
+                    counts[int(rate)] += int(weight)
         for seg in alignments[0]:
             if seg.is_clipped or seg.is_insertion:
                 continue
             n_mm = ((seg.ref_end - seg.ref_start) // COV_WINDOW_BG_MM) +1
-            mm_list += [seg.mismatch_rate] * n_mm
-    bg_mm = np.quantile(mm_list, QT)
-    return bg_mm
+            if n_mm > 0:
+                counts[seg.mismatch_rate] += n_mm
+    if not counts:
+        return np.quantile([], QT)
+    values = np.array(sorted(counts))
+    cumulative = np.cumsum([counts[value] for value in values])
+    rank = (int(cumulative[-1]) - 1) * QT
+    indices = np.searchsorted(cumulative, [int(np.floor(rank)), int(np.ceil(rank))], side='right')
+    return np.quantile(values[indices], rank % 1)
 
 def init_mm_hist(ref_lengths):
     mismatch_histograms = defaultdict(list)
@@ -580,11 +644,13 @@ def update_mm_hist(parsing_results, mismatch_histograms, ref_lengths):
         if alignments[1].size == 0:
             continue
         chr_id = ref_ind[int(alignments[1][0][0])]
-        for j in range(len(alignments[1])):
-            hist_start = alignments[1][j][1] // COV_WINDOW_MM
-            hist_end = alignments[1][j][2] // COV_WINDOW_MM
+        histogram = mismatch_histograms[chr_id]
+        for row in alignments[1]:
+            hist_start = row[1] // COV_WINDOW_MM
+            hist_end = row[2] // COV_WINDOW_MM
+            mismatch_rate = int(row[6])
             for i in range(hist_start, hist_end + 1):
-                mismatch_histograms[chr_id][i].append(int(alignments[1][j][6]))
+                histogram[i].append(mismatch_rate)
     
 def background_mm_hist(segments_by_read, mismatch_histograms, bg_mm, ref_lengths):
     MED_PER = 0.1
@@ -682,16 +748,12 @@ def high_mm_check(mm_hist_high, bg_mm, seg):
         return True
 
 def _calc_nx(lengths, norm_len, rate):
-    n50 = 0
-    sum_len = 0
-    l50 = 0
-    for l in sorted(lengths, reverse=True):
-        sum_len += l
-        l50 += 1
-        if sum_len > rate * norm_len:
-            n50 = l
-            break
-    return l50, n50
+    lengths = np.sort(lengths)[::-1]
+    indices = np.flatnonzero(np.cumsum(lengths) > rate * norm_len)
+    if not len(indices):
+        return len(lengths), 0
+    index = int(indices[0])
+    return index + 1, lengths[index]
 
 def get_read_statistics(parsing_results,segments_by_read):
     ncol= sum([len(a[1]) for a in parsing_results]) + len(segments_by_read)
@@ -703,12 +765,13 @@ def get_read_statistics(parsing_results,segments_by_read):
     for alignments in parsing_results:
         if alignments[1].size == 0:
             continue
-        for i in range(len(alignments[1])):
-            alignment_lengths[t] = alignments[1][i][4]
-            read_lengths[t] = alignments[1][i][3]
-            aln_error[t] = alignments[1][i][7]
-            aln_mm[t] = alignments[1][i][6]
-            t+=1
+        info = alignments[1]
+        end = t + len(info)
+        alignment_lengths[t:end] = info[:, 4]
+        read_lengths[t:end] = info[:, 3]
+        aln_error[t:end] = info[:, 7]
+        aln_mm[t:end] = info[:, 6]
+        t = end
             
     for read in segments_by_read.values():
         aln_len = 0

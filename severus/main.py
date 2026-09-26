@@ -254,11 +254,12 @@ def main():
     read_qual = defaultdict(int)
     read_qual_len = defaultdict(int)
     bg_mm = []
+    coverage_reads = {}
     for i, bam_file in enumerate(all_bams):
         genome_id = genome_ids[i]
         logger.info(f"Parsing reads from {genome_id}")
         segments_by_read_bam = get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
-                                                      coverage_histograms, mismatch_histograms, n90, bg_mm,read_qual,read_qual_len,args)
+                                                      coverage_histograms, mismatch_histograms, n90, bg_mm,read_qual,read_qual_len,args, coverage_reads)
         segments_by_read += segments_by_read_bam
 
     args.min_aligned_length = min(n90) if not args.multisample or not args.min_len == -1 else MIN_ALIGNED_LENGTH
@@ -269,6 +270,6 @@ def main():
     logger.info('Computing coverage histogram')
     median_cov = update_coverage_hist(coverage_histograms,genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes, args.write_log_out)
 
-    double_breaks = call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_files, genome_ids, control_genomes, thread_pool, median_cov, args)
+    double_breaks = call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_files, genome_ids, control_genomes, thread_pool, median_cov, args, coverage_reads)
     
     output_graphs(double_breaks, coverage_histograms, thread_pool, target_genomes, control_genomes, genome_ids, ref_lengths, args)
