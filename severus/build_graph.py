@@ -625,7 +625,7 @@ def build_breakpoint_graph(genomic_segments, adj_segments,
     return graph, adj_clusters, db_to_cl
             
             
-def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, control_genomes, genome_ids, ref_lengths, args):
+def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, control_genomes, genome_ids, ref_lengths, bg_mm, args):
     keys = ['germline', 'somatic'] if control_genomes or args.pon_file else ['germline']
     
     for key in keys:
@@ -652,7 +652,8 @@ def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, con
         for db in double_breaks:
             db.cluster_id = 0
         
-        (genomic_segments, adj_segments) = get_genomic_segments(double_breaks, coverage_histograms, args.phase_vcf,
+        phase_vcf_for_graph = None if args.ignore_hp else args.phase_vcf
+        (genomic_segments, adj_segments) = get_genomic_segments(double_breaks, coverage_histograms, phase_vcf_for_graph,
                                                                 key, ref_lengths, args.max_genomic_len, args.min_sv_size, args.junction_vcf)
         components_list = []
         if key == 'germline':
@@ -667,8 +668,4 @@ def output_graphs(db_list, coverage_histograms, thread_pool, target_genomes, con
         output_clusters_info(adj_clusters, out_cluster_list)
         
         logger.info("\tWriting vcf")
-        write_to_vcf(double_breaks, all_ids, out_folder, key, ref_lengths, args.no_ins, args.multisample, args.junction_vcf, args.germline_genotype)
-        
-            
-        
-    
+        write_to_vcf(double_breaks, all_ids, out_folder, key, ref_lengths, args.no_ins, args.multisample, args.junction_vcf, args.germline_genotype, args.ignore_hp, bg_mm)

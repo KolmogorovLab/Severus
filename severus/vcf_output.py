@@ -13,11 +13,11 @@ class vcf_format(object):
     __slots__ = ('chrom', 'pos', 'haplotypes','haplotype', 'ID', 'sv_type','alt', 'sv_len', 'qual', 
                  'Filter', 'chr2', 'pos2','mut_type', 'tra_pos','ins_seq', 'ins_len_seq', 
                  'cluster_id','ins_len', 'detailed_type', 'prec', 'phaseset_id', 'strands', 
-                 'sample','HP', 'mate_id', 'vntr', 'low_cov', 'whitelist', 'dvls', 'drls', 'bnd_type', 'read_cluster_id')
+                 'sample','HP', 'mate_id', 'vntr', 'low_cov', 'whitelist', 'dvls', 'drls', 'bnd_type', 'read_cluster_id', 'wl_rescue')
     def __init__(self, chrom, pos, haplotypes, haplotype, ID, sv_type, alt, sv_len, qual, 
                  Filter, chr2, pos2, mut_type, cluster_id, ins_len, ins_len_seq, detailed_type, 
                  prec, phaseset_id, strands, sample, HP, mate_id, vntr,tra_pos, low_cov, whitelist,
-                 dvls, drls,bnd_type, read_cluster_id):
+                 dvls, drls,bnd_type, read_cluster_id, wl_rescue=None):
         self.chrom = chrom
         self.pos = pos
         self.haplotypes = haplotypes
@@ -50,12 +50,14 @@ class vcf_format(object):
         self.drls = drls
         self.bnd_type = bnd_type
         self.read_cluster_id = read_cluster_id
+        self.wl_rescue = wl_rescue
      
     def precision(self):
         return 'PRECISE' if self.prec else 'IMPRECISE'
     def inwhitelist(self):
         if self.whitelist:
-            return ';INSIDE_WHITELIST=TRUE'
+            rescue = ';WHITELIST_RESCUE=' + self.wl_rescue if self.wl_rescue else ''
+            return ';INSIDE_WHITELIST=TRUE' + rescue
         else:
             return ''
     
@@ -150,7 +152,7 @@ class vcf_format(object):
       
         
 class vcf_sample(object):
-    __slots__ = ('DR', 'DV', 'vaf', 'hVaf','gen_type', 'GT', 'GQ', 'genotype')
+    __slots__ = ('DR', 'DV', 'vaf', 'hVaf','gen_type', 'GT', 'GQ', 'PL', 'genotype')
     def __init__(self, DR, DV, vaf, hVaf, gen_type, genotype):
         self.DR = DR
         self.DV = DV
@@ -251,7 +253,7 @@ class vcf_sample(object):
         return f"{self.GT}:{self.vaf:.2f}:{self.hVAF()}:{self.DR}:{self.DV}"
     
     
-def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf, germline_genotype):
+def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf, germline_genotype, ignore_hp):
     vcf_list = []
     clusters = defaultdict(list)
     bnd_types = {'-+': 'DUP_LIKE', '+-': 'DEL_LIKE', '++': 'INV_LIKE', '--': 'INV_LIKE'}
@@ -298,7 +300,7 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf, germl
             MIN_SPAN = 5
             db = db_clust[0]
             hpls1 = list(set([db.haplotype_1 for db in db_clust]))
-            hpls2 = list(set([db.haplotype_1 for db in db_clust]))
+            hpls2 = list(set([db.haplotype_2 for db in db_clust]))
             for genome_id, spann_ls in db.bp_1.spanning_reads.items():
                 spann = 0
                 for hp in hpls1:
@@ -344,6 +346,9 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf, germl
                 gen_type2 = '1' if 1 in hap_type else '2'
             phaseset = db.phaseset_id
         haplotype = (db.haplotype_1, db.haplotype_2)
+        if ignore_hp:
+            phaseset = ''
+            haplotype = None
         
         drls = [[str(s) for s in db.bp_1.spanning_reads[db.genome_id][:3]], [str(s) for s in db.bp_2.spanning_reads[db.genome_id][:3]]]
         dvls = [[str(s) for s in db.dvls[0]], [str(s) for s in db.dvls[1]]]
@@ -358,7 +363,7 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf, germl
             hVaf2 = [0.0, 0.0, 0.0]
             for db in db1:
                 hVaf1[db.haplotype_1]  = db.hVaf
-                hVaf2[db.haplotype_1]  = db.hVaf
+                hVaf2[db.haplotype_2]  = db.hVaf
             sample_list[db.genome_id] = vcf_sample(db.DR, db.DV, db.vaf, hVaf1, gen_type1, germline_genotype)
             sample_list2[db.genome_id] = vcf_sample(db.DR, db.DV, db.vaf, hVaf2, gen_type2, germline_genotype)
             
@@ -399,17 +404,17 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf, germl
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID1, sv_type, alt1, db.length, db.vcf_qual, 
                                                      sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type,db.cluster_id,
                                                      has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, ID2,vntr, 
-                                                     db.tra_pos, low_cov, db.whitelist, dvls, drls, bnd_type, db.read_cluster_id))#
+                                                     db.tra_pos, low_cov, db.whitelist, dvls, drls, bnd_type, db.read_cluster_id, getattr(db, 'wl_rescue', None)))#
             vcf_list.append(vcf_format(db.bp_2.ref_id, db.bp_2.position, haplotype2, db.haplotype_2, ID2, sv_type, alt2, db.length, db.vcf_qual, 
                                                      sv_pass, db.bp_1.ref_id, db.bp_1.position, db.mut_type, db.cluster_id,
                                                      has_ins, db.ins_seq,db.sv_type, db.prec, phaseset, strands2,sample2, gen_type2, ID1,vntr, 
-                                                     db.tra_pos, low_cov,db.whitelist, dvls2, drls2, bnd_type, db.read_cluster_id))
+                                                     db.tra_pos, low_cov,db.whitelist, dvls2, drls2, bnd_type, db.read_cluster_id, getattr(db, 'wl_rescue', None)))
         elif db.is_single:
             alt= '.N' if db.direction_1 == -1 else 'N.'
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID, 'sBND', alt, db.length, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type, db.cluster_id,
                                                  has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, db.bp_1.pos2, 
-                                                 low_cov,db.whitelist, dvls, drls, bnd_type, db.read_cluster_id))
+                                                 low_cov,db.whitelist, dvls, drls, bnd_type, db.read_cluster_id, getattr(db, 'wl_rescue', None)))
             vcf_list[-1].pos2 = db.bp_1.pos2
         elif sv_type == 'INV':
             if db.direction_1 == -1:
@@ -418,7 +423,7 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf, germl
             vcf_list.append(vcf_format(db.bp_1.ref_id, pos1, haplotype, db.haplotype_1, ID, sv_type, sv_type, pos2-pos1, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, pos2, db.mut_type, db.cluster_id,
                                                  has_ins, db.ins_seq, 'reciprocal_inversion', db.prec, phaseset, strands,sample, gen_type1, 
-                                                 None,vntr, None, low_cov,db.whitelist, dvls, drls, bnd_type, db.read_cluster_id))            
+                                                 None,vntr, None, low_cov,db.whitelist, dvls, drls, bnd_type, db.read_cluster_id, getattr(db, 'wl_rescue', None)))            
         else:
             if not sv_type == 'INS' and db.bp_1.ref_id == db.bp_2.ref_id:
                 db.length = abs(db.bp_2.position - db.bp_1.position)
@@ -426,7 +431,7 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf, germl
             vcf_list.append(vcf_format(db.bp_1.ref_id, db.bp_1.position, haplotype, db.haplotype_1, ID, sv_type, sv_type, db.length, db.vcf_qual, 
                                                  sv_pass, db.bp_2.ref_id, db.bp_2.position, db.mut_type, db.cluster_id,
                                                  has_ins, db.ins_seq, db.sv_type, db.prec, phaseset, strands,sample, gen_type1, None,vntr, 
-                                                 db.tra_pos, low_cov,db.whitelist, dvls, drls, bnd_type, db.read_cluster_id))#
+                                                 db.tra_pos, low_cov,db.whitelist, dvls, drls, bnd_type, db.read_cluster_id, getattr(db, 'wl_rescue', None)))#
         
         if sv_type == 'INS':
             if not no_ins:
@@ -438,12 +443,13 @@ def db_2_vcf(double_breaks, no_ins, sample_ids, multisample, junction_vcf, germl
 
 
           
-def write_vcf_header(ref_lengths, outfile, sample_list):
+def write_vcf_header(ref_lengths, outfile, sample_list, bg_mm=None):
 
     sample = '\t'.join(sample_list)
     outfile.write("##fileformat=VCFv4.2\n")
     outfile.write('##source=Severus_v'+ __version__ + '\n')
     outfile.write('##CommandLine= '+ " ".join(sys.argv[1:]) +'\n')
+    outfile.write('##BG_MM= '+ str(bg_mm)+'\n')
     filedate = str(datetime.now()).split(' ')[0]
     outfile.write('##fileDate='+filedate+'\n')#
     for chr_id, chr_len in ref_lengths.items():
@@ -482,6 +488,7 @@ def write_vcf_header(ref_lengths, outfile, sample_list):
     outfile.write("##INFO=<ID=BND_TYPE,Number=1,Type=String,Description=\"Junction type\">\n")
     outfile.write("##INFO=<ID=LOW_COV_IN,Number=1,Type=String,Description=\"Samples that has low coverage in that region\">\n")
     outfile.write("##INFO=<ID=INSIDE_WHITELIST,Number=1,Type=String,Description=\"SVs within the whitelist bed file\">\n")
+    outfile.write("##INFO=<ID=WHITELIST_RESCUE,Number=1,Type=String,Description=\"Whitelist rescue reason: WHITELIST, RECIPROCAL or SUPPORTED_NEIGHBOUR\">\n")
 
     outfile.write("##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n")
     #outfile.write("##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotyping quality\">\n")
@@ -513,12 +520,12 @@ def write_germline_vcf(vcf_list, outfile,ref_lengths):
     outfile.close()
     
     
-def write_to_vcf(double_breaks, all_ids, outpath, out_key, ref_lengths, no_ins, multisample, junction_vcf, germline_genotype):            
-    vcf_list = db_2_vcf(double_breaks, no_ins, all_ids, multisample, junction_vcf, germline_genotype)
+def write_to_vcf(double_breaks, all_ids, outpath, out_key, ref_lengths, no_ins, multisample, junction_vcf, germline_genotype, ignore_hp, bg_mm=None):
+    vcf_list = db_2_vcf(double_breaks, no_ins, all_ids, multisample, junction_vcf, germline_genotype, ignore_hp)
     key = 'somatic' if out_key == 'somatic' else 'all'
     sample_ids = [target_id.replace('.bam' , '') for target_id in all_ids]
     
     germline_outfile = open(os.path.join(outpath, 'severus_' + key + ".vcf"), "w")
-    write_vcf_header(ref_lengths, germline_outfile, sample_ids)
+    write_vcf_header(ref_lengths, germline_outfile, sample_ids, bg_mm)
     write_germline_vcf(vcf_list, germline_outfile,ref_lengths)
     

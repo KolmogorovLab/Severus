@@ -7,7 +7,7 @@ of tentative 2-breaks, in particular inversion coordinates
 
 
 import numpy as np
-from collections import defaultdict, Counter
+from collections import defaultdict, Counter, namedtuple
 import pysam
 import os
 import bisect
@@ -18,6 +18,7 @@ import gzip
 
 from severus.bam_processing import _calc_nx, extract_clipped_end, get_coverage_parallel
 from severus.resolve_vntr import read_vntr_file
+from severus.bam_processing import _vntr_indel_size, VNTR_MIN_INDEL
 
 logger = logging.getLogger()
 
@@ -30,11 +31,16 @@ MAX_CONNECTION= 1000
 MAX_UNALIGNED_LEN = 500
 COV_WINDOW = 1000
 CHUNK_SIZE = 10000000
-        
+VntrSegment = namedtuple("VntrSegment", [
+    "region_id", "n_ins", "n_del", "vntr_status", "indel_pos", "segment", "chrom"
+])
+VntrClusterKey = namedtuple("VntrClusterKey", [
+    "region_id", "event_type", "chrom"
+])
+
 class Breakpoint(object):
     __slots__ = ("ref_id", "position","dir_1", "spanning_reads", "connections", 'prec',
-                 "read_ids", "pos2", 'id', "is_insertion", "insertion_size", "qual", 
-                 "CI", "is_single", 'whitelist', 'vaf')
+                 "read_ids", "pos2", 'id', "is_insertion", "insertion_size", "qual", "CI", "is_single", 'whitelist', 'vaf')
     def __init__(self, ref_id, ref_position, dir_1, qual, CI):
         self.ref_id = ref_id
         self.position = ref_position
@@ -73,7 +79,7 @@ class DoubleBreak(object):
     __slots__ = ("bp_1", "direction_1", "bp_2", "direction_2", "genome_id","haplotype_1",'haplotype_2',"supp",'supp_read_ids',
                  'length','genotype','edgestyle', 'is_pass', 'ins_seq', 'mut_type', 'is_dup', 'has_ins','subgraph_id', 'sv_type','tra_pos',
                  'DR', 'DV', 'hVaf', 'vaf', 'prec', 'phaseset_id', 'cluster_id','read_cluster_id', 'gr_id', 'vcf_id', 'vcf_sv_type','vaf_pass', 'vcf_qual', 
-                 'haplotypes', 'is_single', 'vntr', 'whitelist', 'dvls')
+                 'haplotypes', 'is_single', 'vntr', 'whitelist', 'dvls', 'wl_rescue')
     def __init__(self, bp_1, direction_1, bp_2, direction_2, genome_id, haplotype_1, haplotype_2, 
                  supp, supp_read_ids, length):
         self.bp_1 = bp_1
@@ -112,7 +118,8 @@ class DoubleBreak(object):
         self.vntr = None
         self.tra_pos = None
         self.whitelist = None
-        self.dvls = None
+        self.wl_rescue = None
+        self.dvls = [[0,0,0], [0,0,0]]
         
     def to_string(self):
         strand_1 = "+" if self.direction_1 > 0 else "-"
@@ -213,7 +220,6 @@ class UnionFind:
             parent[rb] = ra
             rank[ra] += 1
             
-            
 def get_pos(segls, bp_dir):
     dirls = ['right', 'left']
     s1 = segls[bp_dir]
@@ -246,19 +252,21 @@ def get_breakpoints(split_reads, ref_lengths, white_reg, args):
         seq_breakpoints_r[s1.ref_id].append(rc)
         seq_breakpoints_l[s2.ref_id].append(rc)
        
-    for read_segments in split_reads:
-        read_segments.sort(key=lambda x:(x.align_start, x.read_start))
-        read_segments = [r for r in read_segments if r.is_pass == 'PASS' or r.segment_length >= args.max_segment_dist]
+    for read_segments1 in split_reads:
+        read_segments1.sort(key=lambda x:(x.align_start, x.read_start))
+        read_segments = [r for r in read_segments1 if r.is_pass == 'PASS' or r.segment_length >= args.max_segment_dist]
+        
         for s1, s2 in zip(read_segments[:-1], read_segments[1:]):
             if s2.read_start - s1.read_end < args.max_segment_dist:
                 _add_double(s1, s2)
     all_breaks = []
+    whitelist_cache = {}
     for seq, bp_pos in seq_breakpoints_r.items():
-        bps = cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads,0)
+        bps = cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads,0, white_reg, whitelist_cache)
         if bps:
             all_breaks += bps
     for seq, bp_pos in seq_breakpoints_l.items():  
-        bps = cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads,1)
+        bps = cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads,1, white_reg, whitelist_cache)
         if bps:
             all_breaks += bps
     if white_reg:
@@ -297,11 +305,8 @@ def get_breakpoints(split_reads, ref_lengths, white_reg, args):
 
 def add_whitelist(all_breaks, white_reg):
     for bp in all_breaks:
-        if bp.ref_id in white_reg.keys():
-            ind1 = bisect.bisect_right(white_reg[bp.ref_id][0], bp.position)
-            ind2 = bisect.bisect_left(white_reg[bp.ref_id][1], bp.position)
-            if ind1 - ind2 == 1:
-               bp.whitelist = True
+        if wl_region_id(white_reg, bp.ref_id, bp.position) is not None:
+            bp.whitelist = True
     
 def merge_bps(all_breaks):
     MIN_DIFF = 50
@@ -332,21 +337,36 @@ def get_single_bps(bp_ls, bp_counts):
                 
     return single_bps
     
-def cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_reads, bp_dir):
+def cluster_bp(seq, bp_pos, clust_len, min_ref_flank, ref_lengths, min_supp, bp_dir, white_reg, whitelist_cache=None):
+    if whitelist_cache is None:
+        whitelist_cache = {}
+
+    def _pair_whitelisted(rc):
+        key = (id(rc[0]), id(rc[1]))
+        if key not in whitelist_cache:
+            whitelist_cache[key] = any(
+                wl_region_id(white_reg, rc[i].ref_id, get_pos(rc, i)[0]) is not None
+                for i in (0, 1)
+            )
+        return whitelist_cache[key]
+
+    def _keep_cluster(cl):
+        if len(cl) >= min_supp:
+            return True
+        return bool(white_reg) and any(_pair_whitelisted(rc) for rc in cl)
 
     clusters = []
     cur_cluster = []
     bp_list = []
-    min_supp = min(2, min_reads)
     bp_pos.sort(key=lambda bp: (get_pos(bp, bp_dir)[2], get_pos(bp, bp_dir)[0]))
     for rc in bp_pos:
         if cur_cluster and abs(get_pos(rc,bp_dir)[0] - get_pos(cur_cluster[-1], bp_dir)[0]) > clust_len:
-            if len(cur_cluster) >= min_supp:
+            if _keep_cluster(cur_cluster):
                 clusters.append(cur_cluster)
             cur_cluster = [rc]
         else:
             cur_cluster.append(rc)
-    if cur_cluster and len(cur_cluster) >= min_supp:
+    if cur_cluster and _keep_cluster(cur_cluster):
         clusters.append(cur_cluster)
         
     for cl in clusters:
@@ -449,7 +469,7 @@ def get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads, bp_ls, multisample):
             
     if by_genome_id_pass.values() or bp_1.whitelist or bp_2.whitelist:
         is_pass = 'PASS'
-        whitelist = True if bp_1.whitelist or bp_2.whitelist else None
+        
         if by_genome_id_pass.values() and max(by_genome_id_pass.values()) < min_reads:
             is_pass = 'FAIL'
             
@@ -462,6 +482,10 @@ def get_double_breaks(bp_1, bp_2, cl, sv_size, min_reads, bp_ls, multisample):
             
         if prec == 0 and length_bp > 0 and multisample and min([len(ur) for ur in unique_reads.values()]) <= 1:
             is_pass = 'FAIL_IMPRECISE_MULTISAMPLE'
+            
+        whitelist = True if bp_1.whitelist or bp_2.whitelist else None
+        if whitelist:
+            is_pass = 'PASS'
       
         for keys in unique_reads.keys():
             genome_id = keys[0]
@@ -588,6 +612,14 @@ def match_breakends(double_breaks):
             for db in cl[2]:
                 db.bp_2.connections = conn    
 
+def check_inread(cl, conn_1):
+    inread = [1 for r1, r2 in conn_1[:min(10, len(conn_1))] if r1.ID == r2.ID]
+    if inread:
+        for db in cl:
+            db.bp_1.spanning_reads[db.genome_id][db.haplotype_1] = max(0, db.bp_1.spanning_reads[db.genome_id][db.haplotype_1] - db.supp)
+            db.bp_2.spanning_reads[db.genome_id][db.haplotype_2] = max(0, db.bp_2.spanning_reads[db.genome_id][db.haplotype_2] - db.supp)
+    return inread
+    
 
 def check_db(cl, conn_1, ind):
     PASS_2_FAIL_RAT = 0.5
@@ -602,12 +634,6 @@ def check_db(cl, conn_1, ind):
     if db.bp_1.ref_id == db.bp_2.ref_id and db.bp_1.position > db.bp_2.position:
         return 'FAIL_MAP_CONS'
     genome_ids = list(set([db.genome_id for db in cl]))
-    if ind == 0:
-        inread = [1 for r1, r2 in conn_1[:min(10, len(conn_1))] if r1.ID == r2.ID]
-        if inread:
-            for db in cl:
-                db.bp_1.spanning_reads[db.genome_id][db.haplotype_1] = max(0, db.bp_1.spanning_reads[db.genome_id][db.haplotype_1] - db.supp)
-                db.bp_2.spanning_reads[db.genome_id][db.haplotype_2] = max(0, db.bp_2.spanning_reads[db.genome_id][db.haplotype_2] - db.supp)
     conn_pass_1 =[cn for cn in conn_1 if cn[ind].is_pass == 'PASS']
     conn_count_1 = Counter([cn[ind].is_pass for cn in conn_1])
     supp_read = sum([db.supp for db in cl])
@@ -708,34 +734,74 @@ def add_single_bp(cl, dir_1,single_bps):
                     single_bps.append(db2)
             
             
-def multisample_filter(clusters):
-    MIN_MULT=2
-    supp = []
-    for cl in clusters.values():
-        if not 'PASS' in [db.is_pass for db in cl]:
-            continue        
-        supp = [1 for db in cl if db.supp < MIN_MULT]
-        if supp:
-            for db in cl:
-                db.is_pass = 'FAIL_MULTISAMPLE'          
+         
                 
-def double_breaks_filter(double_breaks, single_bps, min_supp, control_id, sv_size, multisample, cov_thr):
-
+def double_breaks_filter(double_breaks, single_bps, min_supp, control_id, sv_size, multisample, cov_thr, lowq):
+    
+    def _chimera_filter(cl):
+        MIN_DIFF = 200
+        db = cl[0]
+        supp_read_ids = []
+        if db.bp_1.dir_1 == db.bp_2.dir_1 and db.bp_1.ref_id == db.bp_2.ref_id:
+            for db in cl:
+                if len(supp_read_ids) < 250:
+                    supp_read_ids += db.supp_read_ids
+            len_diff = [max(abs(c[0].ref_start- c[1].ref_start), abs(c[0].ref_end - c[1].ref_end)) for c in db.bp_1.connections if c[0].read_id in supp_read_ids]
+            len_diff = [l for l in len_diff if l > MIN_DIFF]
+            if len(len_diff) < 3:
+                return True
+                
+    def _lowq_CI_filter(clusters):
+        MAX_CI = 100
+        for cl in clusters.values():
+            db = cl[0]
+            if not 'PASS' in [db.is_pass for db in cl]:
+                continue
+            if max([db.bp_1.CI, db.bp_2.CI]) > MAX_CI:
+                for db in cl:
+                    db.is_pass = 'FAIL_LOW_CI'
+    
+    def _multisample_filter(clusters):
+        MIN_MULT=2
+        supp = []
+        for cl in clusters.values():
+            if not 'PASS' in [db.is_pass for db in cl]:
+                continue        
+            supp = [1 for db in cl if db.supp < MIN_MULT]
+            if supp:
+                for db in cl:
+                    db.is_pass = 'FAIL_MULTISAMPLE' 
+                    
     NUM_HAPLOTYPES = [0,1,2]
     MAX_STD = 25
     MIN_QUAL = 55
     clusters = defaultdict(list) 
     for br in double_breaks:
         clusters[br.to_string()].append(br)
+    
     for cl in clusters.values():
         db = cl[0]
         if not 'PASS' in [db.is_pass for db in cl]:
             continue
+        if _chimera_filter(cl):
+            for db1 in cl:
+                db1.is_pass = 'FAIL_CHIMERA'
+            continue
+            
         conn_1 = db.bp_1.connections
         conn_2 = db.bp_2.connections#
+        inread = check_inread(cl, conn_1)
         fail1 = check_db(cl, conn_1, 0)
         fail2 = check_db(cl, conn_2, 1)
-        if not fail1 and fail2:
+        if inread and (fail1 or fail2):
+            fail1 = fail2 = fail1 if not fail1 else fail2
+        
+        if not cl[0].whitelist and cl[0].vntr and (fail1 or fail2):
+            fail0 = fail1 if fail1 else fail2
+            for db1 in cl:
+                db1.is_pass = fail0
+        
+        elif not fail1 and fail2:
             if not cl[0].whitelist:
                 add_single_bp(cl, 0, single_bps)
         elif not fail2 and fail1:
@@ -787,7 +853,9 @@ def double_breaks_filter(double_breaks, single_bps, min_supp, control_id, sv_siz
                     for db1 in cl:
                         db1.is_pass = 'FAIL_LOWCOV_NORMAL'
     if multisample: 
-        multisample_filter(clusters)
+        _multisample_filter(clusters)
+    if lowq:
+        _lowq_CI_filter(clusters)
         
     match_haplotypes(double_breaks)
     double_breaks = [db for db in double_breaks if not db.is_single]
@@ -880,7 +948,7 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, white_reg, args):
     CV_THR = 0.2
     SV_LEN_THR = 0.25
     sv_len_diff = args.bp_cluster_size
-    min_reads = args.bp_min_support
+    min_reads = 3
     min_ref_flank = args.min_ref_flank 
     sv_size = args.min_sv_size
     MIN_FULL_READ_SUPP = 2
@@ -960,11 +1028,8 @@ def extract_insertions(ins_list, clipped_clusters,ref_lengths, white_reg, args):
                     clipped_to_remove.append(cl2)
                 if not by_genome_id_pass.values() or not max(by_genome_id_pass.values()) >= min_reads:
                     continue#
-                if white_reg and seq in white_reg.keys():
-                    ind1 = bisect.bisect_right(white_reg[seq][0], position)
-                    ind2 = bisect.bisect_left(white_reg[seq][1], position)
-                    if ind1 - ind2 == 1:
-                       whitelist = True
+                if wl_region_id(white_reg, seq, position) is not None:
+                    whitelist = True
                 for key, unique_read in unique_reads.items():
                     bp_1 = Breakpoint(seq, position, -1, mapq, max(pos_list) - min(pos_list))
                     bp_1.read_ids = [x.read_id for x in unique_read]
@@ -1056,13 +1121,14 @@ def match_small_ins(ins_clusters, control_id):
     MIN_SIM = 0.7
     ins_ls = defaultdict(list)
     for ins in ins_clusters:
+        if ins.vntr is not None:
+            continue
         ins_ls[ins.bp_1.ref_id].append(ins)
     
     for insls in ins_ls.values():
         clusters = defaultdict(list)
         for ins in insls:
             clusters[ins.to_string()].append(ins)
-            
         for ins1, ins2 in zip(list(clusters.values())[:-1], list(clusters.values())[1:]):
             if ins2[0].bp_1.position - ins1[0].bp_1.position < MERGE_THR:
                 ins_seq1 = ins1[0].ins_seq
@@ -1217,7 +1283,7 @@ def check_normal_cov(single_bps, control_id):
 def filter_single_bp(single_bps, cont_id, control_vaf, vaf_thr, min_supp, median_cov, pon_file, ref_lengths):
     sbp_list = []
     QUAL_THR = 37
-    VAF_THR = 0.1
+    VAF_THR = 0.25
     MIN_SUPP = 0.25
     MIN_PREC_THR = 3
     min_supp = max([min_supp, median_cov * MIN_SUPP])
@@ -1340,7 +1406,8 @@ def tra_to_ins(ins_list_pos, ins_list, bp1, bp2, dir_bp, dbs, ins_clusters, doub
     INS_WIN = 2000
     total_supp_thr = 2
     MAX_DEPTH = 10000
-    #MIN_DIFF = 50
+    #min_sv_size = 500
+    MAX_DIFF = 500
     
     ins_1 = ins_list_pos[bp1.ref_id]
     strt = bisect.bisect_left(ins_1, bp1.position - INS_WIN)
@@ -1349,9 +1416,9 @@ def tra_to_ins(ins_list_pos, ins_list, bp1, bp2, dir_bp, dbs, ins_clusters, doub
     #seglen = 0
     db = dbs[0]
     if len(bp1.connections) > MAX_DEPTH or len(bp2.connections) > MAX_DEPTH:
-        med_seg_len = int( np.quantile([cn[slen].segment_length for cn in bp1.connections[:MAX_DEPTH]],0.90))
+        med_seg_len = int( np.quantile([cn[slen].segment_length for cn in bp1.connections[:MAX_DEPTH]],0.75))
     else:
-        med_seg_len = int( np.quantile([cn[slen].segment_length for cn in bp2.connections if cn in bp1.connections],0.90))
+        med_seg_len = int( np.quantile([cn[slen].segment_length for cn in bp2.connections if cn in bp1.connections],0.75))
     
     #seg_len = sorted([cn.seg_len[slen] for cn in bp2.connections if cn in bp1.connections])
     #if seg_len[-1] - seg_len[0] < MIN_DIFF:
@@ -1367,7 +1434,7 @@ def tra_to_ins(ins_list_pos, ins_list, bp1, bp2, dir_bp, dbs, ins_clusters, doub
         hp_list = defaultdict(list)
         ins = ins_cl[0]
         total_supp = 0
-        if (ins.length + min_sv_size) < abs(ins.bp_1.position - bp1.position) or (ins.length + min_sv_size) < med_seg_len:
+        if abs(ins.bp_1.position - bp1.position) > (ins.length + min_sv_size) or (ins.length + MAX_DIFF) < med_seg_len:
             continue
         #if seglen and abs(ins.length - seglen) > MIN_DIFF:
         #    continue
@@ -1396,6 +1463,7 @@ def tra_to_ins(ins_list_pos, ins_list, bp1, bp2, dir_bp, dbs, ins_clusters, doub
                 ins_clusters.append(DoubleBreak(ins.bp_1, ins.direction_1, ins.bp_2, ins.direction_2, db.genome_id, db.haplotype_1,  db.haplotype_1, db.supp, db.supp_read_ids, ins.length))
                 ins_clusters[-1].tra_pos = tra_pos
                 ins_clusters[-1].ins_seq = ins.ins_seq
+                ins_clusters[-1].vntr = ins.vntr
                 
         if total_supp > total_supp_thr:
             for db in dbs:
@@ -1515,7 +1583,7 @@ def get_insseq(bam_file,ref_id, pos, val, ref):
             
     elif bam_file.endswith(".cram"):
         aln_file = pysam.AlignmentFile(bam_file, "rc", reference_filename=ref)
-        
+
     for aln in aln_file.fetch(ref_id, pos * CHUNK_SIZE, (pos+1) * CHUNK_SIZE,  multiple_iterators=True):
         if aln.query_name in read_ids and not aln.is_supplementary and not aln.is_secondary and not aln.is_unmapped:
             st_pos,end_pos = [v[2] for v in val if v[0] == aln.query_name][0]
@@ -1531,7 +1599,6 @@ def calc_vaf(db_list):
         for db in db1:
             if db.is_pass == 'FAIL_MERGED_HP':
                 continue
-            
             if db.bp_2.is_insertion:
                 DR1 = max([0,db.bp_1.spanning_reads[db.genome_id][db.haplotype_1] - db.supp])
             else:
@@ -1545,10 +1612,10 @@ def calc_vaf(db_list):
         DR = int(np.mean([span_bp1, span_bp2]))
         if db.bp_2.is_insertion:
             DR = max([0,span_bp1 - DV])
-            
-        vaf1 = DV / (DV + span_bp1) if DV > 0 else 0
-        vaf2 = DV / (DV + span_bp1) if DV > 0 else 0    
-        vaf =  DV / (DV + DR) if DV > 0 else 0
+         
+        vaf1 = round(DV / (DV + span_bp1) if DV > 0 else 0,2)
+        vaf2 = round(DV / (DV + span_bp2) if DV > 0 else 0,2)
+        vaf =  round(DV / (DV + DR) if DV > 0 else 0,2)
         for db in db1:
             db.DR = DR
             db.DV = DV
@@ -1556,25 +1623,27 @@ def calc_vaf(db_list):
             db.bp_1.vaf = vaf1
             db.bp_2.vaf = vaf2
 
+
+    
 def add_mut_type(db_list, control_id, control_vaf):
+    def _get_mut_type(db1):
+        if db1.is_single and control_id in [c[0].genome_id for c in db1.bp_1.connections]:
+            return 'germline'
+        if not sample_ids == [control_id] and (not control_id in sample_ids or db_list[control_id][0].vaf <= control_vaf):
+            return 'somatic'
+        pass_list = [db.is_pass for dbs in db_list.values() for db in dbs]
+        if 'FAIL_LOWCOV_OTHER' in pass_list and not 'PASS' in pass_list:
+            return 'germline'
+        return 'germline'
+    
     mut_type = 'germline'#
     sample_ids = list(db_list.keys())
     db1 = db_list[sample_ids[0]][0]
-    
-    if not sample_ids == [control_id] and (not control_id in sample_ids or db_list[control_id][0].vaf <= control_vaf):
-        mut_type = 'somatic'
-    if db1.is_single and control_id in [c[0].genome_id for c in db1.bp_1.connections]:
-        mut_type = 'germline'
-    for genome_id, db1 in db_list.items():
-        if genome_id == control_id:
-            for db in db1:
-                db.mut_type = 'germline'
-        else:
-            pass_list = [db.is_pass for db in db1]
-            if 'FAIL_LOWCOV_OTHER' in pass_list and not 'PASS' in pass_list:
-                mut_type = 'germline'
-            for db in db1:
-                db.mut_type = mut_type
+    mut_type = _get_mut_type(db1)
+        
+    for dbs in db_list.values():
+        for db in dbs:
+            db.mut_type = mut_type
         
 
 def calc_gentype(db_list):
@@ -1588,41 +1657,36 @@ def calc_gentype(db_list):
                 db.genotype = gentype1
         
     
-def annotate_mut_type(double_breaks, control_id, control_vaf, vaf_thr, min_supp, pon_file, ref_lengths):
+def annotate_mut_type(double_breaks, control_id, control_vaf, vaf_thr, min_supp, pon_file, ref_lengths, vntr_file=None):
     clusters = defaultdict(list)
     if pon_file:
         pon_list = extract_pon(pon_file, ref_lengths)
+        vntr_regions = _vntr_regions_by_id(vntr_file)
 
     for br in double_breaks:
         clusters[br.to_string()].append(br)
         
     for db_clust in clusters.values():
+        db0 = db_clust[0]
         vaf_pass = 'FAIL'
         db_list = defaultdict(list)
         for db in db_clust:
             db_list[db.genome_id].append(db)
         calc_gentype(db_list)
         calc_vaf(db_list)
-        vaf_list = [db.bp_1.vaf for db in db_clust] + [db.bp_2.vaf for db in db_clust]
+        vaf_list = [db.bp_1.vaf for db in db_clust] + [db.bp_2.vaf for db in db_clust] + [db.vaf for db in db_clust]
         supp_list = [db.DV for db in db_clust]
-        if max(vaf_list) >= vaf_thr and max(supp_list) >= min_supp:
+        vaf_thr1 = vaf_thr if not db0.vntr else 0.25
+        if max(vaf_list) >= vaf_thr1 and max(supp_list) >= min_supp:
             vaf_pass = 'PASS'
-            
         for db in db_clust:
             db.vaf_pass = vaf_pass
-        
-        if control_id and not db.mut_type:
+        if db.vaf_pass == 'FAIL' and db.is_pass == 'PASS':
+            db.is_pass = 'FAIL_LOW_SUPP'
+        if control_id and not db0.mut_type:
             add_mut_type(db_list, control_id, control_vaf)
-            
-        if pon_file:
-            pon_ls = pon_list[db_clust[0].bp_1.ref_id]
-            if not db_clust[0].bp_1.ref_id == db_clust[0].bp_2.ref_id:
-                pon_ls = pon_list[(db_clust[0].bp_1.ref_id,db_clust[0].bp_2.ref_id)]
-            if not pon_ls:
-                for db in db_clust:
-                    db.mut_type = 'somatic'
-                continue
-            add_pon(db_clust, pon_ls)
+        if pon_file and not db0.mut_type == 'germline':
+            add_pon(db_clust, pon_list, vntr_regions)
 
 def add_sv_type(double_breaks, junction_vcf):
     clusters = defaultdict(list)
@@ -1669,30 +1733,120 @@ def filter_germline_db(double_breaks):
     return db_list
 
 def whitebed(bed_file):
-    regions = defaultdict(list)
-    if bed_file.endswith('.bed'):
-        f = open(bed_file)
-    else:
-        f = gzip.open(bed_file,'rt')
-    for line in f:
-        seq, pos1, pos2 = line.strip().split()[:3]
-        pos1, pos2  = int(pos1), int(pos2)
-        if seq in regions.keys():
-            regions[0].append(pos1)
-            regions[1].append(pos2)
-        else:
-            regions[seq] = [[pos1], [pos2]]
+    """Load sorted, merged intervals once; preserve inclusive endpoint checks."""
+    intervals = defaultdict(list)
+    opener = gzip.open if str(bed_file).endswith('.gz') else open
+    with opener(bed_file, 'rt') as bed:
+        for line in bed:
+            if not line.strip() or line.lstrip().startswith(('#', 'track', 'browser')):
+                continue
+            seq, start, end = line.split()[:3]
+            start, end = int(start), int(end)
+            if end < start:
+                raise ValueError('Whitelist interval ends before it starts: ' + line.strip())
+            intervals[seq].append((start, end))
+    regions = {}
+    for seq, entries in intervals.items():
+        merged = []
+        for start, end in sorted(entries):
+            if merged and start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+        regions[seq] = ([x[0] for x in merged], [x[1] for x in merged])
     return regions
 
-def filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segments_by_read, bam_files, thread_pool, args):
+
+WL_CLUSTER_MIN_SUPP = 2
+
+
+def wl_region_id(white_reg, ref_id, position):
+    if not white_reg or ref_id not in white_reg:
+        return None
+    starts, ends = white_reg[ref_id]
+    ind = bisect.bisect_right(starts, position) - 1
+    if ind >= 0 and position <= ends[ind]:
+        return (ref_id, ind)
+    return None
+
+
+def wl_same_region(db, white_reg):
+    reg_1 = wl_region_id(white_reg, db.bp_1.ref_id, db.bp_1.position)
+    return reg_1 is not None and reg_1 == wl_region_id(white_reg, db.bp_2.ref_id, db.bp_2.position)
+
+
+def build_junction_index(double_breaks):
+    index = defaultdict(list)
+    seen = set()
+    for db in double_breaks:
+        if db.bp_2.is_insertion or db.is_single:
+            continue
+        key = db.to_string()
+        if key in seen:
+            continue
+        seen.add(key)
+        entry_1 = (key, db.bp_1.position, db.direction_1, db.bp_2.position, db.direction_2, db.DV)
+        entry_2 = (key, db.bp_2.position, db.direction_2, db.bp_1.position, db.direction_1, db.DV)
+        index[(db.bp_1.ref_id, db.bp_2.ref_id)].append(entry_1)
+        index[(db.bp_2.ref_id, db.bp_1.ref_id)].append(entry_2)
+    sorted_index = {}
+    for refs, entries in index.items():
+        entries.sort(key=lambda entry: entry[1])
+        sorted_index[refs] = ([entry[1] for entry in entries], entries)
+    return sorted_index
+
+
+def wl_corroboration(db, junction_index, wl_tol):
+    key = db.to_string()
+    if not junction_index:
+        return None
+    positions, entries = junction_index.get((db.bp_1.ref_id, db.bp_2.ref_id), ([], []))
+    lower = bisect.bisect_left(positions, db.bp_1.position - wl_tol)
+    upper = bisect.bisect_right(positions, db.bp_1.position + wl_tol)
+    for ind in range(lower, upper):
+        okey, opos_1, odir_1, opos_2, odir_2, odv = entries[ind]
+        if okey == key:
+            continue
+        if abs(opos_1 - db.bp_1.position) > wl_tol or abs(opos_2 - db.bp_2.position) > wl_tol:
+            continue
+        if odir_1 == -db.direction_1 and odir_2 == -db.direction_2:
+            return 'RECIPROCAL'
+        if odv >= WL_CLUSTER_MIN_SUPP:
+            return 'SUPPORTED_NEIGHBOUR'
+    return None
+
+
+def filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segments_by_read, bam_files, thread_pool, args, white_reg):
 
     min_sv_size = args.min_sv_size
     ins_seq = args.ins_seq
     single_bp = args.single_bp
     
+    wl_mode = getattr(args, 'whitelist_single_read', 'reciprocal')
+    wl_tol = getattr(args, 'whitelist_reciprocal_dist') if getattr(args, 'whitelist_reciprocal_dist') else args.bp_cluster_size
+    
+    #Built once, and only when a junction can actually be refused for lack of a partner.
+    junction_index = build_junction_index(double_breaks) if wl_mode == 'reciprocal' and white_reg else None
+    
     db_list = []
     for db in double_breaks:
-        if (db.is_pass == 'PASS' and db.vaf_pass == 'PASS' and db.vcf_qual) or db.whitelist:
+        if (db.is_pass == 'PASS' and db.vaf_pass == 'PASS' and db.vcf_qual):
+            db_list.append(db)
+            continue
+        if not db.whitelist:
+            continue
+        if (db.DV >= WL_CLUSTER_MIN_SUPP or wl_mode == 'any'
+                or db.bp_2.is_insertion or db.is_single):
+            db.wl_rescue = 'WHITELIST'
+            db_list.append(db)
+            continue
+        if wl_mode == 'off':
+            continue
+        if not getattr(args, 'whitelist_allow_intra_region', False) and wl_same_region(db, white_reg):
+            continue
+        reason = wl_corroboration(db, junction_index, wl_tol)
+        if reason:
+            db.wl_rescue = reason
             db_list.append(db)
         
     cluster_db(db_list, coverage_histograms, min_sv_size)
@@ -1706,90 +1860,6 @@ def filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segmen
     db_list = filter_germline_db(db_list)
     return db_list
 
-def check_vntr(db, vntr_list):
-    tr_reg = vntr_list[db.bp_1.ref_id]
-    if tr_reg:
-        strt = bisect.bisect_right(tr_reg[2], db.bp_1.position)
-        end = bisect.bisect_left(tr_reg[3], db.bp_2.position)
-        if strt - end == 1:
-            return (tr_reg[2][strt-1], tr_reg[3][strt-1])
-        
-def add_vntr_annot(double_breaks, args):
-   
-    vntr_list = read_vntr_file(args.vntr_file)
-    add_sv_type(double_breaks, args.junction_vcf)
-    clusters = defaultdict(list)
-    vntr_clusters = defaultdict(list)
-    MERGE_THR = 150
-    MERGE_RAT = 0.25
-    for br in double_breaks:
-        if br.bp_1.ref_id == br.bp_2.ref_id and not br.direction_1 == br.direction_2:
-            clusters[br.to_string()].append(br)
-    
-    for cl in clusters.values():
-        vntr = check_vntr(cl[0], vntr_list)
-        if vntr:
-            vntr_clusters[(cl[0].bp_1.ref_id, vntr)].append(cl)
-            for db in cl:
-                db.vntr = vntr
-            if cl[0].vcf_sv_type == 'BND':
-                pass_conn = [1 for (a,b) in cl[0].bp_1.connections if not a.is_pass == b.is_pass == 'vntr_only']
-                if len(pass_conn) < 2:
-                    for db in cl:
-                        db.is_pass = 'FAIL_VNTR'
-            else:
-                pass_conn = [1 for a in cl[0].bp_1.connections if not a.is_pass == 'vntr_only']
-                if len(pass_conn) < 2:
-                    for db in cl:
-                        db.is_pass = 'FAIL_VNTR'
-    
-    for vntr_cls in vntr_clusters.values():
-        if len(vntr_cls) > 3:
-            for cl in vntr_cls:
-                for db in cl:
-                    db.is_pass = 'FAIL_COMPLEX_VNTR'
-        elif len(vntr_cls) > 1:
-            dbs_type = defaultdict(list)
-            for cl in vntr_cls:
-                dbs_type[cl[0].vcf_sv_type].append(cl)
-            for key, del_dbs in dbs_type.items():
-                if len(del_dbs) > 1:
-                    del_dbs.sort(key=lambda s: s[0].length)
-                    clusters = []
-                    cur_cluster = []
-                    for cl in del_dbs:
-                        if cur_cluster and cl[0].length - cur_cluster[-1][0].length > max(MERGE_THR, cl[0].length * MERGE_RAT):
-                            clusters.append(cur_cluster)
-                            cur_cluster = [cl]
-                        else:
-                            cur_cluster.append(cl)
-                    if cur_cluster:
-                        clusters.append(cur_cluster)
-                    for cl in clusters:
-                        if len(cl) > 1:
-                            new_len = int(np.mean([c[0].length for c in cl]))
-                            by_genome_id = defaultdict(list)
-                            bp_1 = cl[0][0].bp_1
-                            bp_2 = cl[0][0].bp_2
-                            if key == 'BND':
-                                bp_2.position = bp_1.position + new_len
-                            for c in cl:
-                                for db in c:
-                                    by_genome_id[(db.genome_id, db.haplotype_1)].append(db)
-                            for dbs in by_genome_id.values():
-                                dbs[0].bp_1 = bp_1
-                                dbs[0].bp_2 = bp_2
-                                dbs[0].length = new_len
-                                dbs[0].vntr = cl[0][0].vntr
-                                dbs[0].prec = 0
-                                dbs[0].supp = sum([db.supp for db in dbs])
-                                read_ids = []
-                                for db in dbs:
-                                    read_ids += db.supp_read_ids
-                                dbs[0].supp_read_ids = list(set(read_ids))
-                                for db in dbs[1:]:
-                                    db.is_pass = 'FAIL_VNTR'
-    
 def get_phasingblocks(hb_vcf):
 #    MIN_BLOCK_LEN = 10000
 #    MIN_SNP = 10
@@ -2020,8 +2090,6 @@ def calc_gen_segments(double_breaks,coverage_histograms,ref_lengths, max_genomic
             db_cov = db.supp + db.bp_2.spanning_reads[db.genome_id][db.haplotype_2]
             if db.bp_2.dir_1 == -1:
                 ind = bisect.bisect_right(pos_ls,db.bp_2.position)
-                if ind == len(pos_ls):
-                    print((ref_name, db.bp_2.ref_id, db.bp_2.position,db.bp_1.ref_id, db.bp_1.position, pos_ls[-1]))
                 if db.bp_2.position == pos_ls[ind]:
                     ind = ind +1
                 ind_max = bisect.bisect_right(pos_ls, db.bp_2.position + max_genomic_length)
@@ -2080,6 +2148,169 @@ def get_insertionreads(segments_by_read):
                 ins_list_all[seg.ref_id].append(seg)
     return ins_list_all    
 
+def _vntr_regions_by_id(vntr_file):
+    regions_by_id = {}
+    if not vntr_file:
+        return regions_by_id
+    vntr_list = read_vntr_file(vntr_file)
+    for chrom, regions in vntr_list.items():
+        if not regions:
+            continue
+        starts = regions[0]
+        ends = regions[1]
+        region_ids = regions[5]
+        for start, end, region_id in zip(starts, ends, region_ids):
+            regions_by_id[region_id] = (chrom, start, end)
+    return regions_by_id
+
+def _vntr_record_score(record):
+    return abs(record.n_ins - record.n_del), max(record.n_ins, record.n_del), record.n_ins + record.n_del
+
+def _merge_read_vntr_records(records):
+    if any(record.vntr_status == 2 for record in records):
+        return max(records, key=_vntr_record_score)
+
+    best_record = max(records, key=_vntr_record_score)
+    return best_record._replace(
+        n_ins=sum(record.n_ins for record in records),
+        n_del=sum(record.n_del for record in records),
+        vntr_status=max(record.vntr_status for record in records),
+        indel_pos=best_record.indel_pos,
+    )
+
+def get_vntr_indel_segments(segments_by_read, args=None):
+    vntr_segments = []
+    for read in segments_by_read:
+        vntr_records = defaultdict(list)
+        for segment in read:
+            for region_id, n_ins, n_del, vntr_status, indel_pos in getattr(segment, "vntr", None) or []:
+                if not n_ins and not n_del:
+                    continue
+                if _vntr_indel_size(n_ins, n_del) <= VNTR_MIN_INDEL:
+                    continue
+                chrom = segment.ref_id
+                vntr_records[(segment.read_id, region_id)].append(
+                    VntrSegment(region_id, n_ins, n_del, vntr_status, indel_pos, segment, chrom)
+                )
+        for _key, records in vntr_records.items():
+            vntr_segments.append(_merge_read_vntr_records(records))
+    vntr_segments.sort(key=lambda record: (record.chrom, record.region_id, record.segment.read_id))
+    return vntr_segments
+
+def _vntr_segment_position(vntr_segment):
+    if vntr_segment.indel_pos is not None:
+        return vntr_segment.indel_pos
+    return vntr_segment.segment.ref_start
+
+def _vntr_segment_total_indel(vntr_segment):
+    return vntr_segment.n_ins - vntr_segment.n_del
+
+def _vntr_spanning_support(vntr_segments):
+    return sum(1 for record in vntr_segments if record.vntr_status == 2)
+
+def _vntr_segment_cluster_to_db(cluster_key, cluster, min_sv_size):
+    lengths = [abs(_vntr_segment_total_indel(item)) for item in cluster]
+    positions = [_vntr_segment_position(item) for item in cluster]
+    position = int(np.median(positions)) if positions else 0
+    length = int(np.median(lengths))
+    if length <= min_sv_size:
+        return []
+    qual = int(np.median([record.segment.mapq for record in cluster]))
+    ci = int(np.quantile(lengths, 0.9) - np.quantile(lengths, 0.1)) if lengths else 0
+    is_pass = 'PASS' if ci < min(length, 150) else 'FAIL_VNTR_MOSAIC'
+    by_genome_hp = defaultdict(list)
+    for record in cluster:
+        by_genome_hp[(record.segment.genome_id, record.segment.haplotype)].append(record.segment)
+    if cluster_key.event_type == "DEL":
+        bp_1 = Breakpoint(cluster_key.chrom, position, 1, qual, ci)
+        bp_2 = Breakpoint(cluster_key.chrom, position + length, -1, qual, ci)
+    else:
+        bp_1 = Breakpoint(cluster_key.chrom, position, -1, qual, ci)
+        bp_2 = Breakpoint(cluster_key.chrom, position, 1, qual, ci)
+        bp_2.is_insertion = True
+        bp_2.insertion_size = length
+    db_list = []
+    for (genome_id, haplotype), segments in by_genome_hp.items():
+        read_ids = list(dict.fromkeys(segment.read_id for segment in segments))
+        db = DoubleBreak(bp_1, bp_1.dir_1, bp_2, bp_2.dir_1, genome_id, haplotype, haplotype, len(read_ids), read_ids, length)
+        if cluster_key.event_type == "DEL":
+            connections = [(record.segment, record.segment) for record in cluster]
+            db.bp_1.connections = connections
+            db.bp_2.connections = connections
+        else:
+            connections = [record.segment for record in cluster]
+            db.bp_1.connections = connections
+            db.bp_2.connections = connections
+        db.vntr = cluster_key.region_id
+        db.sv_type = cluster_key.event_type
+        db.vcf_sv_type = cluster_key.event_type
+        db.prec = 0 if ci >= 50 else 1
+        db.vcf_qual = qual
+        db.is_dup = False
+        db.is_single = False
+        db.dvls = [[0,0,0], [0,0,0]]
+        db.is_pass = is_pass
+        db_list.append(db)
+    return db_list
+
+def cluster_vntr_segments(vntr_segments, control_genomes, args):
+    min_support = min(2, getattr(args, "bp_min_support", 3))
+    min_len = args.sv_size
+    min_sv_size = getattr(args, "min_sv_size", 0)
+    if isinstance(control_genomes, str):
+        control_genomes = {control_genomes} if control_genomes else set()
+    else:
+        control_genomes = set(control_genomes or [])
+    MERGE_THR = 150
+    MERGE_RAT = 0.25
+    CONTROL_LEN_DIFF = 35
+    control_lengths = defaultdict(list)
+    by_region_event = defaultdict(list)
+    for item in vntr_segments:
+        total_indel = _vntr_segment_total_indel(item)
+        if item.segment.genome_id in control_genomes:
+            if total_indel > 0:
+                control_lengths[(item.region_id, "INS")].append(total_indel)
+            else:
+                control_lengths[(item.region_id, "DEL")].append(-total_indel)
+        if total_indel > min_len:
+            by_region_event[VntrClusterKey(item.region_id, "INS", item.chrom)].append(item)
+        elif -total_indel > min_len:
+            by_region_event[VntrClusterKey(item.region_id, "DEL", item.chrom)].append(item)
+    db_list = {'DEL':[], 'INS':[]}
+    region_sv_counts = defaultdict(list)
+    for cluster_key, records in by_region_event.items():
+        records.sort(key=lambda item: (abs(_vntr_segment_total_indel(item))))
+        cur_cluster = []
+        for item in records:
+            event_len = abs(_vntr_segment_total_indel(item))
+            prev_len = abs(_vntr_segment_total_indel(cur_cluster[-1])) if cur_cluster else event_len
+            if cur_cluster and event_len - prev_len > max(MERGE_THR, event_len * MERGE_RAT):
+                if len(cur_cluster) >= min_support and _vntr_spanning_support(cur_cluster) > 1:
+                    cluster_dbs = _vntr_segment_cluster_to_db(cluster_key, cur_cluster, min_sv_size)
+                    control_key = (cluster_key.region_id, cluster_key.event_type)
+                    for db in cluster_dbs:
+                        if sum([abs(control_len - db.length) <= CONTROL_LEN_DIFF for control_len in control_lengths[control_key]]) >= 2:
+                            db.mut_type = 'germline'
+                        region_sv_counts[cluster_key.region_id].append(db)
+                    db_list[cluster_key.event_type] += cluster_dbs
+                cur_cluster = [item]
+            else:
+                cur_cluster.append(item)
+        if cur_cluster and len(cur_cluster) >= min_support and _vntr_spanning_support(cur_cluster) > 1:
+            cluster_dbs = _vntr_segment_cluster_to_db(cluster_key, cur_cluster, min_sv_size)
+            control_key = (cluster_key.region_id, cluster_key.event_type)
+            for db in cluster_dbs:
+                if any(abs(control_len - db.length) <= CONTROL_LEN_DIFF for control_len in control_lengths[control_key]):
+                    db.mut_type = 'germline'
+                region_sv_counts[cluster_key.region_id].append(db)
+            db_list[cluster_key.event_type] += cluster_dbs
+    for region_id, dbs in region_sv_counts.items():
+        if len(set([db.to_string() for db in dbs])) > 3:
+            for db in dbs:
+                db.is_pass = 'FAIL_COMPLEX_VNTR'
+    return db_list['DEL'], db_list['INS']
+
 def get_splitreads(segments_by_read):
     split_reads = []
     for read in segments_by_read:
@@ -2136,7 +2367,7 @@ def extract_pon(pon_file, ref_lengths):
            
     return pon_list
     
-def add_pon(db_clust, pon_ls):
+def add_pon(db_clust, pon_list, vntr_regions=None):
     BUFF = 2000
     CLUST_LEN = 250
     VNTR_BUFF = 25
@@ -2144,18 +2375,32 @@ def add_pon(db_clust, pon_ls):
     MAX_LEN_DIFF = 50
     db = db_clust[0]
     mut_type = 'somatic'
-    
-    pos1, pos2 = db.bp_1.position - db.bp_1.CI - BUFF, db.bp_1.position + db.bp_1.CI + BUFF  
-    if db.vntr:
-        pos1, pos2 = db.vntr[0] - VNTR_BUFF, db.vntr[1] + VNTR_BUFF
+    vntr_region = vntr_regions.get(db.vntr) if vntr_regions and db.vntr is not None else None
+    if vntr_region:
+        chrom, start, end = vntr_region
+        pon_key = chrom
+    elif db.bp_1.ref_id == db.bp_2.ref_id:
+        pon_key = db.bp_1.ref_id
+    else:
+        pon_key = (db.bp_1.ref_id, db.bp_2.ref_id)
+    pon_ls = pon_list.get(pon_key)
+    if not pon_ls:
+        for db in db_clust:
+            db.mut_type = 'somatic'
+        return False
+    pos1, pos2 = db.bp_1.position - db.bp_1.CI - BUFF, db.bp_1.position + db.bp_1.CI + BUFF
+    if vntr_region:
+        pos1, pos2 = start - VNTR_BUFF, end + VNTR_BUFF
     min_pos = bisect.bisect_left(pon_ls[0], pos1)
     max_pos = bisect.bisect_right(pon_ls[0], pos2)
     if not min_pos == max_pos:
-        max_diff = CLUST_LEN if not db.vntr else VNTR_CLUST_LEN
+        max_diff = VNTR_CLUST_LEN if vntr_region else CLUST_LEN
         for ind in range(min_pos, max_pos):
             if not pon_ls[4][ind] == db.bp_2.ref_id:
                 continue
-            if db.bp_1.ref_id == db.bp_2.ref_id:
+            if db.is_single:
+                len_diff = 0
+            elif db.bp_1.ref_id == db.bp_2.ref_id:
                 len_diff = abs(pon_ls[2][ind] - pon_ls[0][ind] - db.length)
             else:
                 len_diff = abs(pon_ls[2][ind] - db.bp_2.position)
@@ -2164,9 +2409,10 @@ def add_pon(db_clust, pon_ls):
             if (len_diff <= MAX_LEN_DIFF and sum_diff <= VNTR_CLUST_LEN) or sum_diff <= sum_CI + max_diff:
                 mut_type = 'germline'
                 break
-
+        
     for db in db_clust:
         db.mut_type = mut_type
+    return True
 
 def match_haplotypes(double_breaks):
     PHASE_THR = 0.66
@@ -2183,8 +2429,8 @@ def match_haplotypes(double_breaks):
         dv2 = [0,0,0]
         for db in cl:
             by_genome_id[db.genome_id].append(db)
-            dv1[db.haplotype_1] += db.supp
-            dv2[db.haplotype_2] += db.supp
+            dv1[db.haplotype_1] = db.supp
+            dv2[db.haplotype_2] = db.supp
         for db in cl:
             db.dvls = [dv1, dv2]
             
@@ -2272,8 +2518,8 @@ def match_haplotypes_single(double_breaks):
         dv2 = [0,0,0]
         for db in cl:
             by_genome_id[db.genome_id].append(db)
-            dv1[db.haplotype_1] += db.supp
-            dv2[db.haplotype_2] += db.supp
+            dv1[db.haplotype_1] = db.supp
+            dv2[db.haplotype_2] = db.supp
         for db in cl:
             db.dvls = [dv1, dv2]
         for genome_id, db_ls in by_genome_id.items():
@@ -2773,7 +3019,6 @@ def conn_inter(clusters, ind_id):
                             db2.gr_id = 'TIC' + str(ind_id) + '_' + str(t)
                 if sv_type:
                     continue
-
 def assign_cluster_ids_to_doublebreaks(double_breaks):
     uf = UnionFind()
     pos_to_node = {}
@@ -2827,7 +3072,6 @@ def assign_cluster_ids_to_doublebreaks(double_breaks):
     for db in double_breaks:
         if db.read_cluster_id not in multi:
             db.read_cluster_id = None
-            
             
 def write_alignments(allsegments, outpath):
     aln_dump_stream = open(outpath, "w")
@@ -2910,20 +3154,115 @@ def output_readids(double_breaks, genome_ids, out_stream):
         line = ','.join(line)
         out_stream.write(line)
         out_stream.write("\n")
+
+def _is_small_non_vntr_indel(db, max_len=100):
+    if db.mut_type != 'somatic':
+        return False
+    if db.vntr is not None or db.is_single:
+        return False
+    if db.length >= max_len:
+        return False
+    return _control_indel_sv_type(db) is not None
+
+def _control_indel_sv_type(db):
+    if db.bp_2.is_insertion or db.bp_1.is_insertion:
+        return 'INS'
+    if db.bp_1.ref_id == db.bp_2.ref_id and db.direction_1 == 1 and db.direction_2 == -1:
+        return 'DEL'
+    return None
+
+def get_control_small_indel_regions(double_breaks, max_len=100):
+    clusters = defaultdict(list)
+    for db in double_breaks:
+        if _is_small_non_vntr_indel(db, max_len):
+            clusters[db.to_string()].append(db)
+    regions = []
+    region_clusters = []
+    for cl in clusters.values():
+        sv_type = _control_indel_sv_type(cl[0])
+        if sv_type is None:
+            continue
+        chrom = cl[0].bp_1.ref_id
+        sv_len = cl[0].length
+        bp1_positions = [db.bp_1.position for db in cl]
+        bp2_positions = [db.bp_2.position for db in cl]
+        start = min(bp1_positions)
+        end = max(bp2_positions) + 50
+        if end < start:
+            start, end = end, start
+        regions.append((chrom, start, end, sv_type, sv_len))
+        region_clusters.append(cl)
+    region_order = sorted(range(len(regions)), key=lambda i: regions[i])
+    return [regions[i] for i in region_order], [region_clusters[i] for i in region_order]
+
+def _count_matching_indel_reads_in_chunk(control_bam, ref, chrom, chunk_regions, min_indel_len=10, max_len_diff=50):
+    CIGAR_INS = 1
+    CIGAR_DEL = 2
+    CIGAR_REF_ADVANCE = {0, 2, 3, 7, 8}
+    CIGAR_QUERY_ADVANCE = {0, 1, 4, 7, 8}
+    chunk_start = max(0, min(region[1] for region in chunk_regions))
+    chunk_end = max(region[2] for region in chunk_regions)
+    support_reads = defaultdict(set)
+    if control_bam.endswith(".cram"):
+        aln_file = pysam.AlignmentFile(control_bam, "rc", reference_filename=ref)
+    else:
+        aln_file = pysam.AlignmentFile(control_bam, "rb")
+    with aln_file:
+        for aln in aln_file.fetch(chrom, chunk_start, chunk_end, multiple_iterators=True):
+            if aln.is_unmapped or aln.is_secondary or aln.is_supplementary:
+                continue
+            ref_pos = aln.reference_start
+            for op, op_len in aln.cigartuples or []:
+                if op == CIGAR_DEL and op_len > min_indel_len:
+                    del_start = ref_pos
+                    del_end = ref_pos + op_len
+                    for region_id, start, end, sv_type, sv_len in chunk_regions:
+                        if sv_type == 'DEL' and del_start < end and del_end > start and abs(op_len - sv_len) <= max_len_diff:
+                            support_reads[region_id].add(aln.query_name)
+                elif op == CIGAR_INS and op_len > min_indel_len:
+                    for region_id, start, end, sv_type, sv_len in chunk_regions:
+                        if sv_type == 'INS' and start <= ref_pos <= end and abs(op_len - sv_len) <= max_len_diff:
+                            support_reads[region_id].add(aln.query_name)
+                if op in CIGAR_REF_ADVANCE:
+                    ref_pos += op_len
+                elif op not in CIGAR_QUERY_ADVANCE:
+                    continue
+    return [(region_id, len(reads)) for region_id, reads in support_reads.items()]
+
+def _control_small_indel_count_tasks(regions):
+    chunks = defaultdict(list)
+    for region_id, (chrom, start, end, sv_type, sv_len) in enumerate(regions):
+        chunks[(chrom, start // CHUNK_SIZE)].append((region_id, start, end, sv_type, sv_len))
+    return [(chrom, chunk_regions) for (chrom, _chunk_id), chunk_regions in chunks.items()]
+
+def output_control_small_indel_regions(double_breaks, control_id, control_bam, ref, thread_pool):
+    regions, region_clusters = get_control_small_indel_regions(double_breaks)
+    counts = [0] * len(regions)
+    tasks = [(control_bam, ref, chrom, chunk_regions) for chrom, chunk_regions in _control_small_indel_count_tasks(regions)]
+    for result in thread_pool.starmap(_count_matching_indel_reads_in_chunk, tasks):
+        for region_id, indel_count in result:
+            counts[region_id] = indel_count
+    for cl, indel_count in zip(region_clusters, counts):
+        if indel_count:
+            for db in cl:
+                db.mut_type = 'germline'
                             
-def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_files, genome_ids, control_id, thread_pool, median_cov, args):
+def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_files, genome_ids, control_genomes, thread_pool, median_cov, args):
     
     if args.write_alignments:
         outpath_alignments = os.path.join(args.out_dir, "read_alignments")
         write_alignments(segments_by_read, outpath_alignments)
     
-    white_reg = []
+    white_reg = {}
     if args.whitelist:
         white_reg = whitebed(args.whitelist)
     logger.info('Extracting split alignments')
     split_reads = get_splitreads(segments_by_read)
     ins_list_all = get_insertionreads(segments_by_read)
-    cont_id  = list(control_id)[0] if control_id else '' 
+    cont_id  = list(control_genomes)[0] if control_genomes else '' 
+    
+    logger.info('Starting breakpoint detection')
+    double_breaks, single_bps = get_breakpoints(split_reads, ref_lengths, white_reg, args)
     
     logger.info('Extracting clipped reads')
     clipped_clusters = []
@@ -2931,12 +3270,21 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
     clipped_reads = get_clipped_reads(segments_by_read)
     clipped_clusters = cluster_clipped_ends(clipped_reads, args.bp_cluster_size,args.min_ref_flank, ref_lengths)
     
-    logger.info('Starting breakpoint detection')
-    double_breaks, single_bps = get_breakpoints(split_reads, ref_lengths, white_reg, args)
     logger.info('Clustering unmapped insertions')
     ins_clusters = extract_insertions(ins_list_all, clipped_clusters, ref_lengths, white_reg, args)
 
+    del_list, ins_list = [], []
+    if args.vntr_file:
+        vntr_segments = get_vntr_indel_segments(segments_by_read, args)
+        del_list, ins_list = cluster_vntr_segments(vntr_segments, cont_id, args)
+    
+    double_breaks += del_list
+    double_breaks.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position))
+    ins_clusters += ins_list
+    ins_clusters.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position))
+
     match_long_ins(ins_clusters, double_breaks, args.min_sv_size, args.tra_to_ins)
+    
     
     if args.single_bp:
         logger.info('Starting single breakpoint detection')
@@ -2945,26 +3293,29 @@ def call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_fil
         single_bps = []
     
     logger.info('Starting compute_bp_coverage')
-    if args.vntr_file:
-        add_vntr_annot(double_breaks + ins_clusters, args)
-    get_coverage_parallel(bam_files, genome_ids, thread_pool, args.min_mapping_quality, double_breaks + ins_clusters + single_bps, args.ref)
+    get_coverage_parallel(bam_files, genome_ids, thread_pool, args.min_mapping_quality, double_breaks + ins_clusters + single_bps, args.ignore_hp, args.ref)
 
-        
     logger.info('Filtering breakpoints')
-    double_breaks = double_breaks_filter(double_breaks, single_bps, args.bp_min_support, cont_id, args.sv_size, args.multisample, args.cov_thr)
+    double_breaks = double_breaks_filter(double_breaks, single_bps, args.bp_min_support, cont_id, args.sv_size, args.multisample, args.cov_thr, args.lowq)
     double_breaks.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position, b.direction_1))
+    
     if args.single_bp and single_bps:
         single_bps = filter_single_bp(single_bps, cont_id, args.control_vaf, args.vaf_thr, args.bp_min_support, median_cov, args.pon_file, ref_lengths)
     insertion_filter(ins_clusters, args.bp_min_support, cont_id)
     ins_clusters.sort(key=lambda b:(b.bp_1.ref_id, b.bp_1.position))
    
     double_breaks +=  ins_clusters
-    annotate_mut_type(double_breaks, cont_id, args.control_vaf, args.vaf_thr, args.bp_min_support, args.pon_file, ref_lengths)
+    annotate_mut_type(double_breaks, cont_id, args.control_vaf, args.vaf_thr, args.bp_min_support, args.pon_file, ref_lengths, args.vntr_file)
 
     logger.info('Writing breakpoints')
-    output_breaks(double_breaks + single_bps, genome_ids, args.phase_vcf, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
+    effective_phasing = bool(args.phase_vcf) and not args.ignore_hp
+    output_breaks(double_breaks + single_bps, genome_ids, effective_phasing, open(os.path.join(args.out_dir,"breakpoints_double.csv"), "w"))
+
+    if cont_id:
+        output_control_small_indel_regions(double_breaks, cont_id, bam_files[cont_id], getattr(args, "ref", None), thread_pool)
     
-    double_breaks = filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segments_by_read, bam_files, thread_pool, args)
+    double_breaks = filter_fail_double_db(double_breaks, single_bps, coverage_histograms, segments_by_read, bam_files, thread_pool, args, white_reg)
+    
     if 'somatic' in double_breaks.keys():
         assign_cluster_ids_to_doublebreaks(double_breaks['somatic'])
     else:

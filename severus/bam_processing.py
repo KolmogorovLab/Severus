@@ -1,20 +1,21 @@
 import pysam
 import numpy as np
 import bisect
+import gzip
 from collections import  defaultdict
 import logging
-import datetime
 
 logger = logging.getLogger()
 COV_WINDOW_MM  = 1000
 COV_WINDOW  = 1000
 K_MM = 1000
 NUM_HAPLOTYPES = 3
+VNTR_MIN_INDEL = 10
 
 class ReadSegment(object):
     __slots__ = ("align_start", "read_start", "read_end", "ref_start", "ref_end","ref_start_ori", "ref_end_ori", "read_id", "ref_id",
                  "strand", "read_length",'align_len','segment_length', "haplotype", "mapq", "genome_id",
-                 'mismatch_rate', 'is_pass', "is_insertion", "is_clipped", 'error_rate', 'ins_seq', 'is_primary', 'ins_pos', 'bp_pos', "ID", "PS")
+                 'mismatch_rate', 'is_pass', "is_insertion", "is_clipped", 'error_rate', 'ins_seq', 'is_primary', 'ins_pos', 'bp_pos', "ID", "PS", "vntr", "in_whitereg")
     def __init__(self, align_start, read_start, read_end, ref_start, ref_end,ref_start_ori, ref_end_ori, read_id, ref_id,
                  strand, read_length,align_len,segment_length, haplotype, mapq, genome_id,
                  mismatch_rate, is_insertion, error_rate, is_primary, PS):
@@ -45,6 +46,8 @@ class ReadSegment(object):
         self.bp_pos = None
         self.ID = None
         self.PS = PS
+        self.vntr = None
+        self.in_whitereg = False
     def __str__(self):
         return "".join(["read_start=", str(self.read_start), " read_end=", str(self.read_end), " ref_start=", str(self.ref_start),
                          " ref_end=", str(self.ref_end), " read_id=", str(self.read_id), " ref_id=", str(self.ref_id), " strand=", str(self.strand),
@@ -60,8 +63,92 @@ class ReadSegment(object):
             ref_bp_ori = self.ref_start_ori if self.strand == 1 else self.ref_end_ori
             sign = -1 if self.strand == 1 else 1
         return ref_bp, ref_bp_ori, sign
-    
-def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
+
+def _vntr_segment_status(segment, region_start, region_end):
+    if segment.ref_start <= region_start and segment.ref_end >= region_end:
+        return 2
+    if segment.ref_start >= region_start and segment.ref_end <= region_end:
+        return 0
+    left_spanning = segment.ref_start <= region_start < segment.ref_end <= region_end
+    right_spanning = region_start <= segment.ref_start < region_end <= segment.ref_end
+    if left_spanning or right_spanning:
+        return 1
+    return None
+
+def _vntr_indel_size(ins_count, del_count):
+    return max(ins_count, del_count)
+
+def _set_segments_vntr(read_segments, vntr, vntr_index):
+    if not vntr or not vntr_index:
+        return
+    region_starts, region_ends, region_ids = vntr_index
+    region_bounds = {
+        region_id: (region_start, region_end)
+        for region_start, region_end, region_id in zip(region_starts, region_ends, region_ids)
+    }
+    for segment in read_segments:
+        segment_vntr = []
+        for region_id, ins_count, del_count, indel_pos in vntr:
+            if _vntr_indel_size(ins_count, del_count) <= VNTR_MIN_INDEL:
+                continue
+            region_start, region_end = region_bounds[region_id]
+            vntr_status = _vntr_segment_status(segment, region_start, region_end)
+            if vntr_status is not None:
+                segment_vntr.append((region_id, ins_count, del_count, vntr_status, indel_pos))
+        if segment_vntr:
+            segment.vntr = segment_vntr
+
+def _region_names_for_pos(pos, region_starts, region_ends, region_names):
+    names = []
+    region_idx = bisect.bisect_right(region_ends, pos)
+    while region_idx < len(region_starts) and region_starts[region_idx] <= pos:
+        if pos < region_ends[region_idx]:
+            names.append(region_names[region_idx])
+        region_idx += 1
+    return names
+
+def _set_segments_whitereg(read_segments, white_index):
+    if not white_index:
+        return
+    region_starts, region_ends, region_names = white_index
+    if not region_starts:
+        return
+    for segment in read_segments:
+        names = []
+        for pos in (segment.ref_start, segment.ref_end):
+            names.extend(_region_names_for_pos(pos, region_starts, region_ends, region_names))
+        if names:
+            segment.in_whitereg = list(dict.fromkeys(names))
+
+def _has_large_vntr_indel(vntr, sv_size):
+    return any(max(ins_count, del_count) >= sv_size for _region_id, ins_count, del_count, _indel_pos in vntr)
+
+def _add_full_read_vntr_segment(read_segments, read, align_start, read_length, total_segment_length,
+                                haplotype, genome_id, mm_rate, error_rate, is_primary, PS, ID, vntr, vntr_index):
+    read_start = align_start
+    read_end = min(read_length, read_start + total_segment_length)
+    if read.is_reverse:
+        read_start, read_end = read_length - read_end, read_length - read_start
+    region_starts, region_ends, region_ids = vntr_index
+    region_bounds = {
+        region_id: (region_start, region_end)
+        for region_start, region_end, region_id in zip(region_starts, region_ends, region_ids)
+    }
+    read_segments.append(ReadSegment(align_start, read_start, read_end, read.reference_start, read.reference_end,
+                                     read.reference_start, read.reference_end, read.query_name, read.reference_name,
+                                     -1 if read.is_reverse else 1, read_length, total_segment_length, total_segment_length,
+                                     haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, is_primary, PS))
+    read_segments[-1].ID = ID
+    read_segments[-1].vntr = [
+        (region_id, ins_count, del_count, vntr_status, indel_pos)
+        for region_id, ins_count, del_count, indel_pos in vntr
+        if region_id in region_bounds
+        if _vntr_indel_size(ins_count, del_count) > VNTR_MIN_INDEL
+        for vntr_status in [_vntr_segment_status(read_segments[-1], *region_bounds[region_id])]
+        if vntr_status is not None
+    ]
+
+def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind, ignore_hp, vntr_regs, control_g, count_window=None, vntr_index=None, white_index=None):
     """
     Parses cigar and generate ReadSegment structure with alignment coordinates
     """
@@ -71,6 +158,7 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
     CIGAR_DEL = 2
     CIGAR_INS = 1
     CIGAR_CLIP = [4, 5]
+    vntr_sv_size = 10 if control_g else sv_size
 
     first_clip = True
     read_start = 0
@@ -83,6 +171,7 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
     read_segments =[]
     cigar = read.cigartuples
     ID = ','.join([str(ref_ind), str(read.reference_start), str(read.reference_end)])
+    vntr_indels = []
     is_primary = None
     if not read.is_supplementary:
         is_primary = True
@@ -109,15 +198,21 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
         
     haplotype = 0
     PS = 0
-    if use_tag and read.has_tag('HP'):
+    if not ignore_hp and use_tag and read.has_tag('HP'):
         haplotype = int(read.get_tag('HP'))
-    if use_tag and read.has_tag('PS'):
+    if not ignore_hp and use_tag and read.has_tag('PS'):
         PS = read.get_tag('PS')
     
     read_inf = []
+    vntr_indels = _count_vntr_indels(read, vntr_index, sv_size, count_window)
     
     if (not indel or max(indel) < sv_size) and is_primary and not read.has_tag('SA'):
-        read_inf = np.array([ref_ind, read.reference_start, read.reference_end,read_length,total_segment_length, haplotype,mm_rate, error_rate, read.mapping_quality], dtype = int)
+        if _has_large_vntr_indel(vntr_indels, vntr_sv_size):
+            _add_full_read_vntr_segment(read_segments, read, align_start, read_length, total_segment_length,
+                                        haplotype, genome_id, mm_rate, error_rate, is_primary, PS, ID, vntr_indels, vntr_index)
+        else:
+            read_inf = np.array([ref_ind, read.reference_start, read.reference_end,read_length,total_segment_length, haplotype,mm_rate, error_rate, read.mapping_quality], dtype = int)
+            
         if cigar[0][0] in CIGAR_CLIP and cigar[0][1] > MIN_CLIPPED_LENGTH:
             pos = read.reference_start if strand == 1 else read.reference_end
             st = -1 if strand == 1 else 1
@@ -130,7 +225,7 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
             read_segments.append(ReadSegment(0, 0, 0, 0, pos, 0, pos, read.query_name,
                                         read.reference_name, st, read_length, total_segment_length, cigar[-1][1], haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, None,PS))
             read_segments[-1].is_clipped = True
-            
+        _set_segments_whitereg(read_segments, white_index)
         return [read_segments, read_inf]
 
     for token in cigar:
@@ -154,6 +249,11 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
                     del_start, del_end = read_length - read_end, read_length - read_start
                 else:
                     del_start, del_end = read_start , read_end
+                vntr_st = check_vntr(vntr_regs, ref_end) 
+                vntr_end = check_vntr(vntr_regs, ref_end+op_len)
+                if vntr_st is not None and vntr_end is not None and vntr_st == vntr_end:
+                    ref_aligned += op_len
+                    continue
                 read_segments.append(ReadSegment(align_start, del_start, del_end, ref_start, ref_end, ref_start, ref_end, read.query_name,
                                                  read.reference_name, strand, read_length,total_segment_length,read_aligned,
                                                  haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, is_primary, PS))
@@ -162,7 +262,6 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
                 ref_start = ref_end+op_len
                 read_aligned = 0
                 ref_aligned = 0
-
         if op == CIGAR_INS:
             if op_len < sv_size:
                 read_aligned += op_len
@@ -170,6 +269,8 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
                 ins_start = read_start + read_aligned
                 read_aligned += op_len
                 ins_pos= ref_start + ref_aligned
+                if check_vntr(vntr_regs, ins_pos) is not None:
+                    continue
                 ins_end = read_start + read_aligned
                 read_segments.append(ReadSegment(align_start,ins_start, ins_end, ins_pos, ins_pos, ins_pos, ins_pos, read.query_name,
                                                  read.reference_name, strand, read_length,total_segment_length,op_len, haplotype,
@@ -192,7 +293,7 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
         
     if is_primary and not read.has_tag('SA'):
         split = [seg for seg in read_segments if not seg.is_insertion]
-        if len(split) == 1:
+        if len(split) == 1 and not _has_large_vntr_indel(vntr_indels, sv_size):
             read_segments = [seg for seg in read_segments if seg.is_insertion]
             read_inf = np.array([ref_ind,  read.reference_start, read.reference_end,read_length,total_segment_length, haplotype,mm_rate, error_rate, read.mapping_quality], dtype = int)
             if cigar[0][0] in CIGAR_CLIP and cigar[0][1] > MIN_CLIPPED_LENGTH:
@@ -208,6 +309,9 @@ def get_segment(read, genome_id,sv_size,use_supplementary_tag, ref_ind):
                                             read.reference_name, st, read_length, total_segment_length, cigar[-1][1], haplotype, read.mapping_quality, genome_id, mm_rate, False, error_rate, None, PS))
                 read_segments[-1].is_clipped = True
             
+    
+    _set_segments_vntr(read_segments, vntr_indels, vntr_index)
+    _set_segments_whitereg(read_segments, white_index)
     return [read_segments, read_inf]
 
 def merge_short_seg(read):
@@ -283,7 +387,9 @@ def extract_clipped_end(segments_by_read):
             read[-1].is_pass = 'PASS'
         read.sort(key=lambda s: s.read_start)
         
-def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq, ref = None):
+
+def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq, ignore_hp, ref = None):
+
     region_start, region_end = max(0, poslist[0]-3), poslist[-1]+3
     if bam_file.endswith(".bam"):
         aln_file = pysam.AlignmentFile(bam_file, "rb")
@@ -322,7 +428,9 @@ def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq, ref = None):
                 strt = bisect.bisect_right(poslist, aln.reference_start)
                 end = bisect.bisect_left(poslist, aln.reference_end)
                 if not strt == end:
-                    if aln.has_tag('HP'):
+                    if ignore_hp:
+                        hp = 0
+                    elif aln.has_tag('HP'):
                         hp = int(aln.get_tag('HP'))
                     else:
                         hp = 0
@@ -332,7 +440,9 @@ def get_cov(bam_file, genome_id, ref_id, poslist, min_mapq, ref = None):
     return cov_list
 
 
-def get_coverage_parallel(bam_files, genome_ids, thread_pool, min_mapq, double_breaks, ref):
+
+def get_coverage_parallel(bam_files, genome_ids, thread_pool, min_mapq, double_breaks, ignore_hp, ref):
+
     db_list = defaultdict(list)
     covlist = defaultdict(list)
     for db in double_breaks:
@@ -346,7 +456,8 @@ def get_coverage_parallel(bam_files, genome_ids, thread_pool, min_mapq, double_b
         db_list[key] = [lst[start:end] for start, end in zip([0] + indices, indices + [len(lst)])]
     for genome_id in genome_ids:
         covlist = defaultdict(list)
-        tasks = [(bam_files[genome_id], genome_id, ref_id, pos, min_mapq, ref) for ref_id, poslist in db_list.items() for pos in poslist]
+        tasks = [(bam_files[genome_id], genome_id, ref_id, pos, min_mapq, ignore_hp, ref) for ref_id, poslist in db_list.items() for pos in poslist]
+
         parsing_results = None
         parsing_results = thread_pool.starmap(get_cov, tasks)
         for item in parsing_results:
@@ -356,8 +467,100 @@ def get_coverage_parallel(bam_files, genome_ids, thread_pool, min_mapq, double_b
             db.bp_1.spanning_reads[genome_id] = covlist[(db.bp_1.ref_id, db.bp_1.position)]
             db.bp_2.spanning_reads[genome_id] = covlist[(db.bp_2.ref_id, db.bp_2.position)]
     
-        
-def get_all_reads(bam_file, region, genome_id,sv_size,use_supplementary_tag, ref=None):
+
+def _bed_overlaps(start, end, region_starts, region_ends, region_ids):
+    if end <= start:
+        return []
+    overlaps = []
+    region_idx = bisect.bisect_right(region_ends, start)
+    while region_idx < len(region_starts) and region_starts[region_idx] < end:
+        region_start = region_starts[region_idx]
+        region_end = region_ends[region_idx]
+        overlap = max(0, min(end, region_end) - max(start, region_start))
+        if overlap:
+            overlaps.append((region_ids[region_idx], overlap, max(start, region_start), region_start, region_end))
+        region_idx += 1
+    return overlaps
+
+def _has_bed_overlap(start, end, region_starts, region_ends):
+    if end <= start:
+        return False
+    region_idx = bisect.bisect_right(region_ends, start)
+    return region_idx < len(region_starts) and region_starts[region_idx] < end
+
+def _region_info_for_pos(pos, region_starts, region_ends, region_ids):
+    region_idx = bisect.bisect_right(region_starts, pos) - 1
+    if region_idx >= 0 and pos < region_ends[region_idx]:
+        return region_ids[region_idx], region_starts[region_idx], region_ends[region_idx]
+    return None
+
+def _index_vntr_regions(vntr_regs):
+    if not vntr_regs:
+        return [], [], []
+    return vntr_regs[2], vntr_regs[3], vntr_regs[5]
+
+def _index_region_names(regions):
+    if not regions:
+        return [], [], []
+    return regions[0], regions[1], regions[4]
+
+def _update_vntr_indel_pos(read_indel, indel_len, indel_pos, sv_size):
+    if indel_len > sv_size and read_indel[4] is None:
+        read_indel[4] = indel_pos
+    if indel_len > read_indel[2]:
+        read_indel[2] = indel_len
+        read_indel[3] = indel_pos
+
+def _count_vntr_indels(read, vntr_index, sv_size, count_window=None):
+    if vntr_index is None or read.reference_end is None:
+        return []
+
+    region_starts, region_ends, region_ids = vntr_index
+    if not region_starts:
+        return []
+
+    window_start, window_end = count_window if count_window else (read.reference_start, read.reference_end)
+    read_start = max(read.reference_start, window_start)
+    read_end = min(read.reference_end, window_end)
+    if not _has_bed_overlap(read_start, read_end, region_starts, region_ends):
+        return []
+
+    cigar_ins = 1
+    cigar_del = 2
+    ref_consuming_ops = {0, 2, 3, 7, 8}
+    LEN_THR = 3
+    read_indels = {}
+    ref_pos = read.reference_start
+
+    for op, op_len in read.cigartuples or []:
+        if op == cigar_ins and op_len >= LEN_THR:
+            region_info = _region_info_for_pos(ref_pos, region_starts, region_ends, region_ids)
+            if window_start <= ref_pos < window_end and region_info is not None:
+                region_id, _region_start, _region_end = region_info
+                read_indel = read_indels.setdefault(region_id, [0, 0, 0, None, None])
+                read_indel[0] += op_len
+                _update_vntr_indel_pos(read_indel, op_len, ref_pos, sv_size)
+        elif op == cigar_del and op_len >= LEN_THR:
+            del_start = ref_pos
+            del_end = ref_pos + op_len
+            for region_id, overlap, overlap_start, region_start, region_end in _bed_overlaps(max(del_start, window_start), min(del_end, window_end), region_starts, region_ends, region_ids):
+                if del_start <= region_start and del_end >= region_end:
+                    continue
+                read_indel = read_indels.setdefault(region_id, [0, 0, 0, None, None])
+                read_indel[1] += overlap
+                _update_vntr_indel_pos(read_indel, overlap, overlap_start, sv_size)
+
+        if op in ref_consuming_ops:
+            ref_pos += op_len
+
+    return [
+        (region_id, indel[0], indel[1], indel[4] if indel[4] is not None else indel[3])
+        for region_id, indel in read_indels.items()
+    ]
+
+
+def get_all_reads(bam_file, region, genome_id,sv_size,use_supplementary_tag, ignore_hp, control_g, ref=None, vntrs=None, white_regs=None):
+
     """
     Yields set of split reads for each contig separately. Only reads primary alignments
     and infers the split reads from SA alignment tag
@@ -368,6 +571,8 @@ def get_all_reads(bam_file, region, genome_id,sv_size,use_supplementary_tag, ref
     ncol= 10000
     read_info = np.zeros((ncol,9), dtype = int)
     ref_ind, ref_id, region_start, region_end = region
+    vntr_index = _index_vntr_regions(vntrs)
+    white_index = _index_region_names(white_regs)
     if bam_file.endswith(".bam"):
         aln_file = pysam.AlignmentFile(bam_file, "rb")
             
@@ -377,7 +582,9 @@ def get_all_reads(bam_file, region, genome_id,sv_size,use_supplementary_tag, ref
     t=0
     for aln in aln_file.fetch(ref_id, region_start, region_end,  multiple_iterators=True):
         if not aln.is_secondary and not aln.is_unmapped:
-            new_segment, read_inf = get_segment(aln, genome_id, sv_size,use_supplementary_tag, ref_ind)
+            if aln.reference_end is None:
+                continue
+            new_segment, read_inf = get_segment(aln, genome_id, sv_size, use_supplementary_tag, ref_ind, ignore_hp, vntrs, control_g, (region_start, region_end), vntr_index, white_index)
             if new_segment:
                 alignments += new_segment
             if not len(read_inf):
@@ -399,22 +606,124 @@ def get_all_reads(bam_file, region, genome_id,sv_size,use_supplementary_tag, ref
         read_info_final = np.concatenate((read_info_final, read_info[0:t-1]), axis=0)                
     return (alignments, read_info_final)
 
+def read_whitelist_file(bed_file):
+    """Read and merge whitelist BED intervals in the region-reader format."""
+    intervals = defaultdict(list)
+    if not bed_file:
+        return defaultdict(list)
+    opener = gzip.open if str(bed_file).endswith('.gz') else open
+    with opener(bed_file, 'rt') as bed:
+        for line_number, line in enumerate(bed, 1):
+            fields = line.split()
+            if not fields or fields[0].startswith('#') or fields[0] in ('track', 'browser'):
+                continue
+            if len(fields) < 3:
+                raise ValueError(f'Whitelist BED line {line_number} requires three columns')
+            chrom, start, end = fields[:3]
+            start, end = int(start), int(end)
+            if start < 0 or end < start:
+                raise ValueError(f'Invalid whitelist interval on line {line_number}')
+            intervals[chrom].append((start, end))
+    regions = defaultdict(list)
+    region_id = 0
+    for chrom, entries in intervals.items():
+        merged = []
+        for start, end in sorted(entries):
+            if merged and start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+        starts = [x[0] for x in merged]
+        ends = [x[1] for x in merged]
+        regions[chrom] = [starts, ends, starts[:], ends[:],
+                          [f'{chrom}_{start}' for start in starts],
+                          list(range(region_id, region_id + len(merged)))]
+        region_id += len(merged)
+    return regions
 
-def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
+
+def read_vntr_file(vntr_file, bp_tol=50):
+    vntr_list = defaultdict(list)
+    region_idx = 0
+    if not vntr_file:
+        return vntr_list
+    if vntr_file.endswith(".bed.gz"):
+        f = gzip.open(vntr_file, "rt")
+    elif vntr_file.endswith(".bed"):
+        f = open(vntr_file)
+    else:
+        raise ValueError("VNTR file must end with .bed or .bed.gz")
+
+    with f:
+        for line in f:
+            if not line.strip() or line.startswith("#"):
+                continue
+            tr = line.strip().split()
+            chrom = tr[0]
+            start = int(tr[1])
+            end = int(tr[2])
+            if end <= start:
+                continue
+            if not vntr_list[chrom]:
+                vntr_list[chrom] = [[], [], [], [], [], []]
+            vntr_list[chrom][0].append(start)
+            vntr_list[chrom][1].append(end)
+            vntr_list[chrom][2].append(start - bp_tol)
+            vntr_list[chrom][3].append(end + bp_tol)
+            vntr_list[chrom][4].append(f"{chrom}_{start}")
+            vntr_list[chrom][5].append(region_idx)
+            region_idx += 1
+    return vntr_list
+
+def get_vntrs_in_region(vntr_list, chrom, start, end):
+    if not vntr_list:
+        return []
+    if chrom not in vntr_list:
+        return []
+    tr_reg = vntr_list[chrom] if isinstance(vntr_list, defaultdict) else vntr_list
+    if not tr_reg:
+        return []
+
+    start_idx = bisect.bisect_left(tr_reg[3], start)
+    end_idx = bisect.bisect_right(tr_reg[2], end)
+    if start_idx >= end_idx:
+        return []
+    return [values[start_idx:end_idx] for values in tr_reg]
+
+def check_vntr(vntr_regs, pos):
+    if not vntr_regs:
+        return None
+    start_idx = bisect.bisect_right(vntr_regs[2], pos)
+    end_idx = bisect.bisect_left(vntr_regs[3], pos)
+    if start_idx - end_idx == 1:
+        return end_idx
+    return None
+
+def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id, control_g,
                            coverage_histograms, mismatch_histograms, n90ls, bg_mmls,read_qual,read_qual_len, args):
 
     CHUNK_SIZE = 10000000
     sv_size = args.sv_size
     use_supplementary_tag = args.use_supplementary_tag
+    ignore_hp = args.ignore_hp
+    vntr_list = read_vntr_file(getattr(args, 'vntr_file', None))
+    white_reg_file = getattr(args, 'white_reg', None) or getattr(args, 'whitelist', None)
+    white_reg_list = getattr(args, 'whitelist_regions', None)
+    if white_reg_list is None:
+        white_reg_list = read_whitelist_file(white_reg_file)
+    
     ref = args.ref
     if bam_file.endswith(".bam"):
         all_reference_ids = [r for r in pysam.AlignmentFile(bam_file, "rb").references]
             
     elif bam_file.endswith(".cram"):
         all_reference_ids = [r for r in pysam.AlignmentFile(bam_file, "rc", reference_filename=args.ref).references]
+
     
     fetch_list = []
-    for j, ctg in enumerate(all_reference_ids):
+    for j, ctg in enumerate(ref_lengths):
+        if ctg not in all_reference_ids:
+            continue
         ctg_len = ref_lengths[ctg]
         for i in range(0, max(ctg_len // CHUNK_SIZE, 1)):
             reg_start = i * CHUNK_SIZE
@@ -422,7 +731,13 @@ def get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
             if ctg_len - reg_end < CHUNK_SIZE:
                 reg_end = ctg_len
             fetch_list.append((j, ctg, reg_start, reg_end))
-    tasks = [(bam_file, region, genome_id,sv_size,use_supplementary_tag, ref) for region in fetch_list]
+
+    tasks = [
+        (bam_file, region, genome_id, sv_size, use_supplementary_tag, ignore_hp, control_g, ref,
+         get_vntrs_in_region(vntr_list, region[1], region[2], region[3]),
+         get_vntrs_in_region(white_reg_list, region[1], region[2], region[3]))
+        for region in fetch_list
+    ]
     parsing_results = None
     parsing_results = thread_pool.starmap(get_all_reads, tasks)
     segments_by_read = defaultdict(list)
@@ -481,7 +796,7 @@ def update_cov_hist(parsing_results, coverage_histograms, genome_id, ref_lengths
                     read_qual['FAIL_ALNLEN'] += 1
                     read_qual_len['FAIL_ALNLEN'] += alignments[1][j][4]
 
-def update_coverage_hist(coverage_histograms,genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes, loh_out):
+def update_coverage_hist(coverage_histograms,genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes):
     
     for read in segments_by_read:
         for seg in read:
@@ -500,10 +815,8 @@ def update_coverage_hist(coverage_histograms,genome_ids, ref_lengths, segments_b
 
         hp1_cov, hp2_cov, hp0_cov = np.median(by_hp[1]), np.median(by_hp[2]), np.median(by_hp[0])
         logger.info(f"\tMedian coverage by PASS reads for {genome_id} (H1 / H2 / H0): {hp1_cov} / {hp2_cov} / {hp0_cov}")
-        median_cov.append(int(np.median([hp1_cov, hp2_cov, hp0_cov])))
-        
-        if loh_out:
-            extract_LOH(coverage_histograms, ref_lengths, control_genomes, target_genomes, loh_out)
+        median_cov.append(int(max([hp1_cov, hp2_cov, hp0_cov])))
+
     return max(median_cov)
         
 
@@ -511,6 +824,10 @@ def add_read_qual(segments_by_read, ref_lengths, bg_mm, mismatch_histograms,read
     min_mapq = args.min_mapping_quality
     min_aligned_length = args.min_aligned_length
     write_segdups_out = args.write_segdups_out
+    white_reg_file = getattr(args, 'white_reg', None) or getattr(args, 'whitelist', None)
+    white_reg = getattr(args, 'whitelist_regions', None)
+    if white_reg is None:
+        white_reg = read_whitelist_file(white_reg_file)
     
     mm_hist_high = background_mm_hist(segments_by_read, mismatch_histograms, bg_mm, ref_lengths)
 
@@ -519,18 +836,33 @@ def add_read_qual(segments_by_read, ref_lengths, bg_mm, mismatch_histograms,read
     for alignments in segments_by_read:
         if not alignments:
             continue
-        label_reads(alignments, min_mapq, bg_mm, mm_hist_high, min_aligned_length, args.multisample, args.min_len)
+        label_reads(alignments, min_mapq, bg_mm, mm_hist_high, min_aligned_length, args.multisample, args.min_len, white_reg)
 
     write_readqual(segments_by_read, args.outpath_readqual,read_qual,read_qual_len)
 
+#Salute to AmberVerhasselt
 
-def label_reads(read, min_mapq, bg_mm, mm_hist_high, min_aligned_length, multisample, min_len):
+def in_whitelist(white_reg, ref_id, start, end):
+    if not white_reg:
+        return None
+    if ref_id not in white_reg:
+        return None
+    regions = white_reg[ref_id]
+    starts, ends = regions[0], regions[1]
+    return bisect.bisect_right(starts, end) > bisect.bisect_left(ends, start)
+
+
+def label_reads(read, min_mapq, bg_mm, mm_hist_high, min_aligned_length, multisample, min_len, white_reg, enforce_mapq=False):
     MIN_ALIGNED_RATE = 0 if not min_len == -1 else 0.5
     MIN_ALIGNED_LEN = min_len if not min_len == -1 else min_aligned_length
     #MIN_ALIGNED_LEN = min_aligned_length if multisample else 2000
 
     for seg in read:
-        if seg.mapq < min_mapq:
+        whitelisted = in_whitelist(white_reg, seg.ref_id, seg.ref_start_ori, seg.ref_end_ori)
+        if whitelisted:
+            seg.is_pass = 'PASS'
+            continue
+        if seg.mapq < min_mapq and not enforce_mapq:
             seg.is_pass += '_LOW_MAPQ'
         if high_mm_check(mm_hist_high, bg_mm, seg):
             seg.is_pass += '_HIGH_MM_rate'
@@ -541,6 +873,8 @@ def label_reads(read, min_mapq, bg_mm, mm_hist_high, min_aligned_length, multisa
 
     if aligned_ratio < MIN_ALIGNED_RATE or aligned_len < MIN_ALIGNED_LEN:
         for seg in read:
+            if seg.is_pass == 'PASS':
+                continue
             seg.is_pass += '_LOW_ALIGNED_LEN'#
 
     for seg in read:
@@ -631,40 +965,6 @@ def background_mm_hist(segments_by_read, mismatch_histograms, bg_mm, ref_lengths
                             mm_hist_high[chr_id][i] = 1
                             break
     return mm_hist_high
-
-
-def extract_LOH(coverage_histograms, ref_lengths, control_genomes, target_genomes, write_loh_out):
-    MIN_COV = 3
-    MIN_DIFF = 2000
-    MIN_LOH = 10000
-    LOH_dict = defaultdict(list)
-    control_genome = list(control_genomes)[0]
-    for ref_id in ref_lengths.keys():
-        for target_genome in list(target_genomes):
-            for i, (hp1, hp2) in enumerate(zip(coverage_histograms[(target_genome, 1, ref_id)], coverage_histograms[(target_genome, 2, ref_id)])):
-                if not coverage_histograms[(control_genome, 1, ref_id)][i] > MIN_COV and coverage_histograms[(control_genome, 2, ref_id)][i] > MIN_COV:
-                    continue
-                if (hp1 <= MIN_COV and hp2 > MIN_COV):
-                    LOH_dict[(target_genome, 1, ref_id)].append(i)
-                elif (hp1 > MIN_COV and hp2 <= MIN_COV) :
-                    LOH_dict[(target_genome, 2, ref_id)].append(i)
-    LOH_region = defaultdict(list)
-    for key, loh_reg in LOH_dict.items():
-        for ind in loh_reg:
-            if not LOH_region[key]:
-                LOH_region[key].append([ind * COV_WINDOW])
-                LOH_region[key].append([(ind + 1) * COV_WINDOW])
-            elif ind * COV_WINDOW - LOH_region[key][1][-1] <= MIN_DIFF:
-                LOH_region[key][1][-1]=(ind + 1) * COV_WINDOW
-            else:
-                LOH_region[key][0].append(ind * COV_WINDOW)
-                LOH_region[key][1].append((ind + 1) * COV_WINDOW)
-    
-    write_loh_out.write("#chr_id\tstart\tend\tgenome_ids\thaplotype\t\n")  
-    for key, loh_reg in LOH_region.items():
-        for (st,end) in zip(loh_reg[0], loh_reg[1]):
-            if end - st >= MIN_LOH:
-                write_loh_out.write('\t'.join([key[2], str(st), str(end), key[0], str(key[1])]) + '\n')
             
  
 def extract_segdups(mm_hist_high, write_segdups_out):
@@ -724,7 +1024,7 @@ def get_read_statistics(parsing_results,segments_by_read):
     for read in segments_by_read.values():
         aln_len = 0
         for aln in read:
-            if aln.is_clipped or aln.is_insertion:
+            if aln.is_clipped or aln.is_insertion or 'vntr_only' in aln.is_pass:
                 continue
             aln_len += aln.segment_length
             

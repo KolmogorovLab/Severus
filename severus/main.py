@@ -18,7 +18,7 @@ from collections import defaultdict,Counter
 import logging
 
 from severus.build_graph import output_graphs
-from severus.bam_processing import get_all_reads_parallel, init_hist, init_mm_hist, update_coverage_hist
+from severus.bam_processing import get_all_reads_parallel, init_hist, init_mm_hist, update_coverage_hist, read_whitelist_file
 from severus.breakpoint_finder import call_breakpoints
 from severus.resolve_vntr import update_segments_by_read
 from severus.__version__ import __version__
@@ -87,6 +87,8 @@ def main():
     parser.add_argument("--reference", dest="ref",
                         metavar="path", required=False, default=None,
                         help="path to the reference fasta (must be indexed)")
+    parser.add_argument("--chromosome", "--chromosomes", metavar="name", default=None,
+                        nargs="+", help="analyze only these chromosomes (exact BAM/CRAM contig names; default: all)")
     parser.add_argument("--out-dir", dest="out_dir",
                         default=None, required=True,
                         metavar="path", help="Output directory")
@@ -123,13 +125,14 @@ def main():
                         default=MAX_GENOMIC_LEN, metavar="int", type=int,
                         help=f"maximum length of genomic segment to form connected components [{MAX_GENOMIC_LEN}]")
     parser.add_argument("--phasing-vcf", dest="phase_vcf", metavar="path", help="path to vcf file used for phasing (if using haplotype specific SV calling)[None]")
+    parser.add_argument("--ignore-hp", dest="ignore_hp", action="store_true",
+                        help="Ignore BAM HP/PS tags and treat the run as unphased; overrides --phasing-vcf outputs")
     parser.add_argument("--vntr-bed", dest="vntr_file", metavar="path", help="bed file with tandem repeat locations [None]")
     parser.add_argument("--TIN-ratio", dest='control_vaf', metavar="float", type=float, default = CONTROL_VAF, help = 'Tumor in normal ratio[{CONTROL_VAF}]')
     parser.add_argument("--control-cov-thr", dest='cov_thr', metavar="float", type=int, default = CONTROL_COV_THR, help = 'Min normal coverage[{CONTROL_COV_THR}]')
     parser.add_argument("--vaf-thr", dest='vaf_thr', metavar="float", type=float, default = VAF_THR, help = 'Tumor in normal ratio[{CONTROL_VAF}]')
     parser.add_argument("--write-collapsed-dup", dest='write_segdup', action = "store_true", help = 'outputs a bed file with identified collapsed duplication regions')
     parser.add_argument("--no-ins-seq", dest='no_ins', action = "store_true", help = 'do not output insertion sequences to the vcf file')
-    parser.add_argument("--output-LOH", dest='output_loh', action = "store_true", help = 'outputs a bed file with predicted LOH regions')
     parser.add_argument("--resolve-overlaps", dest='resolve_overlaps', action = "store_true")
     parser.add_argument("--ins-to-tra", dest='tra_to_ins', action = "store_false", help = 'converts insertions to translocations if mapping is known')
     parser.add_argument("--use_germline_genotype", dest='germline_genotype', action = "store_true", help = 'calculates GT with germline assumptions')
@@ -140,14 +143,28 @@ def main():
     parser.add_argument("--use-supplementary-tag", dest='use_supplementary_tag', action = "store_true", help = 'Uses haplotype tag in supplementary alignments')
     parser.add_argument("--PON", dest='pon_file', metavar="path", help = 'Uses PON data')
     parser.add_argument("--whitelist", dest='whitelist', metavar="path", help = 'Outputs all the SVs within the bed file')
-    parser.add_argument("--low-quality", dest='multisample', action = "store_true", help = 'Uses set of parameters optimized for the analysis with lower quality') 
+    parser.add_argument("--whitelist-single-read", choices=("off", "any", "reciprocal"),
+                        default="reciprocal", help="Whitelist rescue mode for single-read junctions [reciprocal]")
+    parser.add_argument("--whitelist-reciprocal-dist", type=int, default=None, metavar="int",
+                        help="Maximum distance to a corroborating junction [--bp-cluster-size]")
+    parser.add_argument("--whitelist-allow-intra-region", action="store_true",
+                        help="Allow single-read rescue when both endpoints lie in the same merged whitelist interval")
+    parser.add_argument("--low-quality", dest='lowq', action = "store_true", help = 'Uses set of parameters optimized for the analysis with lower quality') 
+    parser.add_argument("--multisample", dest='multisample', action = "store_true", help = 'Uses set of parameters optimized for the analysis with lower quality')
     parser.add_argument("--junction-vcf", dest='junction_vcf', action = "store_true", help = 'Outputs a junction vcf in which all DELs, DUPs and INVs are represented as a BND') 
     parser.add_argument("--target-sample", dest='target_name', default = '', help = 'Sample name for the target bams', nargs="+")
     parser.add_argument("--control-sample", dest='control_name', default = '', help = 'Sample name for the control bam', nargs="+")
     
     
     args = parser.parse_args()
-    MIN_ALIGNED_LENGTH = 7000 if not args.multisample else 5000
+    if args.whitelist_reciprocal_dist is not None and args.whitelist_reciprocal_dist < 0:
+        parser.error('--whitelist-reciprocal-dist must be non-negative')
+    try:
+        args.whitelist_regions = read_whitelist_file(args.whitelist)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    MIN_ALIGNED_LENGTH = 1500 if args.multisample or args.lowq else 7000
+    print(MIN_ALIGNED_LENGTH)
     
     if not args.min_len == -1:
         MIN_ALIGNED_LENGTH = args.min_len
@@ -198,11 +215,6 @@ def main():
     if args.target_name and not len(args.target_name) == len(target_genomes):
         logger.error("Error: Provide a unique sample name for each sample")
         return 1
-    
-    if args.bp_min_support == 0:
-        args.bp_min_support = 3
-    else:
-        args.vaf_thr = 0
 
     #TODO: check that all bams have the same reference
     first_bam = all_bams[0]
@@ -210,15 +222,22 @@ def main():
     with pysam.AlignmentFile(first_bam, "rb") as a:
         ref_lengths = dict(zip(a.references, a.lengths))
 
+    if args.chromosome is not None:
+        selected_chromosomes = set(args.chromosome)
+        for bam_file in all_bams:
+            with pysam.AlignmentFile(bam_file, "rb") as alignment:
+                for chromosome in args.chromosome:
+                    if chromosome not in alignment.references:
+                        parser.error(f"Chromosome {chromosome!r} not found in {bam_file}")
+        ref_lengths = {chromosome: length for chromosome, length in ref_lengths.items()
+                       if chromosome in selected_chromosomes}
+        logger.info("Analyzing only chromosomes %s", ", ".join(ref_lengths))
+
     thread_pool = Pool(args.threads)
     
     args.write_segdups_out =''
     if args.write_segdup:
         args.write_segdups_out = open(os.path.join(args.out_dir,"severus_collaped_dup.bed"), "w")
-        
-    args.write_log_out = ''
-    if args.output_loh:
-        args.write_log_out = open(os.path.join(args.out_dir,"severus_LOH.bed"), "w")
         
     args.outpath_readqual = os.path.join(args.out_dir, "read_qual.txt")
         
@@ -255,22 +274,31 @@ def main():
     bg_mm = []
     for i, bam_file in enumerate(all_bams):
         genome_id = genome_ids[i]
+        control_g = 1 if bam_file in args.control_bam else 0
         logger.info(f"Parsing reads from {genome_id}")
         if bam_file.endswith(".cram"):
             if not args.ref:
-                logger.info('Cram file is detected. Please provide reference fasta')
-        segments_by_read_bam = get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id,
+                logger.error('Cram file is detected. Please provide reference fasta')
+                return 1
+        segments_by_read_bam = get_all_reads_parallel(bam_file, thread_pool, ref_lengths, genome_id, control_g,
                                                       coverage_histograms, mismatch_histograms, n90, bg_mm,read_qual,read_qual_len,args)
         segments_by_read += segments_by_read_bam
 
-    args.min_aligned_length = min(n90) if not args.multisample or not args.min_len == -1 else MIN_ALIGNED_LENGTH
+    args.min_aligned_length = min(n90) if (not args.multisample and not args.lowq) or not args.min_len == -1 else MIN_ALIGNED_LENGTH   
         
     logger.info('Computing read quality') 
     update_segments_by_read(segments_by_read, mismatch_histograms, bg_mm, ref_lengths,read_qual,read_qual_len, args)
     
     logger.info('Computing coverage histogram')
-    median_cov = update_coverage_hist(coverage_histograms,genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes, args.write_log_out)
+    median_cov = update_coverage_hist(coverage_histograms,genome_ids, ref_lengths, segments_by_read, control_genomes, target_genomes)
+    
+    if args.bp_min_support == 0:
+        args.bp_min_support = round(max(3, median_cov * 0.1))
+    else:
+        args.vaf_thr = 0
+    
+    print(args.bp_min_support)
 
     double_breaks = call_breakpoints(segments_by_read, ref_lengths, coverage_histograms, bam_files, genome_ids, control_genomes, thread_pool, median_cov, args)
     
-    output_graphs(double_breaks, coverage_histograms, thread_pool, target_genomes, control_genomes, genome_ids, ref_lengths, args)
+    output_graphs(double_breaks, coverage_histograms, thread_pool, target_genomes, control_genomes, genome_ids, ref_lengths, bg_mm, args)
